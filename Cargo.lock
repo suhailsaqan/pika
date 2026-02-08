@@ -1758,7 +1758,31 @@ dependencies = [
  "hkdf",
  "image",
  "kamadak-exif",
- "mdk-storage-traits",
+ "mdk-storage-traits 0.5.1",
+ "nostr",
+ "openmls",
+ "openmls_basic_credential",
+ "openmls_rust_crypto",
+ "openmls_traits",
+ "serde",
+ "sha2",
+ "thiserror 2.0.18",
+ "tls_codec",
+ "tracing",
+]
+
+[[package]]
+name = "mdk-core"
+version = "0.5.3"
+source = "git+https://github.com/marmot-protocol/mdk?rev=1ad73229ab712018c078d5295e11ec38e10d6a24#1ad73229ab712018c078d5295e11ec38e10d6a24"
+dependencies = [
+ "blurhash",
+ "chacha20poly1305",
+ "hex",
+ "hkdf",
+ "image",
+ "kamadak-exif",
+ "mdk-storage-traits 0.5.1 (git+https://github.com/marmot-protocol/mdk?rev=1ad73229ab712018c078d5295e11ec38e10d6a24)",
  "nostr",
  "openmls",
  "openmls_basic_credential",
@@ -1778,7 +1802,28 @@ dependencies = [
  "getrandom 0.3.4",
  "hex",
  "keyring-core",
- "mdk-storage-traits",
+ "mdk-storage-traits 0.5.1",
+ "nostr",
+ "openmls",
+ "openmls_traits",
+ "refinery",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "mdk-sqlite-storage"
+version = "0.5.1"
+source = "git+https://github.com/marmot-protocol/mdk?rev=1ad73229ab712018c078d5295e11ec38e10d6a24#1ad73229ab712018c078d5295e11ec38e10d6a24"
+dependencies = [
+ "getrandom 0.3.4",
+ "hex",
+ "keyring-core",
+ "mdk-storage-traits 0.5.1 (git+https://github.com/marmot-protocol/mdk?rev=1ad73229ab712018c078d5295e11ec38e10d6a24)",
  "nostr",
  "openmls",
  "openmls_traits",
@@ -1794,6 +1839,20 @@ dependencies = [
 [[package]]
 name = "mdk-storage-traits"
 version = "0.5.1"
+dependencies = [
+ "nostr",
+ "openmls",
+ "openmls_traits",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "zeroize",
+]
+
+[[package]]
+name = "mdk-storage-traits"
+version = "0.5.1"
+source = "git+https://github.com/marmot-protocol/mdk?rev=1ad73229ab712018c078d5295e11ec38e10d6a24#1ad73229ab712018c078d5295e11ec38e10d6a24"
 dependencies = [
  "nostr",
  "openmls",
@@ -2211,9 +2270,9 @@ dependencies = [
  "anyhow",
  "clap",
  "hex",
- "mdk-core",
- "mdk-sqlite-storage",
- "mdk-storage-traits",
+ "mdk-core 0.5.3",
+ "mdk-sqlite-storage 0.5.1",
+ "mdk-storage-traits 0.5.1",
  "nostr-sdk",
  "rand 0.8.5",
  "serde",
@@ -2237,9 +2296,9 @@ dependencies = [
  "jni",
  "keyring-core",
  "libsqlite3-sys",
- "mdk-core",
- "mdk-sqlite-storage",
- "mdk-storage-traits",
+ "mdk-core 0.5.3 (git+https://github.com/marmot-protocol/mdk?rev=1ad73229ab712018c078d5295e11ec38e10d6a24)",
+ "mdk-sqlite-storage 0.5.1 (git+https://github.com/marmot-protocol/mdk?rev=1ad73229ab712018c078d5295e11ec38e10d6a24)",
+ "mdk-storage-traits 0.5.1 (git+https://github.com/marmot-protocol/mdk?rev=1ad73229ab712018c078d5295e11ec38e10d6a24)",
  "ndk-context",
  "nostr-sdk",
  "rand 0.8.5",

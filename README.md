@@ -38,6 +38,20 @@ Run Rust tests:
 just test
 ```
 
+## E2E
+
+Deterministic local relay + local bot (runs iOS + Android UI E2E):
+
+```bash
+just e2e-local-relay
+```
+
+Public relays + deployed bot (runs Rust public-relay E2E + iOS + Android UI E2E):
+
+```bash
+just e2e-public-relays
+```
+
 ## Relays (V2 / MDK)
 
 Modern MDK publishes MLS key packages as kind `443` events tagged NIP-70 `protected`. Many popular public relays (including Damus/Primal/nos.lol) reject protected events with `blocked: event marked as protected`, which breaks chat creation if you try to publish/fetch key packages there.
@@ -82,6 +96,12 @@ XCUITest smoke tests exist (requires an installed iOS Simulator runtime + a simu
 just ios-ui-test
 ```
 
+Deterministic local E2E (local docker relay + local Rust bot):
+
+```bash
+just ios-ui-e2e-local
+```
+
 If `./tools/simctl list runtimes` is empty, install a simulator runtime via:
 Xcode -> Settings -> Platforms -> iOS Simulator (download).
 
@@ -117,6 +137,12 @@ Deterministic UI smoke tests exist as Compose instrumentation tests (requires a 
 
 ```bash
 just android-ui-test
+```
+
+Deterministic local E2E (local docker relay + local Rust bot):
+
+```bash
+just android-ui-e2e-local
 ```
 
 On macOS, iOS Simulator automation requires a full Xcode install (for `xcrun simctl`).

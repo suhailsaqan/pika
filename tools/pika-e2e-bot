@@ -1,0 +1,164 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Deterministic local E2E bot for UI tests.
+#
+# This bot is implemented using `pika-cli` (this repo) so it can run in CI without
+# depending on any external local checkouts. It:
+# - creates/loads an identity in --state-dir
+# - publishes a key package
+# - accepts welcomes
+# - replies to `ping:<nonce>` with `pong:<nonce>` (and supports legacy `pika-e2e:<nonce>` too)
+#
+# Output contract:
+#   prints a single ready line that tools/ui-e2e-local parses:
+#     [pika_e2e_bot] ready pubkey=<hex> npub=<npub>
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$ROOT"
+
+relay=""
+state_dir=""
+timeout_sec=900
+# Use a generous default to tolerate clock skew between test devices/simulators and the host.
+lookback_sec=$((7 * 24 * 60 * 60))
+
+usage() {
+  cat >&2 <<EOF
+usage: tools/pika-e2e-bot --relay ws://127.0.0.1:7777 --state-dir /tmp/bot [--timeout-sec N] [--lookback-sec N]
+EOF
+}
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --relay)
+      relay="${2:-}"
+      shift 2
+      ;;
+    --state-dir)
+      state_dir="${2:-}"
+      shift 2
+      ;;
+    --timeout-sec)
+      timeout_sec="${2:-}"
+      shift 2
+      ;;
+    --lookback-sec)
+      lookback_sec="${2:-}"
+      shift 2
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      usage
+      exit 2
+      ;;
+  esac
+done
+
+if [ -z "${relay:-}" ] || [ -z "${state_dir:-}" ]; then
+  usage
+  exit 2
+fi
+
+need() {
+  if ! command -v "$1" >/dev/null 2>&1; then
+    echo "error: missing '$1' on PATH" >&2
+    exit 1
+  fi
+}
+need cargo
+need python3
+
+# Build once, then invoke the binary directly to avoid `cargo run` overhead in the loop.
+cargo build -q -p pika-cli
+CLI_BIN="${ROOT}/target/debug/pika-cli"
+if [ ! -x "$CLI_BIN" ]; then
+  echo "error: expected pika-cli at: $CLI_BIN" >&2
+  exit 1
+fi
+CLI=("$CLI_BIN" --state-dir "$state_dir" --relay "$relay")
+
+mkdir -p "$state_dir"
+
+id_json="$("${CLI[@]}" identity)"
+pubkey="$(echo "$id_json" | python3 -c 'import sys,json; print(json.load(sys.stdin)["pubkey"])')"
+npub="$(echo "$id_json" | python3 -c 'import sys,json; print(json.load(sys.stdin)["npub"])')"
+echo "[pika_e2e_bot] ready pubkey=${pubkey} npub=${npub}"
+
+# Ensure we are inviteable.
+"${CLI[@]}" publish-kp >/dev/null
+
+start="$(date +%s)"
+seen_ids="${state_dir}/seen_message_ids.txt"
+touch "$seen_ids"
+
+respond() {
+  local ngid="$1"
+  local content="$2"
+  "${CLI[@]}" send --group "$ngid" --content "$content" >/dev/null
+}
+
+while true; do
+  now="$(date +%s)"
+  elapsed="$((now - start))"
+  if [ "$timeout_sec" -ne 0 ] && [ "$elapsed" -ge "$timeout_sec" ]; then
+    exit 0
+  fi
+
+  # Chunk the listener so we can restart it after accepting a welcome (to resubscribe to new groups).
+  chunk=30
+  if [ "$timeout_sec" -ne 0 ]; then
+    remaining="$((timeout_sec - elapsed))"
+    if [ "$remaining" -lt "$chunk" ]; then
+      chunk="$remaining"
+    fi
+  fi
+  if [ "$chunk" -le 0 ]; then
+    exit 0
+  fi
+
+  restart=0
+  # JSONL output; types: welcome | message
+  while IFS= read -r line; do
+    typ="$(echo "$line" | python3 -c 'import sys,json; print(json.loads(sys.stdin.read()).get("type",""))' 2>/dev/null || true)"
+    if [ "$typ" = "welcome" ]; then
+      wid="$(echo "$line" | python3 -c 'import sys,json; print(json.loads(sys.stdin.read()).get("wrapper_event_id",""))' 2>/dev/null || true)"
+      if [ -n "${wid:-}" ]; then
+        "${CLI[@]}" accept-welcome --wrapper-event-id "$wid" >/dev/null || true
+        restart=1
+      fi
+      continue
+    fi
+    if [ "$typ" = "message" ]; then
+      mid="$(echo "$line" | python3 -c 'import sys,json; print(json.loads(sys.stdin.read()).get("message_id",""))' 2>/dev/null || true)"
+      ngid="$(echo "$line" | python3 -c 'import sys,json; print(json.loads(sys.stdin.read()).get("nostr_group_id",""))' 2>/dev/null || true)"
+      content="$(echo "$line" | python3 -c 'import sys,json; print(json.loads(sys.stdin.read()).get("content",""))' 2>/dev/null || true)"
+      if [ -z "${mid:-}" ] || [ -z "${ngid:-}" ]; then
+        continue
+      fi
+      if grep -qF "$mid" "$seen_ids" >/dev/null 2>&1; then
+        continue
+      fi
+      echo "$mid" >>"$seen_ids"
+
+      # Deterministic probe.
+      if [[ "$content" =~ ^ping:([A-Za-z0-9._-]{16,128})$ ]]; then
+        nonce="${BASH_REMATCH[1]}"
+        respond "$ngid" "pong:${nonce}" || true
+      elif [[ "$content" =~ ^pika-e2e:([A-Za-z0-9._-]{16,128})$ ]]; then
+        nonce="${BASH_REMATCH[1]}"
+        respond "$ngid" "pong:${nonce}" || true
+      fi
+      continue
+    fi
+  done < <("${CLI[@]}" listen --timeout "$chunk" --lookback "$lookback_sec" 2>/dev/null || true)
+
+  if [ "$restart" -eq 1 ]; then
+    # Re-publish in case the relay prunes or to reduce "no key package" races.
+    "${CLI[@]}" publish-kp >/dev/null || true
+    continue
+  fi
+done

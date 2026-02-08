@@ -1,0 +1,218 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Deterministic local E2E UI runner:
+# - starts a local nostr-rs-relay (docker)
+# - starts a local Rust "bot" (tools/pika-e2e-bot; implemented via pika-cli in this repo)
+# - runs platform UI E2E tests against that relay+bot
+#
+# Usage:
+#   tools/ui-e2e-local --platform android
+#   tools/ui-e2e-local --platform ios
+#
+# Env:
+#   BOT_TIMEOUT_SEC=900
+#   KEEP=1                         # don't delete temp state dir
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$ROOT"
+
+platform=""
+KEEP="${KEEP:-0}"
+BOT_TIMEOUT_SEC="${BOT_TIMEOUT_SEC:-900}"
+
+usage() {
+  cat >&2 <<EOF
+usage: tools/ui-e2e-local --platform android|ios
+
+Starts a local relay+bot and runs the platform UI E2E ping/pong test.
+EOF
+}
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --platform)
+      platform="${2:-}"
+      shift 2
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      usage
+      exit 2
+      ;;
+  esac
+done
+
+if [ -z "${platform:-}" ]; then
+  usage
+  exit 2
+fi
+
+need() {
+  if ! command -v "$1" >/dev/null 2>&1; then
+    echo "error: missing '$1' on PATH" >&2
+    exit 1
+  fi
+}
+
+need docker
+need cargo
+need python3
+
+STATE_DIR="$(mktemp -d /tmp/pika-ui-e2e-local.XXXXXX)"
+BOT_LOG="${STATE_DIR}/rustbot.log"
+
+cleanup() {
+  if [ -n "${BOT_PID:-}" ]; then
+    kill "${BOT_PID}" >/dev/null 2>&1 || true
+    wait "${BOT_PID}" >/dev/null 2>&1 || true
+  fi
+  if [ -n "${RELAY_CID:-}" ]; then
+    docker stop "${RELAY_CID}" >/dev/null 2>&1 || true
+  fi
+  # If we didn't capture a CID (or it already exited), ensure the named container is gone.
+  if [ -n "${RELAY_NAME:-}" ]; then
+    docker rm -f "${RELAY_NAME}" >/dev/null 2>&1 || true
+  fi
+  if [ "${KEEP}" != "1" ]; then
+    rm -rf "${STATE_DIR}" >/dev/null 2>&1 || true
+  else
+    echo "note: keeping state dir: ${STATE_DIR}" >&2
+  fi
+}
+trap cleanup EXIT
+
+RELAY_PORT="$(
+  python3 - <<'PY'
+import socket
+s=socket.socket()
+s.bind(("127.0.0.1",0))
+print(s.getsockname()[1])
+s.close()
+PY
+)"
+
+RELAY_DB_DIR="${STATE_DIR}/relay-db"
+mkdir -p "$RELAY_DB_DIR"
+RELAY_CONFIG="${ROOT}/tools/nostr-rs-relay-config.toml"
+if [ ! -f "$RELAY_CONFIG" ]; then
+  echo "error: missing relay config: $RELAY_CONFIG" >&2
+  exit 1
+fi
+
+echo "starting local relay (docker) port=$RELAY_PORT state_dir=$STATE_DIR"
+RELAY_NAME="pika-ui-e2e-relay-${RELAY_PORT}"
+RELAY_CID="$(
+  docker run -d --rm \
+    --name "$RELAY_NAME" \
+    --platform linux/amd64 \
+    -p "127.0.0.1:${RELAY_PORT}:8080" \
+    -v "${RELAY_CONFIG}:/usr/src/app/config.toml:ro" \
+    -v "${RELAY_DB_DIR}:/usr/src/app/db" \
+    -e RUST_LOG=warn \
+    scsibug/nostr-rs-relay:latest
+)"
+
+RELAY_URL="ws://127.0.0.1:${RELAY_PORT}"
+ANDROID_RELAY_URL="ws://10.0.2.2:${RELAY_PORT}"
+
+echo "relay_url=${RELAY_URL}"
+echo "android_relay_url=${ANDROID_RELAY_URL}"
+
+rm -f "$BOT_LOG"
+echo "starting rust bot (logs at: $BOT_LOG)"
+(
+  ./tools/pika-e2e-bot --relay "$RELAY_URL" --state-dir "${STATE_DIR}/bot" --timeout-sec "$BOT_TIMEOUT_SEC"
+) >"$BOT_LOG" 2>&1 &
+BOT_PID="$!"
+
+BOT_NPUB=""
+for _ in $(seq 1 1200); do
+  if [ -s "$BOT_LOG" ]; then
+    # Example line:
+    #   [pika_e2e_bot] ready pubkey=<hex> npub=<npub>
+    line="$(grep -E "\\[pika_e2e_bot\\] ready pubkey=" "$BOT_LOG" | tail -n 1 || true)"
+    if [ -n "${line:-}" ]; then
+      BOT_NPUB="${line#*npub=}"
+      BOT_NPUB="${BOT_NPUB%% *}"
+      if [ -n "${BOT_NPUB:-}" ]; then
+        break
+      fi
+    fi
+  fi
+  if ! kill -0 "$BOT_PID" >/dev/null 2>&1; then
+    echo "error: rust bot exited early; last logs:" >&2
+    tail -n 120 "$BOT_LOG" >&2 || true
+    exit 1
+  fi
+  sleep 0.5
+done
+
+if [ -z "${BOT_NPUB:-}" ]; then
+  echo "error: failed to detect bot identity from logs; last logs:" >&2
+  tail -n 160 "$BOT_LOG" >&2 || true
+  exit 1
+fi
+
+echo "bot_npub=${BOT_NPUB}"
+
+# Deterministic local test identity. This is NOT used for public relays.
+CLIENT_NSEC=""
+if [ -f "${ROOT}/.pika-cli-test-nsec" ]; then
+  CLIENT_NSEC="$(tr -d '\n' < "${ROOT}/.pika-cli-test-nsec" | tr -d '\r')"
+fi
+if [ -z "${CLIENT_NSEC:-}" ]; then
+  echo "error: missing client nsec for local E2E; expected ${ROOT}/.pika-cli-test-nsec" >&2
+  exit 1
+fi
+
+case "$platform" in
+  android)
+    ./tools/android-emulator-ensure >/dev/null
+    just gen-kotlin android-rust android-local-properties >/dev/null
+    (cd android && ./gradlew :app:connectedDebugAndroidTest \
+      -Pandroid.testInstrumentationRunnerArguments.class=com.pika.app.PikaE2eUiTest \
+      -Pandroid.testInstrumentationRunnerArguments.pika_e2e=1 \
+      -Pandroid.testInstrumentationRunnerArguments.pika_disable_network=false \
+      -Pandroid.testInstrumentationRunnerArguments.pika_reset=1 \
+      -Pandroid.testInstrumentationRunnerArguments.pika_peer_npub="${BOT_NPUB}" \
+      -Pandroid.testInstrumentationRunnerArguments.pika_relay_urls="${ANDROID_RELAY_URL}" \
+      -Pandroid.testInstrumentationRunnerArguments.pika_key_package_relay_urls="${ANDROID_RELAY_URL}" \
+      -Pandroid.testInstrumentationRunnerArguments.pika_nsec="${CLIENT_NSEC}"
+    )
+    ;;
+  ios)
+    just ios-xcframework ios-xcodeproj >/dev/null
+    DEV_DIR="$(ls -d /Applications/Xcode*.app/Contents/Developer 2>/dev/null | sort | tail -n 1)"
+    if [ -z "${DEV_DIR:-}" ]; then
+      echo "error: Xcode not found under /Applications" >&2
+      exit 1
+    fi
+    udid="$(
+      PIKA_UI_E2E_NSEC="${CLIENT_NSEC}" \
+      PIKA_UI_E2E_BOT_NPUB="${BOT_NPUB}" \
+      PIKA_UI_E2E_RELAYS="${RELAY_URL}" \
+      PIKA_UI_E2E_KP_RELAYS="${RELAY_URL}" \
+      ./tools/ios-sim-ensure | sed -n 's/^ok: ios simulator ready (udid=\(.*\))$/\1/p'
+    )"
+    if [ -z "${udid:-}" ]; then
+      echo "error: could not determine simulator udid" >&2
+      exit 1
+    fi
+    PIKA_UI_E2E=1 \
+      PIKA_UI_E2E_BOT_NPUB="${BOT_NPUB}" \
+      PIKA_UI_E2E_RELAYS="${RELAY_URL}" \
+      PIKA_UI_E2E_KP_RELAYS="${RELAY_URL}" \
+      PIKA_UI_E2E_NSEC="${CLIENT_NSEC}" \
+      env -u LD -u CC -u CXX DEVELOPER_DIR="$DEV_DIR" \
+        xcodebuild -project ios/Pika.xcodeproj -scheme Pika -destination "id=$udid" test CODE_SIGNING_ALLOWED=NO \
+          -only-testing:PikaUITests/PikaUITests/testE2E_deployedRustBot_pingPong
+    ;;
+  *)
+    echo "error: invalid platform: $platform" >&2
+    exit 2
+    ;;
+esac
