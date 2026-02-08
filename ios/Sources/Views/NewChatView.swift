@@ -3,6 +3,7 @@ import SwiftUI
 struct NewChatView: View {
     let manager: AppManager
     @State private var npubInput = ""
+    @State private var isLoading = false
 
     var body: some View {
         let peer = npubInput.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -13,6 +14,7 @@ struct NewChatView: View {
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
                 .textFieldStyle(.roundedBorder)
+                .disabled(isLoading)
                 .accessibilityIdentifier(TestIds.newChatPeerNpub)
 
             if !peer.isEmpty && !isValidPeer {
@@ -22,16 +24,31 @@ struct NewChatView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
 
-            Button("Start Chat") {
+            Button {
+                isLoading = true
                 manager.dispatch(.createChat(peerNpub: peer))
+            } label: {
+                if isLoading {
+                    HStack(spacing: 8) {
+                        ProgressView()
+                            .tint(.white)
+                        Text("Creating…")
+                    }
+                } else {
+                    Text("Start Chat")
+                }
             }
             .buttonStyle(.borderedProminent)
             .accessibilityIdentifier(TestIds.newChatStart)
-            .disabled(!isValidPeer)
+            .disabled(!isValidPeer || isLoading)
 
             Spacer()
         }
         .padding(16)
         .navigationTitle("New Chat")
+        // Reset loading on error (errors produce toasts).
+        .onChange(of: manager.state.toast) { _, new in
+            if new != nil { isLoading = false }
+        }
     }
 }

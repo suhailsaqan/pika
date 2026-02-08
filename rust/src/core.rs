@@ -582,10 +582,7 @@ impl AppCore {
                     // Include the full anyhow context chain; this is critical for diagnosing
                     // keyring/SQLCipher issues on iOS.
                     self.toast(format!("Create account failed: {e:#}"));
-                    return;
                 }
-
-                self.toast("Account created");
             }
             AppAction::Login { nsec } | AppAction::RestoreSession { nsec } => {
                 let nsec = nsec.trim();
@@ -602,16 +599,13 @@ impl AppCore {
                 };
                 if let Err(e) = self.start_session(keys) {
                     self.toast(format!("Login failed: {e:#}"));
-                    return;
                 }
-                self.toast("Logged in");
             }
             AppAction::Logout => {
                 self.stop_session();
                 self.state.auth = AuthState::LoggedOut;
                 self.emit_auth();
                 self.handle_auth_transition(false);
-                self.toast("Logged out");
             }
             AppAction::ClearToast => {
                 if self.state.toast.is_some() {
@@ -714,15 +708,9 @@ impl AppCore {
                     return;
                 }
 
-                // Give immediate feedback: don't leave the user on the NewChat screen while we do
-                // async relay I/O to fetch the peer key package.
-                self.toast("Creating chat…");
-                if matches!(self.state.router.screen_stack.last(), Some(Screen::NewChat)) {
-                    self.state.router.screen_stack.pop();
-                    self.emit_router();
-                }
-
                 // Fetch peer key package asynchronously; actor will create the group on completion.
+                // The user stays on the NewChat screen with a loading indicator until the
+                // operation completes (success navigates to the chat; failure toasts an error).
                 let (client, tx) = {
                     let Some(sess) = self.session.as_ref() else {
                         return;

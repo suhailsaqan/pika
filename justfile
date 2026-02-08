@@ -22,6 +22,31 @@ pre-merge: fmt
 qa: fmt clippy test android-assemble ios-build-sim
   @echo "QA complete"
 
+# End-to-end suites:
+# - local relay: deterministic docker relay + local Rust bot
+# - public relays: nondeterministic; for production debugging
+e2e-local-relay:
+  just ios-ui-e2e-local
+  just android-ui-e2e-local
+
+e2e-public-relays:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  # Load local secrets if present (gitignored).
+  if [ -f .env ]; then
+    set -a
+    # shellcheck disable=SC1091
+    . ./.env
+    set +a
+  fi
+  : "${PIKA_TEST_NSEC:?missing (put it in ./.env)}"
+  : "${PIKA_UI_E2E_BOT_NPUB:?missing (put it in ./.env)}"
+  : "${PIKA_UI_E2E_RELAYS:?missing (put it in ./.env)}"
+  : "${PIKA_UI_E2E_KP_RELAYS:?missing (put it in ./.env)}"
+  just e2e-public
+  just ios-ui-e2e
+  just android-ui-e2e
+
 # Manual-only nondeterministic smoke test using public relays.
 # Optional:
 #   PIKA_E2E_RELAYS="wss://relay.damus.io,wss://relay.primal.net" just e2e-public
@@ -65,18 +90,45 @@ android-ui-test: gen-kotlin android-rust android-local-properties
   # Requires a running emulator/device (instrumentation tests).
   cd android && ./gradlew :app:connectedDebugAndroidTest
 
+# Deterministic local E2E: runs against a local docker relay + local Rust bot (marmot-interop-lab-rust).
+# Requires Docker and a running emulator/device.
+android-ui-e2e-local:
+  ./tools/ui-e2e-local --platform android
+
 # Opt-in E2E: runs against public relays + deployed OpenClaw rust marmot bot.
 # This is intentionally NOT part of `just qa` because it is nondeterministic by nature.
+# Opt-in E2E: requires a running emulator/device.
 android-ui-e2e: gen-kotlin android-rust android-local-properties
-  # Requires a running emulator/device.
+  #!/usr/bin/env bash
+  set -euo pipefail
+  # Load local secrets if present (gitignored).
+  if [ -f .env ]; then
+    set -a
+    . ./.env
+    set +a
+  fi
+
+  : "${PIKA_TEST_NSEC:?missing (put it in ./.env)}"
+  : "${PIKA_UI_E2E_BOT_NPUB:?missing (put it in ./.env)}"
+  : "${PIKA_UI_E2E_RELAYS:?missing (put it in ./.env)}"
+  : "${PIKA_UI_E2E_KP_RELAYS:?missing (put it in ./.env)}"
+
+  peer="${PIKA_UI_E2E_BOT_NPUB}"
+  relays="${PIKA_UI_E2E_RELAYS}"
+  kp_relays="${PIKA_UI_E2E_KP_RELAYS}"
+  nsec="${PIKA_UI_E2E_NSEC:-${PIKA_TEST_NSEC}}"
+
+  ./tools/android-emulator-ensure
+
   cd android && ./gradlew :app:connectedDebugAndroidTest \
     -Pandroid.testInstrumentationRunnerArguments.class=com.pika.app.PikaE2eUiTest \
     -Pandroid.testInstrumentationRunnerArguments.pika_e2e=1 \
     -Pandroid.testInstrumentationRunnerArguments.pika_disable_network=false \
     -Pandroid.testInstrumentationRunnerArguments.pika_reset=1 \
-    -Pandroid.testInstrumentationRunnerArguments.pika_peer_npub=1ac66317246750fe862cf47156b200051aa219d9a37ca018690bb3483065d3b8 \
-    -Pandroid.testInstrumentationRunnerArguments.pika_relay_urls=wss://relay.primal.net,wss://nos.lol,wss://relay.damus.io \
-    -Pandroid.testInstrumentationRunnerArguments.pika_key_package_relay_urls=wss://nostr-pub.wellorder.net,wss://nostr-01.yakihonne.com,wss://nostr-02.yakihonne.com,wss://relay.satlantis.io
+    -Pandroid.testInstrumentationRunnerArguments.pika_peer_npub="$peer" \
+    -Pandroid.testInstrumentationRunnerArguments.pika_relay_urls="$relays" \
+    -Pandroid.testInstrumentationRunnerArguments.pika_key_package_relay_urls="$kp_relays" \
+    -Pandroid.testInstrumentationRunnerArguments.pika_nsec="$nsec"
 
 # iOS (Xcode build happens outside Nix; Nix helps with Rust + xcodegen).
 ios-gen-swift: rust-build-host
@@ -127,17 +179,41 @@ ios-ui-test: ios-xcframework ios-xcodeproj
   env -u LD -u CC -u CXX DEVELOPER_DIR="$DEV_DIR" xcodebuild -project ios/Pika.xcodeproj -scheme Pika -destination "id=$udid" test CODE_SIGNING_ALLOWED=NO \
     -skip-testing:PikaUITests/PikaUITests/testE2E_deployedRustBot_pingPong
 
+# Deterministic local E2E: runs the XCUITest ping/pong against a local docker relay + local Rust bot.
+# Requires Docker.
+ios-ui-e2e-local:
+  ./tools/ui-e2e-local --platform ios
+
 # Opt-in E2E: runs the XCUITest that hits public relays + deployed OpenClaw rust marmot bot.
 # Enable by setting PIKA_UI_E2E=1 (and optional overrides).
 ios-ui-e2e: ios-xcframework ios-xcodeproj
-  DEV_DIR=$(ls -d /Applications/Xcode*.app/Contents/Developer 2>/dev/null | sort | tail -n 1); \
-  if [ -z "$DEV_DIR" ]; then echo "Xcode not found under /Applications"; exit 1; fi; \
-  udid="$(./tools/ios-sim-ensure | sed -n 's/^ok: ios simulator ready (udid=\(.*\))$/\1/p')"; \
-  if [ -z "$udid" ]; then echo "error: could not determine simulator udid"; exit 1; fi; \
+  #!/usr/bin/env bash
+  set -euo pipefail
+  # Load local secrets if present (gitignored).
+  if [ -f .env ]; then
+    set -a
+    # shellcheck disable=SC1091
+    . ./.env
+    set +a
+  fi
+  : "${PIKA_TEST_NSEC:?missing (put it in ./.env)}"
+  : "${PIKA_UI_E2E_BOT_NPUB:?missing (put it in ./.env)}"
+  : "${PIKA_UI_E2E_RELAYS:?missing (put it in ./.env)}"
+  : "${PIKA_UI_E2E_KP_RELAYS:?missing (put it in ./.env)}"
+
+  DEV_DIR=$(ls -d /Applications/Xcode*.app/Contents/Developer 2>/dev/null | sort | tail -n 1)
+  if [ -z "$DEV_DIR" ]; then echo "Xcode not found under /Applications"; exit 1; fi
+
+  # Ensure the simulator test runner can see this value (tools/ios-sim-ensure propagates it).
+  nsec="${PIKA_UI_E2E_NSEC:-${PIKA_TEST_NSEC}}"
+  udid="$(PIKA_UI_E2E_NSEC="$nsec" ./tools/ios-sim-ensure | sed -n 's/^ok: ios simulator ready (udid=\(.*\))$/\1/p')"
+  if [ -z "$udid" ]; then echo "error: could not determine simulator udid"; exit 1; fi
+
   PIKA_UI_E2E=1 \
-    PIKA_UI_E2E_BOT_NPUB="npub1rtrxx9eyvag0ap3v73c4dvsqq5d2yxwe5d72qxrfpwe5svr96wuqed4p38" \
-    PIKA_UI_E2E_RELAYS="wss://relay.primal.net,wss://nos.lol,wss://relay.damus.io" \
-    PIKA_UI_E2E_KP_RELAYS="wss://nostr-pub.wellorder.net,wss://nostr-01.yakihonne.com,wss://nostr-02.yakihonne.com,wss://relay.satlantis.io" \
+    PIKA_UI_E2E_BOT_NPUB="${PIKA_UI_E2E_BOT_NPUB}" \
+    PIKA_UI_E2E_RELAYS="${PIKA_UI_E2E_RELAYS}" \
+    PIKA_UI_E2E_KP_RELAYS="${PIKA_UI_E2E_KP_RELAYS}" \
+    PIKA_UI_E2E_NSEC="$nsec" \
     env -u LD -u CC -u CXX DEVELOPER_DIR="$DEV_DIR" xcodebuild -project ios/Pika.xcodeproj -scheme Pika -destination "id=$udid" test CODE_SIGNING_ALLOWED=NO \
       -only-testing:PikaUITests/PikaUITests/testE2E_deployedRustBot_pingPong
 

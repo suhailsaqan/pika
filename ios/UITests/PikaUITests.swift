@@ -1,11 +1,20 @@
 import XCTest
 
 final class PikaUITests: XCTestCase {
+    /// Dismiss the non-blocking toast overlay if present. Returns the toast message, or nil.
     private func dismissPikaToastIfPresent(_ app: XCUIApplication, timeout: TimeInterval = 0.5) -> String? {
-        let alert = app.alerts["Pika"]
-        guard alert.waitForExistence(timeout: timeout) else { return nil }
+        // New: non-blocking overlay with accessibility identifier.
+        let overlay = app.staticTexts.matching(identifier: "pika_toast").firstMatch
+        if overlay.waitForExistence(timeout: timeout) {
+            let msg = overlay.label
+            overlay.tap() // dismiss by tapping
+            return msg.isEmpty ? nil : msg
+        }
 
-        // Best-effort: capture the message for diagnostics.
+        // Legacy fallback: modal alert (kept for backwards compatibility during transition).
+        let alert = app.alerts["Pika"]
+        guard alert.waitForExistence(timeout: 0.1) else { return nil }
+
         let msg = alert.staticTexts
             .allElementsBoundByIndex
             .map(\.label)
@@ -42,7 +51,7 @@ final class PikaUITests: XCTestCase {
         let createAccount = app.buttons.matching(identifier: "login_create_account").firstMatch
         if createAccount.waitForExistence(timeout: 2) {
             createAccount.tap()
-            _ = dismissAllPikaToasts(app, maxSeconds: 5)
+            // No blocking toasts to dismiss; navigation happens automatically.
         }
 
         let chatsNavBar = app.navigationBars["Chats"]
@@ -82,7 +91,7 @@ final class PikaUITests: XCTestCase {
         let start = app.buttons.matching(identifier: "newchat_start").firstMatch
         XCTAssertTrue(start.waitForExistence(timeout: 5))
         start.tap()
-        _ = dismissAllPikaToasts(app, maxSeconds: 5)
+        // Note-to-self is synchronous; navigation to the chat happens immediately.
 
         // Send a message and ensure it appears.
         let msgField = app.textViews.matching(identifier: "chat_message_input").firstMatch
@@ -115,16 +124,17 @@ final class PikaUITests: XCTestCase {
     func testE2E_deployedRustBot_pingPong() throws {
         // Opt-in test: run it explicitly via xcodebuild `-only-testing:`. This hits public relays,
         // so it is intentionally not part of the deterministic smoke suite.
-        let botNpub =
-            ProcessInfo.processInfo.environment["PIKA_UI_E2E_BOT_NPUB"] ??
-            "npub1rtrxx9eyvag0ap3v73c4dvsqq5d2yxwe5d72qxrfpwe5svr96wuqed4p38"
+        let env = ProcessInfo.processInfo.environment
+        let botNpub = env["PIKA_UI_E2E_BOT_NPUB"] ?? ""
+        let testNsec = env["PIKA_UI_E2E_NSEC"] ?? env["PIKA_TEST_NSEC"] ?? ""
+        let relays = env["PIKA_UI_E2E_RELAYS"] ?? ""
+        let kpRelays = env["PIKA_UI_E2E_KP_RELAYS"] ?? ""
 
-        let relays =
-            ProcessInfo.processInfo.environment["PIKA_UI_E2E_RELAYS"] ??
-            "wss://relay.primal.net,wss://nos.lol,wss://relay.damus.io"
-        let kpRelays =
-            ProcessInfo.processInfo.environment["PIKA_UI_E2E_KP_RELAYS"] ??
-            "wss://nostr-pub.wellorder.net,wss://nostr-01.yakihonne.com,wss://nostr-02.yakihonne.com,wss://relay.satlantis.io"
+        // Public-relay E2E should be explicit. Defaults hide misconfiguration and cause flaky hangs.
+        if botNpub.isEmpty { XCTFail("Missing env var: PIKA_UI_E2E_BOT_NPUB"); return }
+        if testNsec.isEmpty { XCTFail("Missing env var: PIKA_UI_E2E_NSEC (or PIKA_TEST_NSEC)"); return }
+        if relays.isEmpty { XCTFail("Missing env var: PIKA_UI_E2E_RELAYS"); return }
+        if kpRelays.isEmpty { XCTFail("Missing env var: PIKA_UI_E2E_KP_RELAYS"); return }
 
         let app = XCUIApplication()
         app.launchEnvironment["PIKA_UI_TEST_RESET"] = "1"
@@ -132,11 +142,22 @@ final class PikaUITests: XCTestCase {
         app.launchEnvironment["PIKA_KEY_PACKAGE_RELAY_URLS"] = kpRelays
         app.launch()
 
-        // Create account.
+        // If we land on Login, prefer logging into a stable allowlisted identity when provided.
         let createAccount = app.buttons.matching(identifier: "login_create_account").firstMatch
-        XCTAssertTrue(createAccount.waitForExistence(timeout: 5))
-        createAccount.tap()
-        _ = dismissAllPikaToasts(app, maxSeconds: 10)
+        if createAccount.waitForExistence(timeout: 5) {
+            if !testNsec.isEmpty {
+                let loginNsec = app.textFields.matching(identifier: "login_nsec_input").firstMatch
+                let loginSubmit = app.buttons.matching(identifier: "login_submit").firstMatch
+                XCTAssertTrue(loginNsec.waitForExistence(timeout: 5))
+                XCTAssertTrue(loginSubmit.waitForExistence(timeout: 5))
+                loginNsec.tap()
+                loginNsec.typeText(testNsec)
+                loginSubmit.tap()
+            } else {
+                createAccount.tap()
+            }
+            // No blocking toasts to dismiss; navigation happens automatically.
+        }
 
         // Chat list.
         let chatsNavBar = app.navigationBars["Chats"]
@@ -158,32 +179,47 @@ final class PikaUITests: XCTestCase {
         XCTAssertTrue(start.waitForExistence(timeout: 10))
         start.tap()
 
-        // Rust shows progress via toast; on iOS this is a modal alert.
-        let toasts = dismissAllPikaToasts(app, maxSeconds: 30)
-        for t in toasts {
-            // If we hit an error toast, fail fast with the message.
-            if t.lowercased().contains("failed") ||
-                t.lowercased().contains("invalid peer key package") ||
-                t.lowercased().contains("could not find peer key package")
-            {
-                XCTFail("E2E failed during chat creation: \(t)")
-                return
-            }
-        }
-
-        // Send ping.
+        // Chat creation runs asynchronously (key package fetch + group setup).
+        // The user stays on NewChat with a loading spinner; on success the app navigates
+        // directly to the chat screen. Check for error toasts while waiting.
+        let composerDeadline = Date().addingTimeInterval(60)
+        var chatCreationFailed = false
         let msgField = app.textViews.matching(identifier: "chat_message_input").firstMatch
         let msgFieldFallback = app.textFields.matching(identifier: "chat_message_input").firstMatch
+        while Date() < composerDeadline {
+            // Check if chat screen appeared.
+            if msgField.exists || msgFieldFallback.exists { break }
+
+            // Check for error toasts.
+            if let errorMsg = dismissPikaToastIfPresent(app, timeout: 0.5) {
+                if errorMsg.lowercased().contains("failed") ||
+                    errorMsg.lowercased().contains("invalid peer key package") ||
+                    errorMsg.lowercased().contains("could not find peer key package")
+                {
+                    XCTFail("E2E failed during chat creation: \(errorMsg)")
+                    chatCreationFailed = true
+                    break
+                }
+            }
+            Thread.sleep(forTimeInterval: 0.5)
+        }
+        if chatCreationFailed { return }
+
+        // Send deterministic probe.
+        let nonce = UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased()
+        let probe = "ping:\(nonce)"
+        let expect = "pong:\(nonce)"
+
         let composer = msgField.exists ? msgField : msgFieldFallback
         XCTAssertTrue(composer.waitForExistence(timeout: 30))
         composer.tap()
-        composer.typeText("ping")
+        composer.typeText(probe)
 
         let send = app.buttons.matching(identifier: "chat_send").firstMatch
         XCTAssertTrue(send.waitForExistence(timeout: 10))
         send.tap()
 
-        // Expect pong from the bot.
-        XCTAssertTrue(app.staticTexts["pong"].waitForExistence(timeout: 180))
+        // Expect deterministic ack from the bot.
+        XCTAssertTrue(app.staticTexts[expect].waitForExistence(timeout: 180))
     }
 }

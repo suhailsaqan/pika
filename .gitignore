@@ -10,6 +10,7 @@ android/local.properties
 ios/.build/
 ios/build/
 ios/Frameworks/
+ios/**/xcuserdata/
 
 # Misc
 .android-avd/

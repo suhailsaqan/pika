@@ -2,7 +2,7 @@ import SwiftUI
 
 struct ContentView: View {
     @Bindable var manager: AppManager
-    @State private var showToastAlert = false
+    @State private var visibleToast: String? = nil
 
     var body: some View {
         let router = manager.state.router
@@ -25,14 +25,37 @@ struct ContentView: View {
                 }
             }
         }
-        // Toasts should be visible even on the Login screen (e.g. invalid nsec, create account failure).
-        .onChange(of: manager.state.toast) { _, new in
-            showToastAlert = (new != nil)
+        .overlay(alignment: .top) {
+            if let toast = visibleToast {
+                Text(toast)
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 10)
+                    .background(.black.opacity(0.82), in: RoundedRectangle(cornerRadius: 10))
+                    .padding(.horizontal, 24)
+                    .padding(.top, 8)
+                    .transition(.move(edge: .top).combined(with: .opacity))
+                    .accessibilityIdentifier("pika_toast")
+                    .onTapGesture { withAnimation { visibleToast = nil } }
+                    .allowsHitTesting(true)
+            }
         }
-        .alert("Pika", isPresented: $showToastAlert) {
-            Button("OK") { manager.dispatch(.clearToast) }
-        } message: {
-            Text(manager.state.toast ?? "")
+        .animation(.easeInOut(duration: 0.25), value: visibleToast)
+        .onChange(of: manager.state.toast) { _, new in
+            guard let message = new else { return }
+            // Show the non-blocking overlay and immediately clear Rust state so it
+            // doesn't re-show on state resync. The overlay manages its own lifetime.
+            withAnimation { visibleToast = message }
+            manager.dispatch(.clearToast)
+            // Auto-dismiss after 3 seconds.
+            let captured = message
+            Task { @MainActor in
+                try? await Task.sleep(for: .seconds(3))
+                withAnimation {
+                    if visibleToast == captured { visibleToast = nil }
+                }
+            }
         }
     }
 }

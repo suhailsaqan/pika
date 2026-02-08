@@ -359,9 +359,14 @@ async fn cmd_listen(cli: &Cli, timeout_sec: u64, lookback_sec: u64) -> anyhow::R
 
     // Subscribe to giftwrap (welcomes).
     let since = Timestamp::now() - Duration::from_secs(lookback_sec);
+    // Giftwraps are authored by the sender; recipients are indicated via the `p` tag.
+    // Filtering by `pubkey(...)` would only match events *we* authored and would miss inbound invites.
     let gift_filter = Filter::new()
         .kind(Kind::GiftWrap)
-        .pubkey(keys.public_key())
+        .custom_tag(
+            SingleLetterTag::lowercase(Alphabet::P),
+            keys.public_key().to_hex(),
+        )
         .since(since)
         .limit(200);
     let gift_sub = client.subscribe(gift_filter, None).await?;

@@ -76,4 +76,30 @@ if "$SIMCTL" help 2>/dev/null | grep -q "bootstatus"; then
   "$SIMCTL" bootstatus "$udid" -b >/dev/null 2>&1 || true
 fi
 
+# XCUITest bundles run inside the simulator and do not reliably inherit the host
+# environment. When running E2E suites that require a stable identity (e.g. an
+# allowlisted nsec for public relays), propagate it into the simulator's launchd
+# environment so the test runner can read it via ProcessInfo.environment.
+maybe_nsec="${PIKA_UI_E2E_NSEC:-${PIKA_TEST_NSEC:-}}"
+maybe_bot_npub="${PIKA_UI_E2E_BOT_NPUB:-}"
+maybe_relays="${PIKA_UI_E2E_RELAYS:-}"
+maybe_kp_relays="${PIKA_UI_E2E_KP_RELAYS:-}"
+
+# Notes:
+# - XCUITest runs inside the simulator and does not reliably inherit the host env.
+# - `launchctl setenv` makes these visible to the test runner via ProcessInfo.environment.
+if [ -n "${maybe_nsec:-}" ]; then
+  "$SIMCTL" spawn "$udid" launchctl setenv PIKA_UI_E2E_NSEC "$maybe_nsec" >/dev/null 2>&1 || true
+  "$SIMCTL" spawn "$udid" launchctl setenv PIKA_TEST_NSEC "$maybe_nsec" >/dev/null 2>&1 || true
+fi
+if [ -n "${maybe_bot_npub:-}" ]; then
+  "$SIMCTL" spawn "$udid" launchctl setenv PIKA_UI_E2E_BOT_NPUB "$maybe_bot_npub" >/dev/null 2>&1 || true
+fi
+if [ -n "${maybe_relays:-}" ]; then
+  "$SIMCTL" spawn "$udid" launchctl setenv PIKA_UI_E2E_RELAYS "$maybe_relays" >/dev/null 2>&1 || true
+fi
+if [ -n "${maybe_kp_relays:-}" ]; then
+  "$SIMCTL" spawn "$udid" launchctl setenv PIKA_UI_E2E_KP_RELAYS "$maybe_kp_relays" >/dev/null 2>&1 || true
+fi
+
 echo "ok: ios simulator ready (udid=$udid)"

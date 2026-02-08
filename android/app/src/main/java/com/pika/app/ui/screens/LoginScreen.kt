@@ -6,11 +6,14 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -26,6 +29,12 @@ import com.pika.app.ui.TestTags
 @Composable
 fun LoginScreen(manager: AppManager, padding: PaddingValues) {
     var nsec by remember { mutableStateOf("") }
+    var isLoading by remember { mutableStateOf(false) }
+
+    // Reset loading on error (errors produce toasts).
+    LaunchedEffect(manager.state.toast) {
+        if (manager.state.toast != null) isLoading = false
+    }
 
     Column(
         modifier =
@@ -39,10 +48,21 @@ fun LoginScreen(manager: AppManager, padding: PaddingValues) {
         Text("Pika")
 
         Button(
-            onClick = { manager.dispatch(AppAction.CreateAccount) },
+            onClick = {
+                isLoading = true
+                manager.dispatch(AppAction.CreateAccount)
+            },
+            enabled = !isLoading,
             modifier = Modifier.testTag(TestTags.LOGIN_CREATE_ACCOUNT),
         ) {
-            Text("Create Account")
+            if (isLoading) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(20.dp),
+                    strokeWidth = 2.dp,
+                )
+            } else {
+                Text("Create Account")
+            }
         }
 
         HorizontalDivider(modifier = Modifier.padding(vertical = 10.dp))
@@ -51,15 +71,27 @@ fun LoginScreen(manager: AppManager, padding: PaddingValues) {
             value = nsec,
             onValueChange = { nsec = it },
             singleLine = true,
+            enabled = !isLoading,
             label = { Text("nsec (mock)") },
             modifier = Modifier.fillMaxWidth().testTag(TestTags.LOGIN_NSEC),
         )
 
         Button(
-            onClick = { manager.loginWithNsec(nsec) },
+            onClick = {
+                isLoading = true
+                manager.loginWithNsec(nsec)
+            },
+            enabled = !isLoading,
             modifier = Modifier.testTag(TestTags.LOGIN_LOGIN),
         ) {
-            Text("Login")
+            if (isLoading) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(20.dp),
+                    strokeWidth = 2.dp,
+                )
+            } else {
+                Text("Login")
+            }
         }
     }
 }

@@ -36,16 +36,36 @@ class PikaE2eUiTest {
         )
 
         val ctx = InstrumentationRegistry.getInstrumentation().targetContext
-        val botNpub =
-            args.getString("pika_peer_npub")
-                // Prefer hex for test stability (length validation catches truncation).
-                ?: "1ac66317246750fe862cf47156b200051aa219d9a37ca018690bb3483065d3b8"
+        val testNsec = args.getString("pika_nsec") ?: args.getString("pika_test_nsec") ?: ""
+        val botNpub = args.getString("pika_peer_npub") ?: ""
+
+        // Public-relay E2E should be explicit. Defaults hide misconfiguration and cause flaky hangs.
+        check(botNpub.isNotBlank()) { "Missing instrumentation arg: pika_peer_npub" }
+        check(testNsec.isNotBlank()) { "Missing instrumentation arg: pika_nsec" }
 
         // Ensure we start from a known auth state.
         runOnMain { AppManager.getInstance(ctx).logout() }
+        compose.waitForIdle()
 
-        // Create account (E2E assumes networking is enabled via runner args).
-        compose.onNodeWithTag(TestTags.LOGIN_CREATE_ACCOUNT).performClick()
+        // Wait for login UI to be ready; the Activity may take a moment to transition.
+        compose.waitUntil(30_000) {
+            runCatching {
+                compose.onAllNodesWithTag(TestTags.LOGIN_CREATE_ACCOUNT).fetchSemanticsNodes().isNotEmpty()
+            }.getOrDefault(false) ||
+                runCatching { compose.onAllNodesWithText("Chats").fetchSemanticsNodes().isNotEmpty() }.getOrDefault(false)
+        }
+
+        // Prefer logging into a stable allowlisted identity when provided.
+        val alreadyInChats =
+            runCatching { compose.onNodeWithText("Chats").assertIsDisplayed() }.isSuccess
+
+        if (!alreadyInChats && testNsec.isNotBlank()) {
+            compose.onNodeWithTag(TestTags.LOGIN_NSEC).performTextInput(testNsec)
+            compose.onNodeWithTag(TestTags.LOGIN_LOGIN).performClick()
+        } else if (!alreadyInChats) {
+            // Create account (may not be able to talk to the deployed bot if it enforces allowlists).
+            compose.onNodeWithTag(TestTags.LOGIN_CREATE_ACCOUNT).performClick()
+        }
 
         compose.waitUntil(30_000) {
             runCatching { compose.onNodeWithText("Chats").assertIsDisplayed() }.isSuccess
@@ -92,27 +112,30 @@ class PikaE2eUiTest {
         }
         check(compose.onAllNodesWithTag(TestTags.CHAT_MESSAGE_INPUT).fetchSemanticsNodes().isNotEmpty())
 
-        // Send ping.
-        compose.onNodeWithTag(TestTags.CHAT_MESSAGE_INPUT).performTextInput("ping")
+        // Send deterministic probe.
+        val nonce = java.util.UUID.randomUUID().toString().replace("-", "").lowercase()
+        val probe = "ping:$nonce"
+        val expect = "pong:$nonce"
+        compose.onNodeWithTag(TestTags.CHAT_MESSAGE_INPUT).performTextInput(probe)
         compose.waitForIdle()
         compose.onNodeWithTag(TestTags.CHAT_SEND).performClick()
 
-        dumpState("after ping", ctx)
+        dumpState("after probe", ctx)
 
-        // Wait for pong from the bot. Prefer state inspection (Rust-owned) to avoid keyboard overlap flakes.
+        // Wait for deterministic ack from the bot. Prefer state inspection (Rust-owned) to avoid keyboard overlap flakes.
         compose.waitUntil(180_000) {
             val hasPong =
                 runOnMain {
                     AppManager.getInstance(ctx).state.currentChat?.messages?.any {
-                        it.content.trim() == "pong"
+                        it.content.trim() == expect
                     }
                         ?: false
                 }
             if (!hasPong) return@waitUntil false
-            runCatching { compose.onAllNodesWithText("pong").fetchSemanticsNodes().isNotEmpty() }
+            runCatching { compose.onAllNodesWithText(expect).fetchSemanticsNodes().isNotEmpty() }
                 .getOrDefault(false)
         }
-        check(compose.onAllNodesWithText("pong").fetchSemanticsNodes().isNotEmpty())
+        check(compose.onAllNodesWithText(expect).fetchSemanticsNodes().isNotEmpty())
     }
 
     private fun dumpState(phase: String, ctx: android.content.Context) {

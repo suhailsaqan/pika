@@ -3,9 +3,14 @@ package com.pika.app.ui.screens
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedTextField
@@ -14,6 +19,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -34,8 +40,14 @@ import androidx.compose.material3.MaterialTheme
 @OptIn(ExperimentalMaterial3Api::class)
 fun NewChatScreen(manager: AppManager, padding: PaddingValues) {
     var npub by remember { mutableStateOf("") }
+    var isLoading by remember { mutableStateOf(false) }
     val peer = npub.trim()
     val isValidPeer = PeerKeyValidator.isValidPeer(peer)
+
+    // Reset loading on error (errors produce toasts).
+    LaunchedEffect(manager.state.toast) {
+        if (manager.state.toast != null) isLoading = false
+    }
 
     Scaffold(
         modifier = Modifier.padding(padding),
@@ -48,6 +60,7 @@ fun NewChatScreen(manager: AppManager, padding: PaddingValues) {
                             val stack = manager.state.router.screenStack
                             manager.dispatch(AppAction.UpdateScreenStack(stack.dropLast(1)))
                         },
+                        enabled = !isLoading,
                     ) {
                         Icon(Icons.Default.ArrowBack, contentDescription = "Back")
                     }
@@ -64,6 +77,7 @@ fun NewChatScreen(manager: AppManager, padding: PaddingValues) {
                 onValueChange = { npub = it },
                 label = { Text("Peer npub") },
                 singleLine = true,
+                enabled = !isLoading,
                 isError = peer.isNotEmpty() && !isValidPeer,
                 modifier = Modifier.fillMaxWidth().testTag(TestTags.NEWCHAT_PEER_NPUB),
             )
@@ -74,11 +88,25 @@ fun NewChatScreen(manager: AppManager, padding: PaddingValues) {
                 )
             }
             Button(
-                onClick = { manager.dispatch(AppAction.CreateChat(peer)) },
-                enabled = isValidPeer,
+                onClick = {
+                    isLoading = true
+                    manager.dispatch(AppAction.CreateChat(peer))
+                },
+                enabled = isValidPeer && !isLoading,
                 modifier = Modifier.fillMaxWidth().testTag(TestTags.NEWCHAT_START),
             ) {
-                Text("Start chat")
+                if (isLoading) {
+                    Row {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(20.dp),
+                            strokeWidth = 2.dp,
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Creating…")
+                    }
+                } else {
+                    Text("Start chat")
+                }
             }
         }
     }
