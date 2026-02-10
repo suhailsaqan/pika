@@ -19,6 +19,8 @@ class AppManager private constructor(context: Context) : AppReconciler {
     private val rust: FfiApp
     private var lastRevApplied: ULong = 0UL
     private val listening = AtomicBoolean(false)
+    private val resyncing = AtomicBoolean(false)
+    private var maxRevSeenDuringResync: ULong = 0UL
 
     var state: AppState by mutableStateOf(
         AppState(
@@ -71,28 +73,39 @@ class AppManager private constructor(context: Context) : AppReconciler {
     }
 
     fun onForeground() {
-        // Belt-and-suspenders resync. Avoid blocking the main thread.
-        Thread {
-            val snapshot = rust.state()
-            mainHandler.post {
-                state = snapshot
-                lastRevApplied = snapshot.rev
-            }
-        }.start()
+        // Foreground is a lifecycle signal; Rust owns state changes and side effects.
+        rust.dispatch(AppAction.Foregrounded)
     }
 
     override fun reconcile(update: AppUpdate) {
         mainHandler.post {
             val updateRev = update.rev()
-            if (updateRev != lastRevApplied + 1UL) {
-                // Avoid blocking the main thread on resync.
-                Thread {
-                    val snapshot = rust.state()
-                    mainHandler.post {
-                        state = snapshot
-                        lastRevApplied = snapshot.rev
-                    }
-                }.start()
+
+            // Side-effect updates must not be lost: `AccountCreated` carries an `nsec` that isn't in
+            // AppState snapshots (by design). Store it even if the update is stale w.r.t. rev.
+            if (update is AppUpdate.AccountCreated) {
+                val existing = secureStore.getNsec().orEmpty()
+                if (existing.isBlank() && update.nsec.isNotBlank()) {
+                    secureStore.setNsec(update.nsec)
+                }
+            }
+
+            // After a resync, older updates can still be in-flight on the main handler queue.
+            // Drop them. Only treat *forward* gaps as a reason to resync.
+            if (updateRev <= lastRevApplied) return@post
+            // While resyncing, drop updates but remember the newest rev we've observed so we can
+            // resync again if the snapshot is behind (prevents falling permanently behind).
+            if (resyncing.get()) {
+                if (updateRev > maxRevSeenDuringResync) {
+                    maxRevSeenDuringResync = updateRev
+                }
+                return@post
+            }
+            if (updateRev > lastRevApplied + 1UL) {
+                if (updateRev > maxRevSeenDuringResync) {
+                    maxRevSeenDuringResync = updateRev
+                }
+                requestResync()
                 return@post
             }
 
@@ -101,7 +114,9 @@ class AppManager private constructor(context: Context) : AppReconciler {
                 is AppUpdate.FullState -> state = update.v1
                 is AppUpdate.AccountCreated -> {
                     // Required by spec-v2: native stores nsec; Rust never persists it.
-                    secureStore.setNsec(update.nsec)
+                    if (update.nsec.isNotBlank()) {
+                        secureStore.setNsec(update.nsec)
+                    }
                     state = state.copy(rev = updateRev)
                 }
                 is AppUpdate.RouterChanged -> state = state.copy(rev = updateRev, router = update.router)
@@ -113,6 +128,29 @@ class AppManager private constructor(context: Context) : AppReconciler {
                 }
             }
         }
+    }
+
+    private fun requestResync() {
+        if (!resyncing.compareAndSet(false, true)) return
+        Thread {
+            val snapshot = rust.state()
+            mainHandler.post {
+                state = snapshot
+                if (snapshot.rev > lastRevApplied) {
+                    lastRevApplied = snapshot.rev
+                }
+                val maxSeen = maxRevSeenDuringResync
+                maxRevSeenDuringResync = 0UL
+                resyncing.set(false)
+
+                // If newer updates arrived while the snapshot was in-flight and the snapshot is
+                // behind, resync again (coalesced) rather than dropping ourselves out of date.
+                if (maxSeen > snapshot.rev) {
+                    maxRevSeenDuringResync = maxSeen
+                    requestResync()
+                }
+            }
+        }.start()
     }
 
     private fun AppUpdate.rev(): ULong =

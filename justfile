@@ -4,6 +4,39 @@ set shell := ["bash", "-lc"]
 default:
   @just --list
 
+# Print developer-facing usage notes (targets, env vars, common flows).
+info:
+  @echo "Pika: run commands + target selection"
+  @echo
+  @echo "iOS"
+  @echo "  Simulator:"
+  @echo "    just run-ios --sim"
+  @echo "  Hardware device:"
+  @echo "    just run-ios --device"
+  @echo "  List connected iPhones:"
+  @echo "    just run-ios --list-devices"
+  @echo "  Choose a specific iPhone:"
+  @echo "    just run-ios --udid <UDID>"
+  @echo
+  @echo "  Env equivalents:"
+  @echo "    PIKA_IOS_DEVICE=1               (default to device)"
+  @echo "    PIKA_IOS_DEVICE_UDID=<UDID>     (pick device)"
+  @echo "    PIKA_IOS_DEVELOPMENT_TEAM=...   (required for device builds)"
+  @echo "    PIKA_IOS_CONSOLE=1              (attach console on device)"
+  @echo
+  @echo "Android"
+  @echo "  Emulator:"
+  @echo "    just run-android --emulator"
+  @echo "  Hardware device:"
+  @echo "    just run-android --device"
+  @echo "  List targets (emulators + devices):"
+  @echo "    just run-android --list-targets"
+  @echo "  Choose a specific target:"
+  @echo "    just run-android --serial <adb-serial>"
+  @echo
+  @echo "  Env equivalents:"
+  @echo "    PIKA_ANDROID_SERIAL=<serial>"
+
 # Run pika_core tests.
 test *ARGS:
   cargo test -p pika_core {{ARGS}}
@@ -173,13 +206,13 @@ ios-xcframework: ios-gen-swift ios-rust
 
 # Generate Xcode project via xcodegen.
 ios-xcodeproj:
-  cd ios && xcodegen generate
+  cd ios && rm -rf Pika.xcodeproj && xcodegen generate
 
 # Build iOS app for simulator.
 ios-build-sim: ios-xcframework ios-xcodeproj
   DEV_DIR=$(ls -d /Applications/Xcode*.app/Contents/Developer 2>/dev/null | sort | tail -n 1); \
   if [ -z "$DEV_DIR" ]; then echo "Xcode not found under /Applications"; exit 1; fi; \
-  env -u LD -u CC -u CXX DEVELOPER_DIR="$DEV_DIR" xcodebuild -project ios/Pika.xcodeproj -target Pika -configuration Debug -sdk iphonesimulator build CODE_SIGNING_ALLOWED=NO
+  env -u LD -u CC -u CXX DEVELOPER_DIR="$DEV_DIR" xcodebuild -project ios/Pika.xcodeproj -target Pika -configuration Debug -sdk iphonesimulator build CODE_SIGNING_ALLOWED=NO PRODUCT_BUNDLE_IDENTIFIER="${PIKA_IOS_BUNDLE_ID:-com.justinmoon.pika.dev}"
 
 # Run iOS UI tests on simulator (skips E2E deployed-bot test).
 ios-ui-test: ios-xcframework ios-xcodeproj
@@ -187,7 +220,7 @@ ios-ui-test: ios-xcframework ios-xcodeproj
   if [ -z "$DEV_DIR" ]; then echo "Xcode not found under /Applications"; exit 1; fi; \
   udid="$(./tools/ios-sim-ensure | sed -n 's/^ok: ios simulator ready (udid=\(.*\))$/\1/p')"; \
   if [ -z "$udid" ]; then echo "error: could not determine simulator udid"; exit 1; fi; \
-  env -u LD -u CC -u CXX DEVELOPER_DIR="$DEV_DIR" xcodebuild -project ios/Pika.xcodeproj -scheme Pika -destination "id=$udid" test CODE_SIGNING_ALLOWED=NO \
+  env -u LD -u CC -u CXX DEVELOPER_DIR="$DEV_DIR" xcodebuild -project ios/Pika.xcodeproj -scheme Pika -destination "id=$udid" test CODE_SIGNING_ALLOWED=NO PRODUCT_BUNDLE_IDENTIFIER="${PIKA_IOS_BUNDLE_ID:-com.justinmoon.pika.dev}" \
     -skip-testing:PikaUITests/PikaUITests/testE2E_deployedRustBot_pingPong
 
 # iOS E2E: local docker relay + local Rust bot. Requires Docker.
@@ -222,8 +255,8 @@ ios-ui-e2e: ios-xcframework ios-xcodeproj
     PIKA_UI_E2E_BOT_NPUB="${PIKA_UI_E2E_BOT_NPUB}" \
     PIKA_UI_E2E_RELAYS="${PIKA_UI_E2E_RELAYS}" \
     PIKA_UI_E2E_KP_RELAYS="${PIKA_UI_E2E_KP_RELAYS}" \
-    PIKA_UI_E2E_NSEC="$nsec" \
-    env -u LD -u CC -u CXX DEVELOPER_DIR="$DEV_DIR" xcodebuild -project ios/Pika.xcodeproj -scheme Pika -destination "id=$udid" test CODE_SIGNING_ALLOWED=NO \
+  PIKA_UI_E2E_NSEC="$nsec" \
+    env -u LD -u CC -u CXX DEVELOPER_DIR="$DEV_DIR" xcodebuild -project ios/Pika.xcodeproj -scheme Pika -destination "id=$udid" test CODE_SIGNING_ALLOWED=NO PRODUCT_BUNDLE_IDENTIFIER="${PIKA_IOS_BUNDLE_ID:-com.justinmoon.pika.dev}" \
       -only-testing:PikaUITests/PikaUITests/testE2E_deployedRustBot_pingPong
 
 # Optional: device automation (npx). Not required for building.
@@ -233,20 +266,20 @@ device:
 # Show Android manual QA instructions.
 android-manual-qa:
   @echo "Manual QA prompt: prompts/android-agent-device-manual-qa.md"
-  @echo "Tip: run `npx --yes agent-device --platform android open com.pika.app` then follow the prompt."
+  @echo "Tip: run `npx --yes agent-device --platform android open com.justinmoon.pika.dev` then follow the prompt."
 
 # Show iOS manual QA instructions.
 ios-manual-qa:
   @echo "Manual QA prompt: prompts/ios-agent-device-manual-qa.md"
-  @echo "Tip: run `./tools/agent-device --platform ios open com.pika.app` then follow the prompt."
+  @echo "Tip: run `./tools/agent-device --platform ios open com.justinmoon.pika.dev` then follow the prompt."
 
-# Build, install, and launch Android app on connected device.
-run-android:
-  ./tools/run-android
+# Build, install, and launch Android app on emulator/device.
+run-android *ARGS:
+  ./tools/run-android {{ARGS}}
 
-# Build, install, and launch iOS app on simulator.
-run-ios:
-  ./tools/run-ios
+# Build, install, and launch iOS app on simulator/device.
+run-ios *ARGS:
+  ./tools/run-ios {{ARGS}}
 
 # Check iOS dev environment (Xcode, simulators, runtimes).
 doctor-ios:

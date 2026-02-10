@@ -9,7 +9,7 @@ android {
     ndkVersion = "28.2.13676358"
 
     defaultConfig {
-        applicationId = "com.pika.app"
+        applicationId = "com.justinmoon.pika"
         minSdk = 26
         targetSdk = 35
         versionCode = 1
@@ -22,6 +22,12 @@ android {
     }
 
     buildTypes {
+        debug {
+            // Avoid collisions with App Store / release builds (and signature mismatch failures)
+            // when installing debug builds on real devices.
+            applicationIdSuffix = ".dev"
+            versionNameSuffix = "-dev"
+        }
         release {
             isMinifyEnabled = false
             proguardFiles(

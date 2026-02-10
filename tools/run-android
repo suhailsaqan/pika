@@ -9,19 +9,176 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
-./tools/android-emulator-ensure
-
-ADB="${ADB:-adb}"
-
-pick_device() {
-  "$ADB" devices 2>/dev/null | awk 'NR>1 && $2=="device" {print $1}' | head -n 1
+load_dotenv() {
+  # Dev-only config. `.env` and `.env.local` are gitignored.
+  for f in .env .env.local; do
+    if [ -f "$f" ]; then
+      # Only set vars that aren't already present in the environment so callers can override via:
+      #   PIKA_ANDROID_SERIAL=... ./tools/run-android
+      while IFS= read -r line || [ -n "$line" ]; do
+        # Trim leading/trailing whitespace (basic).
+        line="$(echo "$line" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+        if [ -z "${line:-}" ] || echo "$line" | grep -q '^#'; then
+          continue
+        fi
+        if ! echo "$line" | grep -q '='; then
+          continue
+        fi
+        key="${line%%=*}"
+        val="${line#*=}"
+        key="$(echo "$key" | tr -d '[:space:]')"
+        if [ -z "${key:-}" ]; then
+          continue
+        fi
+        # Indirect expansion: if already set, do not override.
+        if eval "[ -z \"\${$key+x}\" ]"; then
+          export "$key=$val"
+        fi
+      done <"$f"
+    fi
+  done
 }
 
-SERIAL="$(pick_device || true)"
+load_dotenv
+
+# If the user isn't in the devShell, re-exec under Nix for a consistent toolchain.
+if [ -z "${IN_NIX_SHELL:-}" ] && [ "${PIKA_RUN_ANDROID_NO_NIX:-0}" != "1" ]; then
+  qargs=()
+  for a in "$@"; do qargs+=("$(printf '%q' "$a")"); done
+  exec nix develop -c bash -lc "cd \"$ROOT\"; ./tools/run-android ${qargs[*]}"
+fi
+
+ADB="${ADB:-adb}"
+APP_ID="${PIKA_ANDROID_APP_ID:-com.justinmoon.pika.dev}"
+SERIAL="${PIKA_ANDROID_SERIAL:-}"
+MODE="auto" # auto|emulator|device
+
+usage() {
+  cat <<EOF
+usage: ./tools/run-android [--emulator|--device] [--serial <adb-serial>] [--list-targets]
+
+Defaults:
+  - If an emulator exists or can be started, we run on the emulator.
+  - Otherwise we run on a single connected physical device.
+
+Examples:
+  ./tools/run-android --emulator
+  ./tools/run-android --device
+  ./tools/run-android --serial emulator-5554
+  ./tools/run-android --serial <physical-serial>
+  ./tools/run-android --list-targets
+
+Env:
+  PIKA_ANDROID_SERIAL   (same as --serial)
+  PIKA_ANDROID_APP_ID   (default: $APP_ID)
+EOF
+}
+
+list_targets() {
+  local emus devs
+  emus="$("$ADB" devices 2>/dev/null | awk 'NR>1 && $2=="device" && $1 ~ /^emulator-/ {print $1}')"
+  devs="$("$ADB" devices 2>/dev/null | awk 'NR>1 && $2=="device" && $1 !~ /^emulator-/ {print $1}')"
+
+  echo "Android targets:"
+  if [ -n "${emus:-}" ]; then
+    echo "$emus" | sed 's/^/  emulator: /'
+  fi
+  if [ -n "${devs:-}" ]; then
+    echo "$devs" | sed 's/^/  device:   /'
+  fi
+  if [ -z "${emus:-}" ] && [ -z "${devs:-}" ]; then
+    echo "  (none)"
+  fi
+}
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --emulator) MODE="emulator" ;;
+    --device) MODE="device" ;;
+    --serial)
+      shift
+      if [ $# -lt 1 ]; then echo "error: --serial requires a value" >&2; exit 2; fi
+      SERIAL="$1"
+      ;;
+    --list-targets) list_targets; exit 0 ;;
+    -h|--help) usage; exit 0 ;;
+    *)
+      echo "error: unknown arg: $1" >&2
+      usage >&2
+      exit 2
+      ;;
+  esac
+  shift
+done
+
+ensure_emulator() {
+  # Default UX: use an emulator (like iOS uses a simulator) unless the user explicitly
+  # targets a physical device via PIKA_ANDROID_SERIAL or disables emulator startup.
+  if [ "$MODE" = "device" ]; then
+    PIKA_ANDROID_SKIP_EMULATOR=1 ./tools/android-emulator-ensure
+    return 0
+  fi
+  if [ -n "${SERIAL:-}" ] && ! echo "$SERIAL" | grep -q '^emulator-'; then
+    PIKA_ANDROID_SKIP_EMULATOR=1 ./tools/android-emulator-ensure
+  else
+    ./tools/android-emulator-ensure
+  fi
+}
+
+ensure_emulator
+
+serial_exists() {
+  "$ADB" devices 2>/dev/null | awk 'NR>1 && $2=="device" {print $1}' | grep -Fxq "$1"
+}
+
+pick_emulators() {
+  "$ADB" devices 2>/dev/null | awk 'NR>1 && $2=="device" && $1 ~ /^emulator-/ {print $1}'
+}
+
+pick_devices() {
+  "$ADB" devices 2>/dev/null | awk 'NR>1 && $2=="device" && $1 !~ /^emulator-/ {print $1}'
+}
+
+pick_one_or_error() {
+  local label="$1"
+  local items="$2"
+  local count
+  count="$(echo "$items" | sed '/^$/d' | wc -l | tr -d '[:space:]')"
+  if [ "${count:-0}" = "1" ]; then
+    echo "$items" | sed '/^$/d' | head -n 1
+    return 0
+  fi
+  if [ "${count:-0}" -gt 1 ]; then
+    echo "error: multiple android $label targets available; choose one via --serial or PIKA_ANDROID_SERIAL:" >&2
+    echo "$items" | sed '/^$/d' | sed 's/^/  /' >&2
+    exit 2
+  fi
+  echo ""
+}
+
+if [ -n "${SERIAL:-}" ]; then
+  if ! serial_exists "$SERIAL"; then
+    echo "error: requested android serial not connected: $SERIAL" >&2
+    list_targets >&2
+    exit 2
+  fi
+else
+  if [ "$MODE" = "emulator" ] || [ "$MODE" = "auto" ]; then
+    SERIAL="$(pick_one_or_error "emulator" "$(pick_emulators)")"
+  fi
+  if [ -z "${SERIAL:-}" ]; then
+    SERIAL="$(pick_one_or_error "device" "$(pick_devices)")"
+  fi
+fi
 if [ -z "${SERIAL:-}" ]; then
   echo "error: no android device/emulator connected after ensure step" >&2
-  "$ADB" devices >&2 || true
+  list_targets >&2
   exit 1
+fi
+if echo "$SERIAL" | grep -q '^emulator-'; then
+  echo "using android emulator: $SERIAL"
+else
+  echo "using android device: $SERIAL"
 fi
 
 # Build (via Gradle) then install deterministically onto the selected device.
@@ -33,7 +190,13 @@ if [ ! -f "$APK" ]; then
   exit 1
 fi
 
-"$ADB" -s "$SERIAL" install -r "$APK" >/dev/null
+if ! "$ADB" -s "$SERIAL" install -r "$APK" >/dev/null; then
+  echo "error: adb install failed" >&2
+  echo "hint: if you previously installed a differently-signed build, uninstall the old package:" >&2
+  echo "  adb -s $SERIAL uninstall $APP_ID" >&2
+  echo "note: this debug build uses applicationIdSuffix '.dev' (package: $APP_ID)" >&2
+  exit 1
+fi
 
 maybe_setup_adb_reverse() {
   # Optional host->emulator port wiring to mimic "app can reach localhost services":
@@ -106,41 +269,41 @@ PY
   )"
 
   echo "writing relay override to app config (pika_config.json)"
-  "$ADB" -s "$SERIAL" shell am force-stop com.pika.app >/dev/null 2>&1 || true
+  "$ADB" -s "$SERIAL" shell am force-stop "$APP_ID" >/dev/null 2>&1 || true
 
   # Write directly into the app sandbox via `run-as` (most reliable on emulators/devices).
   # `files/pika_config.json` resolves to the same directory Android passes as `data_dir`.
-  if ! printf '%s' "$json" | "$ADB" -s "$SERIAL" shell "run-as com.pika.app sh -c 'mkdir -p files && cat > files/pika_config.json'"; then
+  if ! printf '%s' "$json" | "$ADB" -s "$SERIAL" shell "run-as $APP_ID sh -c 'mkdir -p files && cat > files/pika_config.json'"; then
     echo "error: could not write app config via run-as" >&2
     echo "debug: run-as output:" >&2
-    "$ADB" -s "$SERIAL" shell "run-as com.pika.app id" >&2 || true
-    echo "hint: ensure you're running a debuggable build; if you previously installed a non-debuggable variant, run: adb uninstall com.pika.app" >&2
+    "$ADB" -s "$SERIAL" shell "run-as $APP_ID id" >&2 || true
+    echo "hint: ensure you're running a debuggable build; if you previously installed a non-debuggable variant, run: adb uninstall $APP_ID" >&2
     exit 1
   fi
   # Verify read-back.
-  "$ADB" -s "$SERIAL" shell "run-as com.pika.app sh -c 'cat files/pika_config.json >/dev/null'" >/dev/null
+  "$ADB" -s "$SERIAL" shell "run-as $APP_ID sh -c 'cat files/pika_config.json >/dev/null'" >/dev/null
 }
 
 maybe_write_config
 
-echo "launching com.pika.app"
+echo "launching $APP_ID"
 # Prefer `am start` with a resolved launcher activity (more reliable than monkey).
-resolved="$("$ADB" -s "$SERIAL" shell cmd package resolve-activity --brief -a android.intent.action.MAIN -c android.intent.category.LAUNCHER com.pika.app 2>/dev/null | tr -d '\r' | tail -n 1 || true)"
+resolved="$("$ADB" -s "$SERIAL" shell cmd package resolve-activity --brief -a android.intent.action.MAIN -c android.intent.category.LAUNCHER "$APP_ID" 2>/dev/null | tr -d '\r' | tail -n 1 || true)"
 if [ -n "${resolved:-}" ] && echo "$resolved" | grep -q '/'; then
   "$ADB" -s "$SERIAL" shell am start -W -n "$resolved" >/dev/null
 else
-  "$ADB" -s "$SERIAL" shell am start -W -a android.intent.action.MAIN -c android.intent.category.LAUNCHER -n com.pika.app/.MainActivity >/dev/null
+  "$ADB" -s "$SERIAL" shell am start -W -a android.intent.action.MAIN -c android.intent.category.LAUNCHER -n "$APP_ID"/.MainActivity >/dev/null
 fi
 
 # Confirm the process is actually running, otherwise fail with useful diagnostics.
 for i in $(seq 1 20); do
-  if "$ADB" -s "$SERIAL" shell pidof com.pika.app >/dev/null 2>&1; then
+  if "$ADB" -s "$SERIAL" shell pidof "$APP_ID" >/dev/null 2>&1; then
     echo "ok: android app launched"
     exit 0
   fi
   sleep 0.5
 done
 
-echo "error: app did not appear to start (pidof com.pika.app empty)" >&2
-"$ADB" -s "$SERIAL" shell cmd package resolve-activity --brief -a android.intent.action.MAIN -c android.intent.category.LAUNCHER com.pika.app 2>&1 | sed -n '1,80p' >&2 || true
+echo "error: app did not appear to start (pidof $APP_ID empty)" >&2
+"$ADB" -s "$SERIAL" shell cmd package resolve-activity --brief -a android.intent.action.MAIN -c android.intent.category.LAUNCHER "$APP_ID" 2>&1 | sed -n '1,80p' >&2 || true
 exit 1

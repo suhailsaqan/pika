@@ -1,17 +1,312 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# One-command iOS dev loop:
-# - build iOS simulator app
-# - ensure a simulator device exists and is booted
-# - install and launch
+# One-command iOS dev loop (simulator or device).
 #
-# Requires an installed iOS Simulator runtime (Xcode -> Settings -> Platforms).
+# Default: simulator.
+#   ./tools/run-ios
+#
+# Physical device:
+#   ./tools/run-ios --device
+#   PIKA_IOS_DEVICE_UDID=<udid> ./tools/run-ios --device
+#
+# Notes:
+# - Must run inside `nix develop` (or via direnv) so the Rust toolchain has iOS targets.
+# - Requires a full Xcode install under /Applications for `xcrun`, `simctl`, `devicectl`.
+#
+# Optional relay overrides:
+#   PIKA_RELAY_URLS="wss://relay.primal.net,wss://nos.lol,wss://relay.damus.io" ./tools/run-ios
+#   PIKA_KEY_PACKAGE_RELAY_URLS="wss://nostr-pub.wellorder.net,..." ./tools/run-ios
+# Disable auto defaults:
+#   PIKA_NO_RELAY_OVERRIDE=1 ./tools/run-ios
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
+load_dotenv() {
+  # Dev-only config. `.env` and `.env.local` are gitignored.
+  for f in .env .env.local; do
+    if [ -f "$f" ]; then
+      # Only set vars that aren't already present in the environment so callers can override via:
+      #   PIKA_IOS_DEVICE=0 ./tools/run-ios
+      while IFS= read -r line || [ -n "$line" ]; do
+        # Trim leading/trailing whitespace (basic).
+        line="$(echo "$line" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+        if [ -z "${line:-}" ] || echo "$line" | grep -q '^#'; then
+          continue
+        fi
+        if ! echo "$line" | grep -q '='; then
+          continue
+        fi
+        key="${line%%=*}"
+        val="${line#*=}"
+        key="$(echo "$key" | tr -d '[:space:]')"
+        if [ -z "${key:-}" ]; then
+          continue
+        fi
+        # Indirect expansion: if already set, do not override.
+        if eval "[ -z \"\${$key+x}\" ]"; then
+          export "$key=$val"
+        fi
+      done <"$f"
+    fi
+  done
+}
+
+load_dotenv
+
+# If the user isn't in the devShell, re-exec under Nix for a consistent toolchain.
+if [ -z "${IN_NIX_SHELL:-}" ] && [ "${PIKA_RUN_IOS_NO_NIX:-0}" != "1" ]; then
+  qargs=()
+  for a in "$@"; do qargs+=("$(printf '%q' "$a")"); done
+  exec nix develop -c bash -lc "cd \"$ROOT\"; ./tools/run-ios ${qargs[*]}"
+fi
+
+IOS_BUNDLE_ID="${PIKA_IOS_BUNDLE_ID:-com.justinmoon.pika.dev}"
+IOS_TEAM_ID="${PIKA_IOS_DEVELOPMENT_TEAM:-}"
+MODE="sim"
+CONSOLE="${PIKA_IOS_CONSOLE:-0}"
+if [ "${PIKA_IOS_DEVICE:-0}" = "1" ]; then
+  MODE="device"
+fi
+
+usage() {
+  cat <<EOF
+usage: ./tools/run-ios [--sim|--device] [--console] [--udid <udid>] [--list-devices]
+
+Env:
+  PIKA_IOS_BUNDLE_ID        (default: $IOS_BUNDLE_ID)
+  PIKA_IOS_DEVELOPMENT_TEAM (required for --device; put it in .env to avoid typing)
+  PIKA_IOS_DEVICE_UDID      (optional, for --device)
+  PIKA_IOS_DEVICE=1         default to --device (if set, requires team id)
+  PIKA_IOS_CONSOLE=1        default to --console
+  PIKA_NO_RELAY_OVERRIDE=1  disable dev-friendly relay defaults
+EOF
+}
+
+list_connected_iphones() {
+  DEV_DIR="$(ls -d /Applications/Xcode*.app/Contents/Developer 2>/dev/null | sort | tail -n 1 || true)"
+  if [ -z "${DEV_DIR:-}" ]; then
+    echo "error: Xcode not found under /Applications" >&2
+    exit 1
+  fi
+  DEVELOPER_DIR="$DEV_DIR" xcrun xctrace list devices 2>/dev/null | awk '
+    $0 == "== Devices ==" { in_devices = 1; next }
+    $0 == "== Simulators ==" { in_devices = 0; next }
+    in_devices && $0 ~ /iPhone/ {
+      print $0
+    }
+  '
+}
+
+choose_device_udid() {
+  local lines count
+  lines="$(list_connected_iphones)"
+  count="$(echo "$lines" | sed '/^$/d' | wc -l | tr -d '[:space:]')"
+  if [ "${count:-0}" = "1" ]; then
+    echo "$lines" | sed -n 's/.*(\\([0-9A-Fa-f-]\\{25,\\}\\)).*/\\1/p'
+    return 0
+  fi
+  if [ "${count:-0}" -gt 1 ]; then
+    echo "error: multiple iPhones connected; choose one via --udid or PIKA_IOS_DEVICE_UDID:" >&2
+    echo "$lines" | sed '/^$/d' | sed 's/^/  /' >&2
+    exit 2
+  fi
+  echo ""
+}
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --sim) MODE="sim" ;;
+    --device) MODE="device" ;;
+    --udid)
+      shift
+      if [ $# -lt 1 ]; then echo "error: --udid requires a value" >&2; exit 2; fi
+      export PIKA_IOS_DEVICE_UDID="$1"
+      MODE="device"
+      ;;
+    --list-devices)
+      echo "iOS connected iPhones:"
+      list_connected_iphones | sed '/^$/d' | sed 's/^/  /'
+      exit 0
+      ;;
+    --console) CONSOLE=1 ;;
+    -h|--help) usage; exit 0 ;;
+    *)
+      echo "error: unknown arg: $1" >&2
+      usage >&2
+      exit 2
+      ;;
+  esac
+  shift
+done
+
+default_relays() {
+  echo "wss://relay.primal.net,wss://nos.lol,wss://relay.damus.io"
+}
+
+default_kp_relays() {
+  echo "wss://nostr-pub.wellorder.net,wss://nostr-01.yakihonne.com,wss://nostr-02.yakihonne.com,wss://relay.satlantis.io"
+}
+
+effective_relays() {
+  local relays="${PIKA_RELAY_URLS:-${PIKA_RELAY_URL:-}}"
+  if [ -z "${relays:-}" ]; then relays="$(default_relays)"; fi
+  echo "$relays"
+}
+
+effective_kp_relays() {
+  local kp_relays="${PIKA_KEY_PACKAGE_RELAY_URLS:-${PIKA_KP_RELAY_URLS:-}}"
+  if [ -z "${kp_relays:-}" ]; then kp_relays="$(default_kp_relays)"; fi
+  echo "$kp_relays"
+}
+
+env_json_for_device() {
+  if [ "${PIKA_NO_RELAY_OVERRIDE:-0}" = "1" ]; then
+    # Empty dict.
+    echo "{}"
+    return 0
+  fi
+  local relays kp_relays
+  relays="$(effective_relays)"
+  kp_relays="$(effective_kp_relays)"
+  python3 - <<PY
+import json
+print(json.dumps({
+  "PIKA_RELAY_URLS": "${relays}",
+  "PIKA_KEY_PACKAGE_RELAY_URLS": "${kp_relays}",
+}))
+PY
+}
+
 # Fail fast if iOS Simulator runtimes/devices are missing.
+if [ "$MODE" = "device" ]; then
+  DEV_DIR="$(ls -d /Applications/Xcode*.app/Contents/Developer 2>/dev/null | sort | tail -n 1 || true)"
+  if [ -z "${DEV_DIR:-}" ]; then
+    echo "error: Xcode not found under /Applications" >&2
+    exit 1
+  fi
+
+  if [ -z "${IOS_TEAM_ID:-}" ]; then
+    echo "error: PIKA_IOS_DEVELOPMENT_TEAM is required for --device" >&2
+    echo "hint: add this to .env (gitignored) to make device runs one-command:" >&2
+    echo "  PIKA_IOS_DEVELOPMENT_TEAM=YOUR_TEAM_ID" >&2
+    echo "optional: if signing fails due to bundle id, set:" >&2
+    echo "  PIKA_IOS_BUNDLE_ID=com.your.bundle" >&2
+    exit 2
+  fi
+
+  UDID="${PIKA_IOS_DEVICE_UDID:-}"
+  if [ -z "${UDID:-}" ]; then
+    UDID="$(choose_device_udid)"
+  fi
+  if [ -z "${UDID:-}" ]; then
+    echo "error: could not determine a connected iPhone UDID (set PIKA_IOS_DEVICE_UDID)" >&2
+    exit 1
+  fi
+
+  # Build core xcframework + (re)generate the project.
+  just ios-xcframework ios-xcodeproj
+
+  # Build signed device .app (must unset LD/CC/CXX inside Nix shells).
+  signing_settings=()
+  signing_settings+=("PRODUCT_BUNDLE_IDENTIFIER=$IOS_BUNDLE_ID")
+  signing_settings+=("DEVELOPMENT_TEAM=$IOS_TEAM_ID")
+  signing_settings+=("CODE_SIGN_STYLE=Automatic")
+
+  env -u LD -u CC -u CXX DEVELOPER_DIR="$DEV_DIR" xcodebuild \
+    -project ios/Pika.xcodeproj \
+    -scheme Pika \
+    -configuration Debug \
+    -sdk iphoneos \
+    -destination "id=$UDID" \
+    -derivedDataPath ios/build-device \
+    -allowProvisioningUpdates \
+    "${signing_settings[@]}" \
+    build
+
+  app_path="ios/build-device/Build/Products/Debug-iphoneos/Pika.app"
+  if [ ! -d "$app_path" ]; then
+    echo "error: missing built app at $app_path" >&2
+    exit 1
+  fi
+
+  echo "installing app to device: $UDID"
+  DEVELOPER_DIR="$DEV_DIR" xcrun devicectl device install app -d "$UDID" "$app_path"
+
+  env_json="$(env_json_for_device)"
+
+  wait_for_unlocked() {
+    # devicectl refuses to launch while locked; poll lock state for a short window so
+    # `just run-ios` succeeds as soon as you unlock the device.
+    local json tmp locked
+    tmp="$(mktemp)"
+    for i in $(seq 1 120); do
+      rm -f "$tmp" >/dev/null 2>&1 || true
+      if DEVELOPER_DIR="$DEV_DIR" xcrun devicectl device info lockState -d "$UDID" --json-output "$tmp" >/dev/null 2>&1; then
+        locked="$(python3 - <<PY 2>/dev/null || true
+import json
+p="${tmp}"
+try:
+  obj=json.load(open(p))
+  # Best-effort: handle a few likely shapes.
+  def find_locked(o):
+    if isinstance(o, dict):
+      for k,v in o.items():
+        if k.lower() in ("locked","islocked","devicelocked"):
+          return v
+        r=find_locked(v)
+        if r is not None: return r
+    if isinstance(o, list):
+      for it in o:
+        r=find_locked(it)
+        if r is not None: return r
+    return None
+  v=find_locked(obj)
+  if v is True: print("1")
+  elif v is False: print("0")
+except Exception:
+  pass
+PY
+)"
+        if [ "$locked" = "0" ]; then
+          rm -f "$tmp" >/dev/null 2>&1 || true
+          return 0
+        fi
+      fi
+      if [ "$i" = "1" ]; then
+        echo "waiting for device unlock (udid=$UDID)..." >&2
+      fi
+      sleep 1
+    done
+    rm -f "$tmp" >/dev/null 2>&1 || true
+    return 1
+  }
+
+  if ! wait_for_unlocked; then
+    echo "error: device appears locked; unlock it and re-run" >&2
+    exit 1
+  fi
+
+  if [ "$CONSOLE" = "1" ]; then
+    echo "launching $IOS_BUNDLE_ID (console attached)"
+    DEVELOPER_DIR="$DEV_DIR" xcrun devicectl device process launch -d "$UDID" \
+      --environment-variables "$env_json" \
+      --terminate-existing \
+      --console \
+      "$IOS_BUNDLE_ID"
+  else
+    echo "launching $IOS_BUNDLE_ID"
+    DEVELOPER_DIR="$DEV_DIR" xcrun devicectl device process launch -d "$UDID" \
+      --environment-variables "$env_json" \
+      --terminate-existing \
+      "$IOS_BUNDLE_ID" >/dev/null
+    echo "ok: ios app launched (device)"
+  fi
+  exit 0
+fi
+
+# Simulator mode.
 udid="$(./tools/ios-sim-ensure | sed -n 's/^ok: ios simulator ready (udid=\(.*\))$/\1/p')"
 if [ -z "${udid:-}" ]; then
   echo "error: could not determine simulator udid" >&2
@@ -30,33 +325,15 @@ echo "installing app to simulator: $udid"
 ./tools/simctl install "$udid" "$app_path"
 
 maybe_write_config() {
-  # Dev-friendly defaults:
-  # - If no relay env vars are provided, we write a default relay config that works with
-  #   the deployed OpenClaw/Marmot bot (public relays + separate key-package relays).
-  #
-  # Override:
-  #   PIKA_RELAY_URLS="ws://127.0.0.1:18080" just run-ios
-  #   PIKA_KEY_PACKAGE_RELAY_URLS="wss://..." just run-ios
-  #
-  # Disable:
-  #   PIKA_NO_RELAY_OVERRIDE=1 just run-ios
-  #
   # iOS passes `applicationSupportDirectory` as Rust `data_dir`, so we write:
   #   <app data container>/Library/Application Support/pika_config.json
   if [ "${PIKA_NO_RELAY_OVERRIDE:-0}" = "1" ]; then
     return 0
   fi
 
-  local relays="${PIKA_RELAY_URLS:-${PIKA_RELAY_URL:-}}"
-  local kp_relays="${PIKA_KEY_PACKAGE_RELAY_URLS:-${PIKA_KP_RELAY_URLS:-}}"
-
-  # Defaults aimed at quick-start interop with the deployed Rust bot.
-  if [ -z "${relays:-}" ]; then
-    relays="wss://relay.primal.net,wss://nos.lol,wss://relay.damus.io"
-  fi
-  if [ -z "${kp_relays:-}" ]; then
-    kp_relays="wss://nostr-pub.wellorder.net,wss://nostr-01.yakihonne.com,wss://nostr-02.yakihonne.com,wss://relay.satlantis.io"
-  fi
+  local relays kp_relays
+  relays="$(effective_relays)"
+  kp_relays="$(effective_kp_relays)"
 
   local json
   json="$(
@@ -71,9 +348,9 @@ PY
   )"
 
   local container support_dir
-  container="$(./tools/simctl get_app_container "$udid" com.pika.app data 2>/dev/null | tr -d '\r' | tail -n 1)"
+  container="$(./tools/simctl get_app_container "$udid" "$IOS_BUNDLE_ID" data 2>/dev/null | tr -d '\r' | tail -n 1)"
   if [ -z "${container:-}" ] || [ ! -d "$container" ]; then
-    echo "error: failed to locate simulator app container for com.pika.app (udid=$udid)" >&2
+    echo "error: failed to locate simulator app container for $IOS_BUNDLE_ID (udid=$udid)" >&2
     exit 1
   fi
 
@@ -85,10 +362,10 @@ PY
 
 maybe_write_config
 
-echo "launching com.pika.app"
-./tools/simctl launch "$udid" com.pika.app
+echo "launching $IOS_BUNDLE_ID"
+./tools/simctl launch "$udid" "$IOS_BUNDLE_ID"
 
 # Bring Simulator app to the foreground.
 open -a Simulator >/dev/null 2>&1 || true
 
-echo "ok: ios app launched"
+echo "ok: ios app launched (simulator)"

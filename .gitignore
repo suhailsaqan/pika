@@ -9,6 +9,7 @@ android/local.properties
 # iOS
 ios/.build/
 ios/build/
+ios/build-device/
 ios/Frameworks/
 ios/**/xcuserdata/
 
@@ -25,4 +26,5 @@ worktrees
 # Local dev artifacts
 .pika-cli-test-nsec
 .env
+.env.local
 .cargo/config.toml
