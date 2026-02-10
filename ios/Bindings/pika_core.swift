@@ -1258,21 +1258,14 @@ public func FfiConverterTypeAppAction_lower(_ value: AppAction) -> RustBuffer {
 
 public enum AppUpdate: Equatable, Hashable {
     
+    /**
+     * Primary update stream: always send a full state snapshot.
+     *
+     * MVP tradeoff: simplest reconciliation story on iOS/Android; can be made more granular later.
+     */
     case fullState(AppState
     )
     case accountCreated(rev: UInt64, nsec: String, pubkey: String, npub: String
-    )
-    case routerChanged(rev: UInt64, router: Router
-    )
-    case authChanged(rev: UInt64, auth: AuthState
-    )
-    case busyChanged(rev: UInt64, busy: BusyState
-    )
-    case chatListChanged(rev: UInt64, chatList: [ChatSummary]
-    )
-    case currentChatChanged(rev: UInt64, currentChat: ChatViewState?
-    )
-    case toastChanged(rev: UInt64, toast: String?
     )
 
 
@@ -1301,24 +1294,6 @@ public struct FfiConverterTypeAppUpdate: FfiConverterRustBuffer {
         case 2: return .accountCreated(rev: try FfiConverterUInt64.read(from: &buf), nsec: try FfiConverterString.read(from: &buf), pubkey: try FfiConverterString.read(from: &buf), npub: try FfiConverterString.read(from: &buf)
         )
         
-        case 3: return .routerChanged(rev: try FfiConverterUInt64.read(from: &buf), router: try FfiConverterTypeRouter.read(from: &buf)
-        )
-        
-        case 4: return .authChanged(rev: try FfiConverterUInt64.read(from: &buf), auth: try FfiConverterTypeAuthState.read(from: &buf)
-        )
-        
-        case 5: return .busyChanged(rev: try FfiConverterUInt64.read(from: &buf), busy: try FfiConverterTypeBusyState.read(from: &buf)
-        )
-        
-        case 6: return .chatListChanged(rev: try FfiConverterUInt64.read(from: &buf), chatList: try FfiConverterSequenceTypeChatSummary.read(from: &buf)
-        )
-        
-        case 7: return .currentChatChanged(rev: try FfiConverterUInt64.read(from: &buf), currentChat: try FfiConverterOptionTypeChatViewState.read(from: &buf)
-        )
-        
-        case 8: return .toastChanged(rev: try FfiConverterUInt64.read(from: &buf), toast: try FfiConverterOptionString.read(from: &buf)
-        )
-        
         default: throw UniffiInternalError.unexpectedEnumCase
         }
     }
@@ -1338,42 +1313,6 @@ public struct FfiConverterTypeAppUpdate: FfiConverterRustBuffer {
             FfiConverterString.write(nsec, into: &buf)
             FfiConverterString.write(pubkey, into: &buf)
             FfiConverterString.write(npub, into: &buf)
-            
-        
-        case let .routerChanged(rev,router):
-            writeInt(&buf, Int32(3))
-            FfiConverterUInt64.write(rev, into: &buf)
-            FfiConverterTypeRouter.write(router, into: &buf)
-            
-        
-        case let .authChanged(rev,auth):
-            writeInt(&buf, Int32(4))
-            FfiConverterUInt64.write(rev, into: &buf)
-            FfiConverterTypeAuthState.write(auth, into: &buf)
-            
-        
-        case let .busyChanged(rev,busy):
-            writeInt(&buf, Int32(5))
-            FfiConverterUInt64.write(rev, into: &buf)
-            FfiConverterTypeBusyState.write(busy, into: &buf)
-            
-        
-        case let .chatListChanged(rev,chatList):
-            writeInt(&buf, Int32(6))
-            FfiConverterUInt64.write(rev, into: &buf)
-            FfiConverterSequenceTypeChatSummary.write(chatList, into: &buf)
-            
-        
-        case let .currentChatChanged(rev,currentChat):
-            writeInt(&buf, Int32(7))
-            FfiConverterUInt64.write(rev, into: &buf)
-            FfiConverterOptionTypeChatViewState.write(currentChat, into: &buf)
-            
-        
-        case let .toastChanged(rev,toast):
-            writeInt(&buf, Int32(8))
-            FfiConverterUInt64.write(rev, into: &buf)
-            FfiConverterOptionString.write(toast, into: &buf)
             
         }
     }

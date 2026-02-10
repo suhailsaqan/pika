@@ -7,8 +7,6 @@ final class AppManager: AppReconciler {
     let rust: FfiApp
     var state: AppState
     private var lastRevApplied: UInt64
-    private var resyncInFlight: Bool = false
-    private var maxRevSeenDuringResync: UInt64 = 0
 
     private let nsecStore = KeychainNsecStore()
 
@@ -90,22 +88,8 @@ final class AppManager: AppReconciler {
             }
         }
 
-        // After a resync, older updates can still be in-flight on the MainActor queue.
-        // Drop them. Only treat *forward* gaps as a reason to resync.
-        if updateRev <= lastRevApplied {
-            return
-        }
-        // While resyncing, drop updates but remember the newest rev we've observed so we can
-        // resync again if the snapshot is behind (prevents falling permanently behind).
-        if resyncInFlight {
-            maxRevSeenDuringResync = max(maxRevSeenDuringResync, updateRev)
-            return
-        }
-        if updateRev > lastRevApplied + 1 {
-            maxRevSeenDuringResync = max(maxRevSeenDuringResync, updateRev)
-            requestResync()
-            return
-        }
+        // The stream is full-state snapshots; drop anything stale.
+        if updateRev <= lastRevApplied { return }
 
         lastRevApplied = updateRev
         switch update {
@@ -117,46 +101,6 @@ final class AppManager: AppReconciler {
                 nsecStore.setNsec(nsec)
             }
             state.rev = updateRev
-        case .routerChanged(_, let router):
-            state.router = router
-            state.rev = updateRev
-        case .authChanged(_, let auth):
-            state.auth = auth
-            state.rev = updateRev
-        case .busyChanged(_, let busy):
-            state.busy = busy
-            state.rev = updateRev
-        case .chatListChanged(_, let list):
-            state.chatList = list
-            state.rev = updateRev
-        case .currentChatChanged(_, let chat):
-            state.currentChat = chat
-            state.rev = updateRev
-        case .toastChanged(_, let toast):
-            state.toast = toast
-            state.rev = updateRev
-        }
-    }
-
-    private func requestResync() {
-        if resyncInFlight { return }
-        resyncInFlight = true
-        Task.detached(priority: .userInitiated) { [rust] in
-            let snapshot = rust.state()
-            await MainActor.run {
-                self.state = snapshot
-                self.lastRevApplied = max(self.lastRevApplied, snapshot.rev)
-                let maxSeen = self.maxRevSeenDuringResync
-                self.maxRevSeenDuringResync = 0
-                self.resyncInFlight = false
-
-                // If newer updates arrived while the snapshot was in-flight and the snapshot is
-                // behind, resync again (coalesced) rather than dropping ourselves out of date.
-                if maxSeen > snapshot.rev {
-                    self.maxRevSeenDuringResync = maxSeen
-                    self.requestResync()
-                }
-            }
         }
     }
 
@@ -187,12 +131,6 @@ private extension AppUpdate {
         switch self {
         case .fullState(let s): return s.rev
         case .accountCreated(let rev, _, _, _): return rev
-        case .routerChanged(let rev, _): return rev
-        case .authChanged(let rev, _): return rev
-        case .busyChanged(let rev, _): return rev
-        case .chatListChanged(let rev, _): return rev
-        case .currentChatChanged(let rev, _): return rev
-        case .toastChanged(let rev, _): return rev
         }
     }
 }

@@ -47,3 +47,33 @@ pub enum AppAction {
     // Lifecycle
     Foregrounded,
 }
+
+impl AppAction {
+    /// Log-safe action tag (never includes secrets like `nsec`).
+    pub fn tag(&self) -> &'static str {
+        match self {
+            // Auth
+            AppAction::CreateAccount => "CreateAccount",
+            AppAction::Login { .. } => "Login",
+            AppAction::RestoreSession { .. } => "RestoreSession",
+            AppAction::Logout => "Logout",
+
+            // Navigation
+            AppAction::PushScreen { .. } => "PushScreen",
+            AppAction::UpdateScreenStack { .. } => "UpdateScreenStack",
+
+            // Chat
+            AppAction::CreateChat { .. } => "CreateChat",
+            AppAction::SendMessage { .. } => "SendMessage",
+            AppAction::RetryMessage { .. } => "RetryMessage",
+            AppAction::OpenChat { .. } => "OpenChat",
+            AppAction::LoadOlderMessages { .. } => "LoadOlderMessages",
+
+            // UI
+            AppAction::ClearToast => "ClearToast",
+
+            // Lifecycle
+            AppAction::Foregrounded => "Foregrounded",
+        }
+    }
+}

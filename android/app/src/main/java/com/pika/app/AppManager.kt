@@ -19,8 +19,6 @@ class AppManager private constructor(context: Context) : AppReconciler {
     private val rust: FfiApp
     private var lastRevApplied: ULong = 0UL
     private val listening = AtomicBoolean(false)
-    private val resyncing = AtomicBoolean(false)
-    private var maxRevSeenDuringResync: ULong = 0UL
 
     var state: AppState by mutableStateOf(
         AppState(
@@ -95,24 +93,8 @@ class AppManager private constructor(context: Context) : AppReconciler {
                 }
             }
 
-            // After a resync, older updates can still be in-flight on the main handler queue.
-            // Drop them. Only treat *forward* gaps as a reason to resync.
+            // The stream is full-state snapshots; drop anything stale.
             if (updateRev <= lastRevApplied) return@post
-            // While resyncing, drop updates but remember the newest rev we've observed so we can
-            // resync again if the snapshot is behind (prevents falling permanently behind).
-            if (resyncing.get()) {
-                if (updateRev > maxRevSeenDuringResync) {
-                    maxRevSeenDuringResync = updateRev
-                }
-                return@post
-            }
-            if (updateRev > lastRevApplied + 1UL) {
-                if (updateRev > maxRevSeenDuringResync) {
-                    maxRevSeenDuringResync = updateRev
-                }
-                requestResync()
-                return@post
-            }
 
             lastRevApplied = updateRev
             when (update) {
@@ -124,51 +106,14 @@ class AppManager private constructor(context: Context) : AppReconciler {
                     }
                     state = state.copy(rev = updateRev)
                 }
-                is AppUpdate.RouterChanged -> state = state.copy(rev = updateRev, router = update.router)
-                is AppUpdate.AuthChanged -> state = state.copy(rev = updateRev, auth = update.auth)
-                is AppUpdate.BusyChanged -> state = state.copy(rev = updateRev, busy = update.busy)
-                is AppUpdate.ChatListChanged -> state = state.copy(rev = updateRev, chatList = update.chatList)
-                is AppUpdate.CurrentChatChanged -> state = state.copy(rev = updateRev, currentChat = update.currentChat)
-                is AppUpdate.ToastChanged -> {
-                    state = state.copy(rev = updateRev, toast = update.toast)
-                }
             }
         }
-    }
-
-    private fun requestResync() {
-        if (!resyncing.compareAndSet(false, true)) return
-        Thread {
-            val snapshot = rust.state()
-            mainHandler.post {
-                state = snapshot
-                if (snapshot.rev > lastRevApplied) {
-                    lastRevApplied = snapshot.rev
-                }
-                val maxSeen = maxRevSeenDuringResync
-                maxRevSeenDuringResync = 0UL
-                resyncing.set(false)
-
-                // If newer updates arrived while the snapshot was in-flight and the snapshot is
-                // behind, resync again (coalesced) rather than dropping ourselves out of date.
-                if (maxSeen > snapshot.rev) {
-                    maxRevSeenDuringResync = maxSeen
-                    requestResync()
-                }
-            }
-        }.start()
     }
 
     private fun AppUpdate.rev(): ULong =
         when (this) {
             is AppUpdate.FullState -> this.v1.rev
             is AppUpdate.AccountCreated -> this.rev
-            is AppUpdate.RouterChanged -> this.rev
-            is AppUpdate.AuthChanged -> this.rev
-            is AppUpdate.BusyChanged -> this.rev
-            is AppUpdate.ChatListChanged -> this.rev
-            is AppUpdate.CurrentChatChanged -> this.rev
-            is AppUpdate.ToastChanged -> this.rev
         }
 
     companion object {

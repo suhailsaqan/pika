@@ -2105,6 +2105,11 @@ public object FfiConverterTypeAppAction : FfiConverterRustBuffer<AppAction>{
 
 sealed class AppUpdate {
     
+    /**
+     * Primary update stream: always send a full state snapshot.
+     *
+     * MVP tradeoff: simplest reconciliation story on iOS/Android; can be made more granular later.
+     */
     data class FullState(
         val v1: com.pika.app.rust.AppState) : AppUpdate()
         
@@ -2119,66 +2124,6 @@ sealed class AppUpdate {
         val `nsec`: kotlin.String, 
         val `pubkey`: kotlin.String, 
         val `npub`: kotlin.String) : AppUpdate()
-        
-    {
-        
-
-        companion object
-    }
-    
-    data class RouterChanged(
-        val `rev`: kotlin.ULong, 
-        val `router`: com.pika.app.rust.Router) : AppUpdate()
-        
-    {
-        
-
-        companion object
-    }
-    
-    data class AuthChanged(
-        val `rev`: kotlin.ULong, 
-        val `auth`: com.pika.app.rust.AuthState) : AppUpdate()
-        
-    {
-        
-
-        companion object
-    }
-    
-    data class BusyChanged(
-        val `rev`: kotlin.ULong, 
-        val `busy`: com.pika.app.rust.BusyState) : AppUpdate()
-        
-    {
-        
-
-        companion object
-    }
-    
-    data class ChatListChanged(
-        val `rev`: kotlin.ULong, 
-        val `chatList`: List<com.pika.app.rust.ChatSummary>) : AppUpdate()
-        
-    {
-        
-
-        companion object
-    }
-    
-    data class CurrentChatChanged(
-        val `rev`: kotlin.ULong, 
-        val `currentChat`: com.pika.app.rust.ChatViewState?) : AppUpdate()
-        
-    {
-        
-
-        companion object
-    }
-    
-    data class ToastChanged(
-        val `rev`: kotlin.ULong, 
-        val `toast`: kotlin.String?) : AppUpdate()
         
     {
         
@@ -2211,30 +2156,6 @@ public object FfiConverterTypeAppUpdate : FfiConverterRustBuffer<AppUpdate>{
                 FfiConverterString.read(buf),
                 FfiConverterString.read(buf),
                 )
-            3 -> AppUpdate.RouterChanged(
-                FfiConverterULong.read(buf),
-                FfiConverterTypeRouter.read(buf),
-                )
-            4 -> AppUpdate.AuthChanged(
-                FfiConverterULong.read(buf),
-                FfiConverterTypeAuthState.read(buf),
-                )
-            5 -> AppUpdate.BusyChanged(
-                FfiConverterULong.read(buf),
-                FfiConverterTypeBusyState.read(buf),
-                )
-            6 -> AppUpdate.ChatListChanged(
-                FfiConverterULong.read(buf),
-                FfiConverterSequenceTypeChatSummary.read(buf),
-                )
-            7 -> AppUpdate.CurrentChatChanged(
-                FfiConverterULong.read(buf),
-                FfiConverterOptionalTypeChatViewState.read(buf),
-                )
-            8 -> AppUpdate.ToastChanged(
-                FfiConverterULong.read(buf),
-                FfiConverterOptionalString.read(buf),
-                )
             else -> throw RuntimeException("invalid enum value, something is very wrong!!")
         }
     }
@@ -2257,54 +2178,6 @@ public object FfiConverterTypeAppUpdate : FfiConverterRustBuffer<AppUpdate>{
                 + FfiConverterString.allocationSize(value.`npub`)
             )
         }
-        is AppUpdate.RouterChanged -> {
-            // Add the size for the Int that specifies the variant plus the size needed for all fields
-            (
-                4UL
-                + FfiConverterULong.allocationSize(value.`rev`)
-                + FfiConverterTypeRouter.allocationSize(value.`router`)
-            )
-        }
-        is AppUpdate.AuthChanged -> {
-            // Add the size for the Int that specifies the variant plus the size needed for all fields
-            (
-                4UL
-                + FfiConverterULong.allocationSize(value.`rev`)
-                + FfiConverterTypeAuthState.allocationSize(value.`auth`)
-            )
-        }
-        is AppUpdate.BusyChanged -> {
-            // Add the size for the Int that specifies the variant plus the size needed for all fields
-            (
-                4UL
-                + FfiConverterULong.allocationSize(value.`rev`)
-                + FfiConverterTypeBusyState.allocationSize(value.`busy`)
-            )
-        }
-        is AppUpdate.ChatListChanged -> {
-            // Add the size for the Int that specifies the variant plus the size needed for all fields
-            (
-                4UL
-                + FfiConverterULong.allocationSize(value.`rev`)
-                + FfiConverterSequenceTypeChatSummary.allocationSize(value.`chatList`)
-            )
-        }
-        is AppUpdate.CurrentChatChanged -> {
-            // Add the size for the Int that specifies the variant plus the size needed for all fields
-            (
-                4UL
-                + FfiConverterULong.allocationSize(value.`rev`)
-                + FfiConverterOptionalTypeChatViewState.allocationSize(value.`currentChat`)
-            )
-        }
-        is AppUpdate.ToastChanged -> {
-            // Add the size for the Int that specifies the variant plus the size needed for all fields
-            (
-                4UL
-                + FfiConverterULong.allocationSize(value.`rev`)
-                + FfiConverterOptionalString.allocationSize(value.`toast`)
-            )
-        }
     }
 
     override fun write(value: AppUpdate, buf: ByteBuffer) {
@@ -2320,42 +2193,6 @@ public object FfiConverterTypeAppUpdate : FfiConverterRustBuffer<AppUpdate>{
                 FfiConverterString.write(value.`nsec`, buf)
                 FfiConverterString.write(value.`pubkey`, buf)
                 FfiConverterString.write(value.`npub`, buf)
-                Unit
-            }
-            is AppUpdate.RouterChanged -> {
-                buf.putInt(3)
-                FfiConverterULong.write(value.`rev`, buf)
-                FfiConverterTypeRouter.write(value.`router`, buf)
-                Unit
-            }
-            is AppUpdate.AuthChanged -> {
-                buf.putInt(4)
-                FfiConverterULong.write(value.`rev`, buf)
-                FfiConverterTypeAuthState.write(value.`auth`, buf)
-                Unit
-            }
-            is AppUpdate.BusyChanged -> {
-                buf.putInt(5)
-                FfiConverterULong.write(value.`rev`, buf)
-                FfiConverterTypeBusyState.write(value.`busy`, buf)
-                Unit
-            }
-            is AppUpdate.ChatListChanged -> {
-                buf.putInt(6)
-                FfiConverterULong.write(value.`rev`, buf)
-                FfiConverterSequenceTypeChatSummary.write(value.`chatList`, buf)
-                Unit
-            }
-            is AppUpdate.CurrentChatChanged -> {
-                buf.putInt(7)
-                FfiConverterULong.write(value.`rev`, buf)
-                FfiConverterOptionalTypeChatViewState.write(value.`currentChat`, buf)
-                Unit
-            }
-            is AppUpdate.ToastChanged -> {
-                buf.putInt(8)
-                FfiConverterULong.write(value.`rev`, buf)
-                FfiConverterOptionalString.write(value.`toast`, buf)
                 Unit
             }
         }.let { /* this makes the `when` an expression, which ensures it is exhaustive */ }

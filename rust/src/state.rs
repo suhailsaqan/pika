@@ -1,5 +1,3 @@
-use rand::RngCore;
-
 #[derive(uniffi::Record, Clone, Debug)]
 pub struct AppState {
     pub rev: u64,
@@ -112,17 +110,4 @@ pub fn now_seconds() -> i64 {
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs() as i64
-}
-
-pub fn generate_id(prefix: &str) -> String {
-    let mut b = [0u8; 16];
-    rand::thread_rng().fill_bytes(&mut b);
-    format!("{prefix}_{}", hex::encode(b))
-}
-
-pub fn stable_hash(s: &str) -> String {
-    use std::hash::{Hash, Hasher};
-    let mut h = std::collections::hash_map::DefaultHasher::new();
-    s.hash(&mut h);
-    format!("{:016x}", h.finish())
 }

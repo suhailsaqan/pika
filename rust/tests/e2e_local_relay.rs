@@ -688,7 +688,7 @@ fn alice_sends_bob_receives_over_local_relay() {
                 .unwrap()
                 .iter()
                 .filter_map(|u| match u {
-                    AppUpdate::ToastChanged { toast: Some(t), .. } => Some(t.clone()),
+                    AppUpdate::FullState(s) => s.toast.clone(),
                     _ => None,
                 })
                 .collect();

@@ -1,38 +1,17 @@
-use crate::state::{AppState, AuthState, BusyState, ChatSummary, ChatViewState, Router};
+use crate::state::AppState;
 use crate::AppAction;
 
 #[derive(uniffi::Enum, Clone, Debug)]
 pub enum AppUpdate {
+    /// Primary update stream: always send a full state snapshot.
+    ///
+    /// MVP tradeoff: simplest reconciliation story on iOS/Android; can be made more granular later.
     FullState(AppState),
     AccountCreated {
         rev: u64,
         nsec: String,
         pubkey: String,
         npub: String,
-    },
-    RouterChanged {
-        rev: u64,
-        router: Router,
-    },
-    AuthChanged {
-        rev: u64,
-        auth: AuthState,
-    },
-    BusyChanged {
-        rev: u64,
-        busy: BusyState,
-    },
-    ChatListChanged {
-        rev: u64,
-        chat_list: Vec<ChatSummary>,
-    },
-    CurrentChatChanged {
-        rev: u64,
-        current_chat: Option<ChatViewState>,
-    },
-    ToastChanged {
-        rev: u64,
-        toast: Option<String>,
     },
 }
 
@@ -41,12 +20,6 @@ impl AppUpdate {
         match self {
             AppUpdate::FullState(s) => s.rev,
             AppUpdate::AccountCreated { rev, .. } => *rev,
-            AppUpdate::RouterChanged { rev, .. } => *rev,
-            AppUpdate::AuthChanged { rev, .. } => *rev,
-            AppUpdate::BusyChanged { rev, .. } => *rev,
-            AppUpdate::ChatListChanged { rev, .. } => *rev,
-            AppUpdate::CurrentChatChanged { rev, .. } => *rev,
-            AppUpdate::ToastChanged { rev, .. } => *rev,
         }
     }
 }
@@ -100,3 +73,4 @@ pub enum InternalEvent {
         group_sub: Option<nostr_sdk::prelude::SubscriptionId>,
     },
 }
+
