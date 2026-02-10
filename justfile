@@ -240,13 +240,13 @@ ios-manual-qa:
   @echo "Manual QA prompt: prompts/ios-agent-device-manual-qa.md"
   @echo "Tip: run `./tools/agent-device --platform ios open com.justinmoon.pika.dev` then follow the prompt."
 
-# Build, install, and launch Android app on connected device.
-run-android:
-  ./tools/run-android
+# Build, install, and launch Android app on emulator/device.
+run-android *ARGS:
+  ./tools/run-android {{ARGS}}
 
-# Build, install, and launch iOS app on simulator.
-run-ios:
-  ./tools/run-ios
+# Build, install, and launch iOS app on simulator/device.
+run-ios *ARGS:
+  ./tools/run-ios {{ARGS}}
 
 # Check iOS dev environment (Xcode, simulators, runtimes).
 doctor-ios:

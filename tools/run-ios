@@ -72,7 +72,7 @@ fi
 
 usage() {
   cat <<EOF
-usage: ./tools/run-ios [--sim|--device] [--console]
+usage: ./tools/run-ios [--sim|--device] [--console] [--udid <udid>] [--list-devices]
 
 Env:
   PIKA_IOS_BUNDLE_ID        (default: $IOS_BUNDLE_ID)
@@ -84,10 +84,52 @@ Env:
 EOF
 }
 
+list_connected_iphones() {
+  DEV_DIR="$(ls -d /Applications/Xcode*.app/Contents/Developer 2>/dev/null | sort | tail -n 1 || true)"
+  if [ -z "${DEV_DIR:-}" ]; then
+    echo "error: Xcode not found under /Applications" >&2
+    exit 1
+  fi
+  DEVELOPER_DIR="$DEV_DIR" xcrun xctrace list devices 2>/dev/null | awk '
+    $0 == "== Devices ==" { in_devices = 1; next }
+    $0 == "== Simulators ==" { in_devices = 0; next }
+    in_devices && $0 ~ /iPhone/ {
+      print $0
+    }
+  '
+}
+
+choose_device_udid() {
+  local lines count
+  lines="$(list_connected_iphones)"
+  count="$(echo "$lines" | sed '/^$/d' | wc -l | tr -d '[:space:]')"
+  if [ "${count:-0}" = "1" ]; then
+    echo "$lines" | sed -n 's/.*(\\([0-9A-Fa-f-]\\{25,\\}\\)).*/\\1/p'
+    return 0
+  fi
+  if [ "${count:-0}" -gt 1 ]; then
+    echo "error: multiple iPhones connected; choose one via --udid or PIKA_IOS_DEVICE_UDID:" >&2
+    echo "$lines" | sed '/^$/d' | sed 's/^/  /' >&2
+    exit 2
+  fi
+  echo ""
+}
+
 while [ $# -gt 0 ]; do
   case "$1" in
     --sim) MODE="sim" ;;
     --device) MODE="device" ;;
+    --udid)
+      shift
+      if [ $# -lt 1 ]; then echo "error: --udid requires a value" >&2; exit 2; fi
+      export PIKA_IOS_DEVICE_UDID="$1"
+      MODE="device"
+      ;;
+    --list-devices)
+      echo "iOS connected iPhones:"
+      list_connected_iphones | sed '/^$/d' | sed 's/^/  /'
+      exit 0
+      ;;
     --console) CONSOLE=1 ;;
     -h|--help) usage; exit 0 ;;
     *)
@@ -156,26 +198,7 @@ if [ "$MODE" = "device" ]; then
 
   UDID="${PIKA_IOS_DEVICE_UDID:-}"
   if [ -z "${UDID:-}" ]; then
-    udids="$(
-      DEVELOPER_DIR="$DEV_DIR" xcrun xctrace list devices 2>/dev/null | awk '
-        $0 == "== Devices ==" { in_devices = 1; next }
-        $0 == "== Simulators ==" { in_devices = 0; next }
-        in_devices && $0 ~ /iPhone/ {
-          if (match($0, /\([0-9A-Fa-f-]{25,}\)[[:space:]]*$/)) {
-            u = substr($0, RSTART + 1, RLENGTH - 2) # strip parens
-            print u
-          }
-        }
-      '
-    )"
-    count="$(echo "$udids" | sed '/^$/d' | wc -l | tr -d '[:space:]')"
-    if [ "${count:-0}" = "1" ]; then
-      UDID="$(echo "$udids" | sed '/^$/d' | head -n 1)"
-    elif [ "${count:-0}" -gt 1 ]; then
-      echo "error: multiple iPhones connected; set PIKA_IOS_DEVICE_UDID to choose one:" >&2
-      echo "$udids" | sed '/^$/d' | sed 's/^/  /' >&2
-      exit 2
-    fi
+    UDID="$(choose_device_udid)"
   fi
   if [ -z "${UDID:-}" ]; then
     echo "error: could not determine a connected iPhone UDID (set PIKA_IOS_DEVICE_UDID)" >&2
