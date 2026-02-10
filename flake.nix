@@ -61,6 +61,7 @@
             pkgs.jdk17_headless
             pkgs.just
             pkgs.nodejs_22
+            pkgs.python3
             pkgs.curl
             pkgs.git
             pkgs.cargo-ndk

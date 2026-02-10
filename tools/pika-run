@@ -1,0 +1,475 @@
+#!/usr/bin/env python3
+import argparse
+import json
+import os
+import re
+import subprocess
+import sys
+from pathlib import Path
+from typing import Any, Dict, List, Optional
+
+
+ROOT = Path(__file__).resolve().parent.parent
+
+
+class CliError(Exception):
+    def __init__(self, message: str, *, exit_code: int = 2, details: Optional[Dict[str, Any]] = None):
+        super().__init__(message)
+        self.message = message
+        self.exit_code = exit_code
+        self.details = details or {}
+
+
+def _strip_quotes(v: str) -> str:
+    v = v.strip()
+    if len(v) >= 2 and ((v[0] == v[-1] == '"') or (v[0] == v[-1] == "'")):
+        return v[1:-1]
+    return v
+
+
+def load_dotenv_defaults(root: Path) -> None:
+    # Dev-only config. `.env` and `.env.local` are gitignored.
+    # Rule: only fill missing env; never override already-set process env.
+    for rel in (".env", ".env.local"):
+        p = root / rel
+        if not p.exists():
+            continue
+        try:
+            for raw in p.read_text(encoding="utf-8").splitlines():
+                line = raw.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                k, v = line.split("=", 1)
+                k = k.strip()
+                if not k:
+                    continue
+                if k in os.environ:
+                    continue
+                os.environ[k] = _strip_quotes(v)
+        except Exception:
+            # Best-effort; do not make help/list-targets brittle.
+            continue
+
+
+def run(
+    argv: List[str],
+    *,
+    env: Optional[Dict[str, str]] = None,
+    capture: bool = False,
+    check: bool = False,
+    stdout=None,
+    stderr=None,
+) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        argv,
+        cwd=str(ROOT),
+        env=env,
+        text=True,
+        stdout=subprocess.PIPE if capture else stdout,
+        stderr=subprocess.PIPE if capture else stderr,
+        check=check,
+    )
+
+
+def _json_print(obj: Any) -> None:
+    sys.stdout.write(json.dumps(obj, sort_keys=True))
+    sys.stdout.write("\n")
+
+
+def _human_print_targets_ios(devs: List[Dict[str, Any]], sims: List[Dict[str, Any]]) -> None:
+    print("iOS targets:")
+    if devs:
+        print("  Devices:")
+        for d in devs:
+            os_s = d.get("os") or ""
+            print(f"    {d['udid']}  {d['name']}  ({os_s})")
+    else:
+        print("  Devices: (none)")
+    if sims:
+        print("  Simulators:")
+        for s in sims:
+            runtime = s.get("runtime") or s.get("os") or ""
+            state = s.get("state") or ""
+            print(f"    {s['udid']}  {s['name']}  ({runtime})  [{state}]")
+    else:
+        print("  Simulators: (none)")
+
+
+def _human_print_targets_android(items: List[Dict[str, Any]]) -> None:
+    print("Android targets:")
+    if not items:
+        print("  (none)")
+        return
+    for it in items:
+        extra = []
+        if it.get("model"):
+            extra.append(f"model={it['model']}")
+        if it.get("product"):
+            extra.append(f"product={it['product']}")
+        extra_s = (" " + " ".join(extra)) if extra else ""
+        print(f"  {it['type']}: {it['serial']}{extra_s}")
+
+
+_XCTRACE_LINE_RE = re.compile(r"^(?P<name>.+?)\s+\((?P<os>[^)]+)\)\s+\((?P<udid>[0-9A-Fa-f-]{25,})\)\s*$")
+
+
+def ios_connected_devices() -> List[Dict[str, Any]]:
+    # Uses xctrace output because it works without building and doesn't require extra deps.
+    cmd = ["./tools/xcrun", "xctrace", "list", "devices"]
+    p = run(cmd, capture=True)
+    if p.returncode != 0:
+        raise CliError(
+            "failed to list iOS devices (xcrun/xctrace)",
+            exit_code=1,
+            details={"cmd": " ".join(cmd), "stderr": (p.stderr or "").strip()},
+        )
+    lines = (p.stdout or "").splitlines()
+    in_devices = False
+    out: List[Dict[str, Any]] = []
+    for ln in lines:
+        if ln.strip() == "== Devices ==":
+            in_devices = True
+            continue
+        if ln.strip() == "== Simulators ==":
+            in_devices = False
+            continue
+        if not in_devices:
+            continue
+        if "iPhone" not in ln and "iPad" not in ln:
+            continue
+        m = _XCTRACE_LINE_RE.match(ln.strip())
+        if not m:
+            continue
+        out.append(
+            {
+                "kind": "device",
+                "udid": m.group("udid"),
+                "name": m.group("name"),
+                "os": m.group("os"),
+            }
+        )
+    out.sort(key=lambda d: (d.get("name") or "", d.get("udid") or ""))
+    return out
+
+
+def ios_simulators() -> List[Dict[str, Any]]:
+    cmd = ["./tools/simctl", "list", "-j", "devices", "available"]
+    p = run(cmd, capture=True)
+    if p.returncode != 0:
+        raise CliError(
+            "failed to list iOS simulators (simctl)",
+            exit_code=1,
+            details={"cmd": " ".join(cmd), "stderr": (p.stderr or "").strip()},
+        )
+    try:
+        j = json.loads(p.stdout or "{}")
+    except Exception as e:
+        raise CliError("failed to parse simctl JSON output", exit_code=1, details={"error": str(e)})
+
+    sims: List[Dict[str, Any]] = []
+    devices_by_rt = j.get("devices") or {}
+    for runtime, devs in devices_by_rt.items():
+        # Only iOS simulators; exclude tvOS/watchOS.
+        if "iOS" not in runtime:
+            continue
+        if not isinstance(devs, list):
+            continue
+        for d in devs:
+            if not isinstance(d, dict):
+                continue
+            if not d.get("isAvailable", True):
+                continue
+            udid = d.get("udid")
+            name = d.get("name")
+            state = d.get("state")
+            os_v = d.get("osVersion")
+            if not udid or not name:
+                continue
+            sims.append(
+                {
+                    "kind": "simulator",
+                    "udid": udid,
+                    "name": name,
+                    "state": state,
+                    "os": os_v,
+                    "runtime": runtime,
+                }
+            )
+    sims.sort(key=lambda s: (s.get("state") != "Booted", s.get("name") or "", s.get("udid") or ""))
+    return sims
+
+
+def android_targets() -> List[Dict[str, Any]]:
+    adb = os.environ.get("ADB") or "adb"
+    cmd = [adb, "devices", "-l"]
+    p = run(cmd, capture=True)
+    if p.returncode != 0:
+        raise CliError(
+            "failed to list android devices (adb)",
+            exit_code=1,
+            details={"cmd": " ".join(cmd), "stderr": (p.stderr or "").strip()},
+        )
+    out: List[Dict[str, Any]] = []
+    for ln in (p.stdout or "").splitlines():
+        ln = ln.strip()
+        if not ln or ln.startswith("List of devices"):
+            continue
+        parts = ln.split()
+        if len(parts) < 2:
+            continue
+        serial, state = parts[0], parts[1]
+        if state != "device":
+            continue
+        typ = "emulator" if serial.startswith("emulator-") else "device"
+        fields = {"serial": serial, "state": state, "type": typ}
+        for tok in parts[2:]:
+            if ":" in tok:
+                k, v = tok.split(":", 1)
+                if k and v:
+                    fields[k] = v
+        out.append(
+            {
+                "serial": fields["serial"],
+                "type": fields["type"],
+                "model": fields.get("model"),
+                "product": fields.get("product"),
+                "device": fields.get("device"),
+            }
+        )
+    out.sort(key=lambda d: (d.get("type") != "emulator", d.get("serial") or ""))
+    return out
+
+
+def ios_choose_device_udid(explicit: Optional[str]) -> str:
+    if explicit:
+        return explicit
+    env_udid = os.environ.get("PIKA_IOS_DEVICE_UDID") or ""
+    if env_udid:
+        return env_udid
+    devs = ios_connected_devices()
+    if len(devs) == 1:
+        return devs[0]["udid"]
+    if len(devs) > 1:
+        raise CliError(
+            "multiple iOS devices connected; choose one via --udid",
+            exit_code=2,
+            details={"choices": [{"udid": d["udid"], "name": d["name"], "os": d.get("os")} for d in devs]},
+        )
+    raise CliError("no iOS device connected", exit_code=2)
+
+
+def ios_ensure_sim_udid(explicit: Optional[str]) -> str:
+    if explicit:
+        return explicit
+    # Match the existing repo behavior: deterministic "Pika iPhone 15" simulator.
+    cmd = ["./tools/ios-sim-ensure"]
+    p = run(cmd, capture=True)
+    if p.returncode != 0:
+        raise CliError("failed to ensure iOS simulator", exit_code=1, details={"cmd": " ".join(cmd), "stderr": (p.stderr or "").strip()})
+    m = re.search(r"^ok: ios simulator ready \(udid=(?P<udid>[^)]+)\)\s*$", p.stdout or "", re.M)
+    if not m:
+        raise CliError("failed to parse iOS simulator UDID from ios-sim-ensure output", exit_code=1)
+    return m.group("udid").strip()
+
+
+def cmd_ios_list_targets(args: argparse.Namespace) -> int:
+    devs = ios_connected_devices()
+    sims = ios_simulators()
+    if args.json:
+        _json_print({"ok": True, "platform": "ios", "devices": devs, "simulators": sims})
+        return 0
+    _human_print_targets_ios(devs, sims)
+    return 0
+
+
+def cmd_android_list_targets(args: argparse.Namespace) -> int:
+    items = android_targets()
+    if args.json:
+        _json_print({"ok": True, "platform": "android", "targets": items})
+        return 0
+    _human_print_targets_android(items)
+    return 0
+
+
+def cmd_ios_run(args: argparse.Namespace) -> int:
+    mode = "device" if args.device else "sim"
+    bundle_id = args.bundle_id or os.environ.get("PIKA_IOS_BUNDLE_ID") or "com.justinmoon.pika.dev"
+
+    env = dict(os.environ)
+    env["PIKA_IOS_BUNDLE_ID"] = bundle_id
+    if args.no_relay_override:
+        env["PIKA_NO_RELAY_OVERRIDE"] = "1"
+    if args.console:
+        env["PIKA_IOS_CONSOLE"] = "1"
+
+    if mode == "device":
+        udid = ios_choose_device_udid(args.udid)
+        argv = ["./tools/run-ios", "--device", "--udid", udid]
+        if args.console:
+            argv.append("--console")
+    else:
+        udid = ios_ensure_sim_udid(args.udid)
+        # tools/run-ios gains support for this env var; don't pass --udid (it means device there).
+        env["PIKA_IOS_SIM_UDID"] = udid
+        argv = ["./tools/run-ios", "--sim"]
+
+    # Required user-facing output surface (even in non-json mode).
+    if not args.json:
+        print(f"mode={mode} udid={udid} bundle_id={bundle_id}")
+        return subprocess.call(argv, cwd=str(ROOT), env=env)
+
+    # Keep stdout clean for JSON; send subprocess logs to stderr.
+    p = subprocess.Popen(argv, cwd=str(ROOT), env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    assert p.stdout is not None
+    tail: List[str] = []
+    for line in p.stdout:
+        sys.stderr.write(line)
+        tail.append(line.rstrip("\n"))
+        if len(tail) > 80:
+            tail = tail[-80:]
+    rc = p.wait()
+    if rc == 0:
+        _json_print(
+            {
+                "ok": True,
+                "platform": "ios",
+                "mode": mode,
+                "udid": udid,
+                "bundle_id": bundle_id,
+                "pid": None,
+            }
+        )
+        return 0
+    _json_print(
+        {
+            "ok": False,
+            "platform": "ios",
+            "mode": mode,
+            "udid": udid,
+            "bundle_id": bundle_id,
+            "error": {"exit_code": rc, "tail": tail[-20:]},
+        }
+    )
+    return rc
+
+
+def cmd_android_run(args: argparse.Namespace) -> int:
+    env = dict(os.environ)
+    if args.no_relay_override:
+        env["PIKA_NO_RELAY_OVERRIDE"] = "1"
+    if args.app_id:
+        env["PIKA_ANDROID_APP_ID"] = args.app_id
+    if args.adb_reverse:
+        env["PIKA_ADB_REVERSE_PORTS"] = args.adb_reverse
+
+    argv = ["./tools/run-android"]
+    if args.emulator:
+        argv.append("--emulator")
+    if args.device:
+        argv.append("--device")
+    if args.serial:
+        argv += ["--serial", args.serial]
+
+    if not args.json:
+        return subprocess.call(argv, cwd=str(ROOT), env=env)
+
+    p = subprocess.Popen(argv, cwd=str(ROOT), env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    assert p.stdout is not None
+    out_lines: List[str] = []
+    for line in p.stdout:
+        sys.stderr.write(line)
+        out_lines.append(line.rstrip("\n"))
+        if len(out_lines) > 500:
+            out_lines = out_lines[-500:]
+    rc = p.wait()
+
+    serial = None
+    typ = None
+    for ln in out_lines:
+        m = re.search(r"^using android (emulator|device):\s+(?P<serial>.+)\s*$", ln)
+        if m:
+            typ = m.group(1)
+            serial = m.group("serial").strip()
+            break
+
+    if rc == 0:
+        _json_print({"ok": True, "platform": "android", "serial": serial, "type": typ})
+        return 0
+    _json_print({"ok": False, "platform": "android", "serial": serial, "type": typ, "error": {"exit_code": rc, "tail": out_lines[-20:]}})
+    return rc
+
+
+def build_parser() -> argparse.ArgumentParser:
+    json_parent = argparse.ArgumentParser(add_help=False)
+    json_parent.add_argument("--json", action="store_true", help="Machine-readable output (where supported).")
+
+    p = argparse.ArgumentParser(prog="tools/pika-run", description="Canonical runner CLI for Pika (iOS + Android).")
+    sub = p.add_subparsers(dest="platform", required=True)
+
+    ios = sub.add_parser("ios", help="iOS targets and runner")
+    ios_sub = ios.add_subparsers(dest="cmd", required=True)
+    ios_list = ios_sub.add_parser("list-targets", parents=[json_parent], help="List connected iOS devices and available simulators")
+    ios_list.set_defaults(func=cmd_ios_list_targets)
+
+    ios_run = ios_sub.add_parser("run", parents=[json_parent], help="Build/install/launch iOS app")
+    m = ios_run.add_mutually_exclusive_group()
+    m.add_argument("--sim", action="store_true", help="Run on iOS Simulator (default)")
+    m.add_argument("--device", action="store_true", help="Run on a physical iOS device")
+    ios_run.add_argument("--udid", help="Target UDID (device or simulator depending on mode)")
+    ios_run.add_argument("--console", action="store_true", help="Attach device console (device mode)")
+    ios_run.add_argument("--no-relay-override", action="store_true", help="Disable writing dev relay config")
+    ios_run.add_argument("--bundle-id", help="Override iOS bundle id (default debug id)")
+    ios_run.set_defaults(func=cmd_ios_run)
+
+    android = sub.add_parser("android", help="Android targets and runner")
+    android_sub = android.add_subparsers(dest="cmd", required=True)
+    android_list = android_sub.add_parser("list-targets", parents=[json_parent], help="List connected Android devices/emulators")
+    android_list.set_defaults(func=cmd_android_list_targets)
+
+    android_run = android_sub.add_parser("run", parents=[json_parent], help="Build/install/launch Android app")
+    m2 = android_run.add_mutually_exclusive_group()
+    m2.add_argument("--emulator", action="store_true", help="Prefer emulator (default)")
+    m2.add_argument("--device", action="store_true", help="Prefer physical device")
+    android_run.add_argument("--serial", help="adb serial to target")
+    android_run.add_argument("--app-id", help="Override application id (defaults to debug id)")
+    android_run.add_argument("--adb-reverse", help="Comma-separated adb reverse ports (e.g. 18080:32820,9090)")
+    android_run.add_argument("--no-relay-override", action="store_true", help="Disable writing dev relay config")
+    android_run.set_defaults(func=cmd_android_run)
+
+    return p
+
+
+def main(argv: List[str]) -> int:
+    load_dotenv_defaults(ROOT)
+    p = build_parser()
+    args = p.parse_args(argv)
+
+    # Default modes.
+    if args.platform == "ios" and getattr(args, "cmd", None) == "run":
+        if not args.sim and not args.device:
+            args.sim = True
+    if args.platform == "android" and getattr(args, "cmd", None) == "run":
+        if not args.emulator and not args.device:
+            args.emulator = True
+
+    # Execute.
+    try:
+        return int(args.func(args))
+    except CliError as e:
+        if getattr(args, "json", False):
+            _json_print({"ok": False, "error": {"message": e.message, "exit_code": e.exit_code, **(e.details or {})}})
+        else:
+            sys.stderr.write(f"error: {e.message}\n")
+            if e.details.get("cmd"):
+                sys.stderr.write(f"cmd: {e.details['cmd']}\n")
+            if e.details.get("stderr"):
+                sys.stderr.write(f"stderr: {e.details['stderr']}\n")
+            if e.details.get("choices"):
+                sys.stderr.write("choices:\n")
+                for c in e.details["choices"]:
+                    sys.stderr.write(f"  {c.get('udid','')}  {c.get('name','')}\n")
+        return e.exit_code
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv[1:]))

@@ -31,6 +31,20 @@ titles+=("pika-cli help")
 cmds+=("cargo run -q -p pika-cli -- --help")
 descs+=("Marmot protocol CLI for testing and agent automation.")
 
+# --- Canonical run CLI ---
+
+titles+=("pika-run help")
+cmds+=("./tools/pika-run --help")
+descs+=("Canonical runner CLI (iOS + Android).")
+
+titles+=("pika-run ios targets")
+cmds+=("./tools/pika-run ios list-targets")
+descs+=("Connected iOS devices + available simulators.")
+
+titles+=("pika-run android targets")
+cmds+=("./tools/pika-run android list-targets")
+descs+=("Connected Android devices + emulators.")
+
 # --- Device automation ---
 
 titles+=("agent-device help")

@@ -69,6 +69,7 @@ CONSOLE="${PIKA_IOS_CONSOLE:-0}"
 if [ "${PIKA_IOS_DEVICE:-0}" = "1" ]; then
   MODE="device"
 fi
+SIM_UDID="${PIKA_IOS_SIM_UDID:-}"
 
 usage() {
   cat <<EOF
@@ -78,6 +79,7 @@ Env:
   PIKA_IOS_BUNDLE_ID        (default: $IOS_BUNDLE_ID)
   PIKA_IOS_DEVELOPMENT_TEAM (required for --device; put it in .env to avoid typing)
   PIKA_IOS_DEVICE_UDID      (optional, for --device)
+  PIKA_IOS_SIM_UDID         (optional, for --sim)
   PIKA_IOS_DEVICE=1         default to --device (if set, requires team id)
   PIKA_IOS_CONSOLE=1        default to --console
   PIKA_NO_RELAY_OVERRIDE=1  disable dev-friendly relay defaults
@@ -307,7 +309,22 @@ PY
 fi
 
 # Simulator mode.
-udid="$(./tools/ios-sim-ensure | sed -n 's/^ok: ios simulator ready (udid=\(.*\))$/\1/p')"
+udid=""
+if [ -n "${SIM_UDID:-}" ]; then
+  udid="$SIM_UDID"
+  echo "using ios simulator udid: $udid"
+  if ! ./tools/simctl list devices 2>/dev/null | grep -q "($udid)"; then
+    echo "error: requested simulator udid not found: $udid" >&2
+    echo "hint: run ./tools/pika-run ios list-targets to see available simulators" >&2
+    exit 2
+  fi
+  ./tools/simctl boot "$udid" >/dev/null 2>&1 || true
+  if ./tools/simctl help 2>/dev/null | grep -q "bootstatus"; then
+    ./tools/simctl bootstatus "$udid" -b >/dev/null 2>&1 || true
+  fi
+else
+  udid="$(./tools/ios-sim-ensure | sed -n 's/^ok: ios simulator ready (udid=\(.*\))$/\1/p')"
+fi
 if [ -z "${udid:-}" ]; then
   echo "error: could not determine simulator udid" >&2
   exit 1

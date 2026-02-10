@@ -10,13 +10,11 @@ info:
   @echo
   @echo "iOS"
   @echo "  Simulator:"
-  @echo "    just run-ios --sim"
+  @echo "    just run-ios"
   @echo "  Hardware device:"
-  @echo "    just run-ios --device"
-  @echo "  List connected iPhones:"
-  @echo "    just run-ios --list-devices"
-  @echo "  Choose a specific iPhone:"
-  @echo "    just run-ios --udid <UDID>"
+  @echo "    just run-ios --device --udid <UDID>"
+  @echo "  List targets (devices + simulators):"
+  @echo "    ./tools/pika-run ios list-targets"
   @echo
   @echo "  Env equivalents:"
   @echo "    PIKA_IOS_DEVICE=1               (default to device)"
@@ -26,13 +24,11 @@ info:
   @echo
   @echo "Android"
   @echo "  Emulator:"
-  @echo "    just run-android --emulator"
+  @echo "    just run-android"
   @echo "  Hardware device:"
-  @echo "    just run-android --device"
+  @echo "    just run-android --device --serial <serial>"
   @echo "  List targets (emulators + devices):"
-  @echo "    just run-android --list-targets"
-  @echo "  Choose a specific target:"
-  @echo "    just run-android --serial <adb-serial>"
+  @echo "    ./tools/pika-run android list-targets"
   @echo
   @echo "  Env equivalents:"
   @echo "    PIKA_ANDROID_SERIAL=<serial>"
@@ -275,11 +271,11 @@ ios-manual-qa:
 
 # Build, install, and launch Android app on emulator/device.
 run-android *ARGS:
-  ./tools/run-android {{ARGS}}
+  ./tools/pika-run android run {{ARGS}}
 
 # Build, install, and launch iOS app on simulator/device.
 run-ios *ARGS:
-  ./tools/run-ios {{ARGS}}
+  ./tools/pika-run ios run {{ARGS}}
 
 # Check iOS dev environment (Xcode, simulators, runtimes).
 doctor-ios:
