@@ -13,31 +13,70 @@ load_dotenv() {
   # Dev-only config. `.env` and `.env.local` are gitignored.
   for f in .env .env.local; do
     if [ -f "$f" ]; then
-      set -a
-      # shellcheck disable=SC1090
-      . "./$f"
-      set +a
+      # Only set vars that aren't already present in the environment so callers can override via:
+      #   PIKA_ANDROID_SERIAL=... ./tools/run-android
+      while IFS= read -r line || [ -n "$line" ]; do
+        # Trim leading/trailing whitespace (basic).
+        line="$(echo "$line" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+        if [ -z "${line:-}" ] || echo "$line" | grep -q '^#'; then
+          continue
+        fi
+        if ! echo "$line" | grep -q '='; then
+          continue
+        fi
+        key="${line%%=*}"
+        val="${line#*=}"
+        key="$(echo "$key" | tr -d '[:space:]')"
+        if [ -z "${key:-}" ]; then
+          continue
+        fi
+        # Indirect expansion: if already set, do not override.
+        if eval "[ -z \"\${$key+x}\" ]"; then
+          export "$key=$val"
+        fi
+      done <"$f"
     fi
   done
 }
 
 load_dotenv
 
-./tools/android-emulator-ensure
-
 ADB="${ADB:-adb}"
 APP_ID="${PIKA_ANDROID_APP_ID:-com.justinmoon.pika.dev}"
+SERIAL="${PIKA_ANDROID_SERIAL:-}"
 
-pick_device() {
+ensure_emulator() {
+  # Default UX: use an emulator (like iOS uses a simulator) unless the user explicitly
+  # targets a physical device via PIKA_ANDROID_SERIAL or disables emulator startup.
+  if [ -n "${SERIAL:-}" ] && ! echo "$SERIAL" | grep -q '^emulator-'; then
+    PIKA_ANDROID_SKIP_EMULATOR=1 ./tools/android-emulator-ensure
+  else
+    ./tools/android-emulator-ensure
+  fi
+}
+
+ensure_emulator
+
+pick_emulator() {
+  "$ADB" devices 2>/dev/null | awk 'NR>1 && $2=="device" && $1 ~ /^emulator-/ {print $1}' | head -n 1
+}
+
+pick_any_device() {
   "$ADB" devices 2>/dev/null | awk 'NR>1 && $2=="device" {print $1}' | head -n 1
 }
 
-SERIAL="$(pick_device || true)"
+if [ -z "${SERIAL:-}" ]; then
+  SERIAL="$(pick_emulator || true)"
+fi
+if [ -z "${SERIAL:-}" ]; then
+  SERIAL="$(pick_any_device || true)"
+fi
 if [ -z "${SERIAL:-}" ]; then
   echo "error: no android device/emulator connected after ensure step" >&2
   "$ADB" devices >&2 || true
   exit 1
 fi
+echo "using android device: $SERIAL"
 
 # Build (via Gradle) then install deterministically onto the selected device.
 just android-assemble

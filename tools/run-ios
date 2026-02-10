@@ -27,10 +27,28 @@ load_dotenv() {
   # Dev-only config. `.env` and `.env.local` are gitignored.
   for f in .env .env.local; do
     if [ -f "$f" ]; then
-      set -a
-      # shellcheck disable=SC1090
-      . "./$f"
-      set +a
+      # Only set vars that aren't already present in the environment so callers can override via:
+      #   PIKA_IOS_DEVICE=0 ./tools/run-ios
+      while IFS= read -r line || [ -n "$line" ]; do
+        # Trim leading/trailing whitespace (basic).
+        line="$(echo "$line" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+        if [ -z "${line:-}" ] || echo "$line" | grep -q '^#'; then
+          continue
+        fi
+        if ! echo "$line" | grep -q '='; then
+          continue
+        fi
+        key="${line%%=*}"
+        val="${line#*=}"
+        key="$(echo "$key" | tr -d '[:space:]')"
+        if [ -z "${key:-}" ]; then
+          continue
+        fi
+        # Indirect expansion: if already set, do not override.
+        if eval "[ -z \"\${$key+x}\" ]"; then
+          export "$key=$val"
+        fi
+      done <"$f"
     fi
   done
 }
@@ -138,20 +156,26 @@ if [ "$MODE" = "device" ]; then
 
   UDID="${PIKA_IOS_DEVICE_UDID:-}"
   if [ -z "${UDID:-}" ]; then
-    UDID="$(
-      # Avoid heredocs-in-command-substitution: macOS /bin/bash is 3.2 and can
-      # mis-parse `<<'EOF'` in this context.
+    udids="$(
       DEVELOPER_DIR="$DEV_DIR" xcrun xctrace list devices 2>/dev/null | awk '
         $0 == "== Devices ==" { in_devices = 1; next }
         $0 == "== Simulators ==" { in_devices = 0; next }
-        in_devices && !found && $0 ~ /iPhone/ {
+        in_devices && $0 ~ /iPhone/ {
           if (match($0, /\([0-9A-Fa-f-]{25,}\)[[:space:]]*$/)) {
-            found = substr($0, RSTART + 1, RLENGTH - 2) # strip parens
+            u = substr($0, RSTART + 1, RLENGTH - 2) # strip parens
+            print u
           }
         }
-        END { if (found) printf "%s", found }
       '
     )"
+    count="$(echo "$udids" | sed '/^$/d' | wc -l | tr -d '[:space:]')"
+    if [ "${count:-0}" = "1" ]; then
+      UDID="$(echo "$udids" | sed '/^$/d' | head -n 1)"
+    elif [ "${count:-0}" -gt 1 ]; then
+      echo "error: multiple iPhones connected; set PIKA_IOS_DEVICE_UDID to choose one:" >&2
+      echo "$udids" | sed '/^$/d' | sed 's/^/  /' >&2
+      exit 2
+    fi
   fi
   if [ -z "${UDID:-}" ]; then
     echo "error: could not determine a connected iPhone UDID (set PIKA_IOS_DEVICE_UDID)" >&2
@@ -188,6 +212,59 @@ if [ "$MODE" = "device" ]; then
   DEVELOPER_DIR="$DEV_DIR" xcrun devicectl device install app -d "$UDID" "$app_path"
 
   env_json="$(env_json_for_device)"
+
+  wait_for_unlocked() {
+    # devicectl refuses to launch while locked; poll lock state for a short window so
+    # `just run-ios` succeeds as soon as you unlock the device.
+    local json tmp locked
+    tmp="$(mktemp)"
+    for i in $(seq 1 120); do
+      rm -f "$tmp" >/dev/null 2>&1 || true
+      if DEVELOPER_DIR="$DEV_DIR" xcrun devicectl device info lockState -d "$UDID" --json-output "$tmp" >/dev/null 2>&1; then
+        locked="$(python3 - <<PY 2>/dev/null || true
+import json
+p="${tmp}"
+try:
+  obj=json.load(open(p))
+  # Best-effort: handle a few likely shapes.
+  def find_locked(o):
+    if isinstance(o, dict):
+      for k,v in o.items():
+        if k.lower() in ("locked","islocked","devicelocked"):
+          return v
+        r=find_locked(v)
+        if r is not None: return r
+    if isinstance(o, list):
+      for it in o:
+        r=find_locked(it)
+        if r is not None: return r
+    return None
+  v=find_locked(obj)
+  if v is True: print("1")
+  elif v is False: print("0")
+except Exception:
+  pass
+PY
+)"
+        if [ "$locked" = "0" ]; then
+          rm -f "$tmp" >/dev/null 2>&1 || true
+          return 0
+        fi
+      fi
+      if [ "$i" = "1" ]; then
+        echo "waiting for device unlock (udid=$UDID)..." >&2
+      fi
+      sleep 1
+    done
+    rm -f "$tmp" >/dev/null 2>&1 || true
+    return 1
+  }
+
+  if ! wait_for_unlocked; then
+    echo "error: device appears locked; unlock it and re-run" >&2
+    exit 1
+  fi
+
   if [ "$CONSOLE" = "1" ]; then
     echo "launching $IOS_BUNDLE_ID (console attached)"
     DEVELOPER_DIR="$DEV_DIR" xcrun devicectl device process launch -d "$UDID" \

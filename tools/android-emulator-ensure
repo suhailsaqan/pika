@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Ensures an Android emulator/device is available.
-# - If any device is connected, do nothing.
-# - Otherwise, start the repo's AVD (pika_api35) and wait for boot.
+# Ensures an Android emulator is available.
+# - Default: start (or reuse) the repo's AVD (pika_api35) and wait for boot.
+# - If you explicitly want a physical device, set PIKA_ANDROID_SKIP_EMULATOR=1.
 #
 # This is meant to mimic "flutter run"/"react-native run-android" style UX.
 
@@ -11,19 +11,57 @@ ADB="${ADB:-adb}"
 EMULATOR="${EMULATOR:-emulator}"
 AVD_NAME="${PIKA_ANDROID_AVD_NAME:-pika_api35}"
 LOG_FILE="${PIKA_ANDROID_EMULATOR_LOG:-emulator.log}"
+FORCE_GUI="${PIKA_ANDROID_FORCE_GUI:-1}"
+SKIP_EMULATOR="${PIKA_ANDROID_SKIP_EMULATOR:-0}"
 
 if ! command -v "$ADB" >/dev/null 2>&1 || ! command -v "$EMULATOR" >/dev/null 2>&1; then
   echo "error: missing adb/emulator on PATH. Run inside \`nix develop\`." >&2
   exit 1
 fi
 
-has_device() {
-  "$ADB" devices 2>/dev/null | awk 'NR>1 && $2=="device" {print $1}' | head -n 1 | grep -q .
+list_devices() {
+  "$ADB" devices 2>/dev/null | awk 'NR>1 && $2=="device" {print $1}'
 }
 
-if has_device; then
-  echo "ok: android device already connected"
-  exit 0
+pick_emulator() {
+  list_devices | awk '/^emulator-[0-9]+$/ {print $1}' | head -n 1
+}
+
+if [ "$SKIP_EMULATOR" = "1" ]; then
+  # Respect explicit "no emulator" runs: require a connected physical device.
+  serial="$(list_devices | awk '!/^emulator-/' | head -n 1 || true)"
+  if [ -n "${serial:-}" ]; then
+    echo "ok: android device already connected ($serial)"
+    exit 0
+  fi
+  echo "error: PIKA_ANDROID_SKIP_EMULATOR=1 but no physical android device is connected" >&2
+  "$ADB" devices >&2 || true
+  exit 1
+fi
+
+serial="$(pick_emulator || true)"
+if [ -n "${serial:-}" ]; then
+
+  # If only an emulator is connected but it has no UI (common if a prior run used -no-window
+  # or the UI crashed), restart it so users see a window.
+  if [ "$FORCE_GUI" = "1" ]; then
+    if pgrep -f "qemu-system-.*-headless.*-avd ${AVD_NAME}" >/dev/null 2>&1 && ! pgrep -f "emulator.*-avd ${AVD_NAME}" >/dev/null 2>&1; then
+      echo "note: emulator appears to be running headless; restarting with GUI (avd=$AVD_NAME)"
+      "$ADB" -s "$serial" emu kill >/dev/null 2>&1 || true
+      for i in $(seq 1 30); do
+        if ! list_devices | grep -q "^${serial}$"; then
+          break
+        fi
+        sleep 1
+      done
+    else
+      echo "ok: android emulator already connected ($serial)"
+      exit 0
+    fi
+  else
+    echo "ok: android emulator already connected ($serial)"
+    exit 0
+  fi
 fi
 
 echo "starting android emulator: $AVD_NAME"
@@ -57,15 +95,21 @@ if [ "${#EXTRA_ARGS[@]}" -gt 0 ]; then
   cmd+=( "${EXTRA_ARGS[@]}" )
 fi
 
-nohup "${cmd[@]}" >"$LOG_FILE" 2>&1 &
+(
+  # Don't use `nohup`: it can cause the emulator to detach into headless-only mode on macOS.
+  # Keep the launcher process alive so the Qt UI stays up.
+  "${cmd[@]}" >"$LOG_FILE" 2>&1 &
+  disown || true
+)
 sleep 1
 
-# Wait for adb to see a device and for boot to complete (bounded; no infinite hang).
+# Wait for adb to see the emulator and for boot to complete (bounded; no infinite hang).
 for i in $(seq 1 180); do
-  if has_device; then
-    boot="$("$ADB" shell getprop sys.boot_completed 2>/dev/null | tr -d '\r' || true)"
+  serial="$(pick_emulator || true)"
+  if [ -n "${serial:-}" ]; then
+    boot="$("$ADB" -s "$serial" shell getprop sys.boot_completed 2>/dev/null | tr -d '\r' || true)"
     if [ "$boot" = "1" ]; then
-      echo "ok: android emulator booted"
+      echo "ok: android emulator booted ($serial)"
       exit 0
     fi
   fi
