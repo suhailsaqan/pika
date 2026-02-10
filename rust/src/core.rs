@@ -1564,6 +1564,9 @@ impl AppCore {
             // GiftWrap inbox subscription (kind GiftWrap, #p = me).
             // NOTE: Filter `pubkey` matches the event author; GiftWraps can be authored by anyone,
             // so we must filter by the recipient `p` tag (spec-v2).
+            if !alive.load(Ordering::SeqCst) {
+                return;
+            }
             let gift_filter = Filter::new()
                 .kind(Kind::GiftWrap)
                 .custom_tags(SingleLetterTag::lowercase(Alphabet::P), vec![my_hex]);
@@ -1574,6 +1577,9 @@ impl AppCore {
                 .map(|o| o.val);
 
             // Group subscription: kind 445 filtered by #h for all joined groups.
+            if !alive.load(Ordering::SeqCst) {
+                return;
+            }
             let group_sub = if h_values.is_empty() {
                 None
             } else {
@@ -1587,6 +1593,9 @@ impl AppCore {
                     .map(|o| o.val)
             };
 
+            if !alive.load(Ordering::SeqCst) {
+                return;
+            }
             let _ = tx.send(CoreMsg::Internal(Box::new(
                 InternalEvent::SubscriptionsRecomputed {
                     token,
