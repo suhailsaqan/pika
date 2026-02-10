@@ -56,7 +56,7 @@ fun PikaApp(manager: AppManager) {
                     when (screen) {
                         is Screen.ChatList -> ChatListScreen(manager = manager, padding = padding)
                         is Screen.NewChat -> NewChatScreen(manager = manager, padding = padding)
-                        is Screen.Chat -> ChatScreen(manager = manager, padding = padding)
+                        is Screen.Chat -> ChatScreen(manager = manager, chatId = screen.chatId, padding = padding)
                         is Screen.Login -> LoginScreen(manager = manager, padding = padding)
                     }
                 }

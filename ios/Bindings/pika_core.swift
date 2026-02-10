@@ -684,16 +684,18 @@ public struct AppState: Equatable, Hashable {
     public var rev: UInt64
     public var router: Router
     public var auth: AuthState
+    public var busy: BusyState
     public var chatList: [ChatSummary]
     public var currentChat: ChatViewState?
     public var toast: String?
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(rev: UInt64, router: Router, auth: AuthState, chatList: [ChatSummary], currentChat: ChatViewState?, toast: String?) {
+    public init(rev: UInt64, router: Router, auth: AuthState, busy: BusyState, chatList: [ChatSummary], currentChat: ChatViewState?, toast: String?) {
         self.rev = rev
         self.router = router
         self.auth = auth
+        self.busy = busy
         self.chatList = chatList
         self.currentChat = currentChat
         self.toast = toast
@@ -718,6 +720,7 @@ public struct FfiConverterTypeAppState: FfiConverterRustBuffer {
                 rev: FfiConverterUInt64.read(from: &buf), 
                 router: FfiConverterTypeRouter.read(from: &buf), 
                 auth: FfiConverterTypeAuthState.read(from: &buf), 
+                busy: FfiConverterTypeBusyState.read(from: &buf), 
                 chatList: FfiConverterSequenceTypeChatSummary.read(from: &buf), 
                 currentChat: FfiConverterOptionTypeChatViewState.read(from: &buf), 
                 toast: FfiConverterOptionString.read(from: &buf)
@@ -728,6 +731,7 @@ public struct FfiConverterTypeAppState: FfiConverterRustBuffer {
         FfiConverterUInt64.write(value.rev, into: &buf)
         FfiConverterTypeRouter.write(value.router, into: &buf)
         FfiConverterTypeAuthState.write(value.auth, into: &buf)
+        FfiConverterTypeBusyState.write(value.busy, into: &buf)
         FfiConverterSequenceTypeChatSummary.write(value.chatList, into: &buf)
         FfiConverterOptionTypeChatViewState.write(value.currentChat, into: &buf)
         FfiConverterOptionString.write(value.toast, into: &buf)
@@ -747,6 +751,71 @@ public func FfiConverterTypeAppState_lift(_ buf: RustBuffer) throws -> AppState 
 #endif
 public func FfiConverterTypeAppState_lower(_ value: AppState) -> RustBuffer {
     return FfiConverterTypeAppState.lower(value)
+}
+
+
+/**
+ * "In flight" flags for long-ish operations that the UI should reflect.
+ *
+ * Spec-v1 allows ephemeral UI state to remain native (scroll position, focus, etc),
+ * but UX-relevant async operation state should live in Rust to avoid native-side
+ * heuristics (e.g., resetting spinners on toast).
+ */
+public struct BusyState: Equatable, Hashable {
+    public var creatingAccount: Bool
+    public var loggingIn: Bool
+    public var creatingChat: Bool
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(creatingAccount: Bool, loggingIn: Bool, creatingChat: Bool) {
+        self.creatingAccount = creatingAccount
+        self.loggingIn = loggingIn
+        self.creatingChat = creatingChat
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension BusyState: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeBusyState: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> BusyState {
+        return
+            try BusyState(
+                creatingAccount: FfiConverterBool.read(from: &buf), 
+                loggingIn: FfiConverterBool.read(from: &buf), 
+                creatingChat: FfiConverterBool.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: BusyState, into buf: inout [UInt8]) {
+        FfiConverterBool.write(value.creatingAccount, into: &buf)
+        FfiConverterBool.write(value.loggingIn, into: &buf)
+        FfiConverterBool.write(value.creatingChat, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeBusyState_lift(_ buf: RustBuffer) throws -> BusyState {
+    return try FfiConverterTypeBusyState.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeBusyState_lower(_ value: BusyState) -> RustBuffer {
+    return FfiConverterTypeBusyState.lower(value)
 }
 
 
@@ -1197,6 +1266,8 @@ public enum AppUpdate: Equatable, Hashable {
     )
     case authChanged(rev: UInt64, auth: AuthState
     )
+    case busyChanged(rev: UInt64, busy: BusyState
+    )
     case chatListChanged(rev: UInt64, chatList: [ChatSummary]
     )
     case currentChatChanged(rev: UInt64, currentChat: ChatViewState?
@@ -1236,13 +1307,16 @@ public struct FfiConverterTypeAppUpdate: FfiConverterRustBuffer {
         case 4: return .authChanged(rev: try FfiConverterUInt64.read(from: &buf), auth: try FfiConverterTypeAuthState.read(from: &buf)
         )
         
-        case 5: return .chatListChanged(rev: try FfiConverterUInt64.read(from: &buf), chatList: try FfiConverterSequenceTypeChatSummary.read(from: &buf)
+        case 5: return .busyChanged(rev: try FfiConverterUInt64.read(from: &buf), busy: try FfiConverterTypeBusyState.read(from: &buf)
         )
         
-        case 6: return .currentChatChanged(rev: try FfiConverterUInt64.read(from: &buf), currentChat: try FfiConverterOptionTypeChatViewState.read(from: &buf)
+        case 6: return .chatListChanged(rev: try FfiConverterUInt64.read(from: &buf), chatList: try FfiConverterSequenceTypeChatSummary.read(from: &buf)
         )
         
-        case 7: return .toastChanged(rev: try FfiConverterUInt64.read(from: &buf), toast: try FfiConverterOptionString.read(from: &buf)
+        case 7: return .currentChatChanged(rev: try FfiConverterUInt64.read(from: &buf), currentChat: try FfiConverterOptionTypeChatViewState.read(from: &buf)
+        )
+        
+        case 8: return .toastChanged(rev: try FfiConverterUInt64.read(from: &buf), toast: try FfiConverterOptionString.read(from: &buf)
         )
         
         default: throw UniffiInternalError.unexpectedEnumCase
@@ -1278,20 +1352,26 @@ public struct FfiConverterTypeAppUpdate: FfiConverterRustBuffer {
             FfiConverterTypeAuthState.write(auth, into: &buf)
             
         
-        case let .chatListChanged(rev,chatList):
+        case let .busyChanged(rev,busy):
             writeInt(&buf, Int32(5))
+            FfiConverterUInt64.write(rev, into: &buf)
+            FfiConverterTypeBusyState.write(busy, into: &buf)
+            
+        
+        case let .chatListChanged(rev,chatList):
+            writeInt(&buf, Int32(6))
             FfiConverterUInt64.write(rev, into: &buf)
             FfiConverterSequenceTypeChatSummary.write(chatList, into: &buf)
             
         
         case let .currentChatChanged(rev,currentChat):
-            writeInt(&buf, Int32(6))
+            writeInt(&buf, Int32(7))
             FfiConverterUInt64.write(rev, into: &buf)
             FfiConverterOptionTypeChatViewState.write(currentChat, into: &buf)
             
         
         case let .toastChanged(rev,toast):
-            writeInt(&buf, Int32(7))
+            writeInt(&buf, Int32(8))
             FfiConverterUInt64.write(rev, into: &buf)
             FfiConverterOptionString.write(toast, into: &buf)
             

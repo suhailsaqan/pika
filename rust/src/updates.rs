@@ -1,4 +1,4 @@
-use crate::state::{AppState, AuthState, ChatSummary, ChatViewState, Router};
+use crate::state::{AppState, AuthState, BusyState, ChatSummary, ChatViewState, Router};
 use crate::AppAction;
 
 #[derive(uniffi::Enum, Clone, Debug)]
@@ -17,6 +17,10 @@ pub enum AppUpdate {
     AuthChanged {
         rev: u64,
         auth: AuthState,
+    },
+    BusyChanged {
+        rev: u64,
+        busy: BusyState,
     },
     ChatListChanged {
         rev: u64,
@@ -39,6 +43,7 @@ impl AppUpdate {
             AppUpdate::AccountCreated { rev, .. } => *rev,
             AppUpdate::RouterChanged { rev, .. } => *rev,
             AppUpdate::AuthChanged { rev, .. } => *rev,
+            AppUpdate::BusyChanged { rev, .. } => *rev,
             AppUpdate::ChatListChanged { rev, .. } => *rev,
             AppUpdate::CurrentChatChanged { rev, .. } => *rev,
             AppUpdate::ToastChanged { rev, .. } => *rev,

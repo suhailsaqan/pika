@@ -48,11 +48,11 @@ import com.pika.app.ui.TestTags
 
 @Composable
 @OptIn(ExperimentalMaterial3Api::class)
-fun ChatScreen(manager: AppManager, padding: PaddingValues) {
+fun ChatScreen(manager: AppManager, chatId: String, padding: PaddingValues) {
     val chat = manager.state.currentChat
-    if (chat == null) {
+    if (chat == null || chat.chatId != chatId) {
         Box(modifier = Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
-            Text("No chat selected")
+            Text("Loading chat…")
         }
         return
     }

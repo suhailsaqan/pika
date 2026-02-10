@@ -30,6 +30,11 @@ class AppManager private constructor(context: Context) : AppReconciler {
                 screenStack = emptyList(),
             ),
             auth = com.pika.app.rust.AuthState.LoggedOut,
+            busy = com.pika.app.rust.BusyState(
+                creatingAccount = false,
+                loggingIn = false,
+                creatingChat = false,
+            ),
             chatList = emptyList(),
             currentChat = null,
             toast = null,
@@ -121,6 +126,7 @@ class AppManager private constructor(context: Context) : AppReconciler {
                 }
                 is AppUpdate.RouterChanged -> state = state.copy(rev = updateRev, router = update.router)
                 is AppUpdate.AuthChanged -> state = state.copy(rev = updateRev, auth = update.auth)
+                is AppUpdate.BusyChanged -> state = state.copy(rev = updateRev, busy = update.busy)
                 is AppUpdate.ChatListChanged -> state = state.copy(rev = updateRev, chatList = update.chatList)
                 is AppUpdate.CurrentChatChanged -> state = state.copy(rev = updateRev, currentChat = update.currentChat)
                 is AppUpdate.ToastChanged -> {
@@ -159,6 +165,7 @@ class AppManager private constructor(context: Context) : AppReconciler {
             is AppUpdate.AccountCreated -> this.rev
             is AppUpdate.RouterChanged -> this.rev
             is AppUpdate.AuthChanged -> this.rev
+            is AppUpdate.BusyChanged -> this.rev
             is AppUpdate.ChatListChanged -> this.rev
             is AppUpdate.CurrentChatChanged -> this.rev
             is AppUpdate.ToastChanged -> this.rev

@@ -3,18 +3,21 @@ import SwiftUI
 struct LoginView: View {
     let manager: AppManager
     @State private var nsecInput = ""
-    @State private var isLoading = false
 
     var body: some View {
+        let busy = manager.state.busy
+        let createBusy = busy.creatingAccount
+        let loginBusy = busy.loggingIn
+        let anyBusy = createBusy || loginBusy
+
         VStack(spacing: 16) {
             Text("Pika")
                 .font(.largeTitle.weight(.semibold))
 
             Button {
-                isLoading = true
                 manager.dispatch(.createAccount)
             } label: {
-                if isLoading {
+                if createBusy {
                     ProgressView()
                         .tint(.white)
                 } else {
@@ -22,7 +25,7 @@ struct LoginView: View {
                 }
             }
             .buttonStyle(.borderedProminent)
-            .disabled(isLoading)
+            .disabled(anyBusy)
             .accessibilityIdentifier(TestIds.loginCreateAccount)
 
             Divider().padding(.vertical, 8)
@@ -31,27 +34,22 @@ struct LoginView: View {
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
                 .textFieldStyle(.roundedBorder)
-                .disabled(isLoading)
+                .disabled(anyBusy)
                 .accessibilityIdentifier(TestIds.loginNsecInput)
 
             Button {
-                isLoading = true
                 manager.login(nsec: nsecInput)
             } label: {
-                if isLoading {
+                if loginBusy {
                     ProgressView()
                 } else {
                     Text("Login")
                 }
             }
             .buttonStyle(.bordered)
-            .disabled(isLoading)
+            .disabled(anyBusy)
             .accessibilityIdentifier(TestIds.loginSubmit)
         }
         .padding(20)
-        // Reset loading on error (errors produce toasts).
-        .onChange(of: manager.state.toast) { _, new in
-            if new != nil { isLoading = false }
-        }
     }
 }

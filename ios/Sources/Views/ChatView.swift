@@ -2,10 +2,11 @@ import SwiftUI
 
 struct ChatView: View {
     let manager: AppManager
+    let chatId: String
     @State private var messageText = ""
 
     var body: some View {
-        if let chat = manager.state.currentChat {
+        if let chat = manager.state.currentChat, chat.chatId == chatId {
             VStack(spacing: 0) {
                 ScrollViewReader { proxy in
                     ScrollView {
@@ -39,8 +40,11 @@ struct ChatView: View {
             .navigationTitle(chat.peerName ?? chat.peerNpub)
             .navigationBarTitleDisplayMode(.inline)
         } else {
-            Text("No chat selected")
-                .foregroundStyle(.secondary)
+            VStack(spacing: 10) {
+                ProgressView()
+                Text("Loading chat…")
+                    .foregroundStyle(.secondary)
+            }
         }
     }
 }

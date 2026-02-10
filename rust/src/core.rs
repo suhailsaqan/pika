@@ -11,7 +11,8 @@ use crate::actions::AppAction;
 use crate::mdk_support::{open_mdk, PikaMdk};
 use crate::state::now_seconds;
 use crate::state::{
-    AuthState, ChatMessage, ChatSummary, ChatViewState, MessageDeliveryState, Router, Screen,
+    AuthState, BusyState, ChatMessage, ChatSummary, ChatViewState, MessageDeliveryState, Router,
+    Screen,
 };
 use crate::updates::{AppUpdate, CoreMsg, InternalEvent};
 
@@ -122,6 +123,7 @@ impl AppCore {
             rev: 0,
             router,
             auth: AuthState::LoggedOut,
+            busy: BusyState::idle(),
             chat_list: vec![],
             current_chat: None,
             toast: None,
@@ -273,6 +275,14 @@ impl AppCore {
         });
     }
 
+    fn emit_busy(&mut self) {
+        let rev = self.next_rev();
+        self.emit(AppUpdate::BusyChanged {
+            rev,
+            busy: self.state.busy.clone(),
+        });
+    }
+
     fn emit_current_chat(&mut self) {
         let rev = self.next_rev();
         self.emit(AppUpdate::CurrentChatChanged {
@@ -329,6 +339,7 @@ impl AppCore {
             self.state.router.screen_stack.clear();
             self.state.current_chat = None;
             self.state.chat_list = vec![];
+            self.state.busy = BusyState::idle();
             self.loaded_count.clear();
             self.unread_counts.clear();
             self.delivery_overrides.clear();
@@ -336,8 +347,48 @@ impl AppCore {
             self.local_outbox.clear();
             self.last_outgoing_ts = 0;
             self.emit_router();
+            self.emit_busy();
             self.emit_chat_list();
             self.emit_current_chat();
+        }
+    }
+
+    fn set_busy(&mut self, f: impl FnOnce(&mut BusyState)) {
+        let mut next = self.state.busy.clone();
+        f(&mut next);
+        if next != self.state.busy {
+            self.state.busy = next;
+            self.emit_busy();
+        }
+    }
+
+    fn clear_busy(&mut self) {
+        self.set_busy(|b| *b = BusyState::idle());
+    }
+
+    fn sync_current_chat_to_router(&mut self) {
+        let top = self.state.router.screen_stack.last().cloned();
+        match top {
+            Some(Screen::Chat { chat_id }) => {
+                // Ensure current_chat is loaded for the chat the router claims is visible.
+                let needs_refresh = self
+                    .state
+                    .current_chat
+                    .as_ref()
+                    .map(|c| c.chat_id != chat_id)
+                    .unwrap_or(true);
+                if needs_refresh {
+                    self.unread_counts.insert(chat_id.clone(), 0);
+                    self.refresh_chat_list_from_storage();
+                    self.refresh_current_chat(&chat_id);
+                }
+            }
+            _ => {
+                if self.state.current_chat.is_some() {
+                    self.state.current_chat = None;
+                    self.emit_current_chat();
+                }
+            }
         }
     }
 
@@ -425,10 +476,12 @@ impl AppCore {
                     "peer_key_package_fetched"
                 );
                 if let Some(err) = error {
+                    self.set_busy(|b| b.creating_chat = false);
                     self.toast(err);
                     return;
                 }
                 let Some(kp_event) = key_package_event else {
+                    self.set_busy(|b| b.creating_chat = false);
                     self.toast("Could not find peer key package (kind 443). The peer must run Pika/MDK once (publish a key package) and you must share at least one relay.".to_string());
                     return;
                 };
@@ -455,11 +508,13 @@ impl AppCore {
                 }
                 let group_result = {
                     let Some(sess) = self.session.as_mut() else {
+                        self.set_busy(|b| b.creating_chat = false);
                         return;
                     };
 
                     // Validate peer key package before use (spec-v2).
                     if let Err(e) = sess.mdk.parse_key_package(&kp_event) {
+                        self.set_busy(|b| b.creating_chat = false);
                         self.toast(format!(
                             "Invalid peer key package: {e}. If this is a Marmot/WhiteNoise interop peer, ensure it publishes MIP-00 compliant tags (mls_protocol_version=1.0, encoding=base64)."
                         ));
@@ -485,6 +540,7 @@ impl AppCore {
                     ) {
                         Ok(r) => r,
                         Err(e) => {
+                            self.set_busy(|b| b.creating_chat = false);
                             self.toast(format!("Create group failed: {e}"));
                             return;
                         }
@@ -520,6 +576,7 @@ impl AppCore {
                 self.open_chat_screen(&chat_id);
                 self.refresh_current_chat(&chat_id);
                 self.emit_router();
+                self.set_busy(|b| b.creating_chat = false);
             }
             InternalEvent::GiftWrapReceived { wrapper, rumor } => {
                 tracing::info!(
@@ -638,6 +695,10 @@ impl AppCore {
         match action {
             // Auth
             AppAction::CreateAccount => {
+                self.set_busy(|b| {
+                    b.creating_account = true;
+                    b.logging_in = false;
+                });
                 let keys = Keys::generate();
                 let nsec = keys.secret_key().to_bech32().expect("infallible");
                 let pubkey = keys.public_key().to_hex();
@@ -654,24 +715,36 @@ impl AppCore {
                 if let Err(e) = self.start_session(keys) {
                     // Include the full anyhow context chain; this is critical for diagnosing
                     // keyring/SQLCipher issues on iOS.
+                    self.clear_busy();
                     self.toast(format!("Create account failed: {e:#}"));
+                } else {
+                    self.clear_busy();
                 }
             }
             AppAction::Login { nsec } | AppAction::RestoreSession { nsec } => {
+                self.set_busy(|b| {
+                    b.logging_in = true;
+                    b.creating_account = false;
+                });
                 let nsec = nsec.trim();
                 if nsec.is_empty() {
+                    self.clear_busy();
                     self.toast("Enter an nsec");
                     return;
                 }
                 let keys = match Keys::parse(nsec) {
                     Ok(k) => k,
                     Err(e) => {
+                        self.clear_busy();
                         self.toast(format!("Invalid nsec: {e}"));
                         return;
                     }
                 };
                 if let Err(e) = self.start_session(keys) {
+                    self.clear_busy();
                     self.toast(format!("Login failed: {e:#}"));
+                } else {
+                    self.clear_busy();
                 }
             }
             AppAction::Logout => {
@@ -700,24 +773,13 @@ impl AppCore {
                     return;
                 }
                 self.push_screen(screen);
+                self.sync_current_chat_to_router();
                 self.emit_router();
             }
             AppAction::UpdateScreenStack { stack } => {
                 self.state.router.screen_stack = stack;
 
-                // If the top screen is a chat, show it. Otherwise clear current_chat.
-                let top = self.state.router.screen_stack.last().cloned();
-                match top {
-                    Some(Screen::Chat { chat_id }) => {
-                        self.unread_counts.insert(chat_id.clone(), 0);
-                        self.refresh_chat_list_from_storage();
-                        self.refresh_current_chat(&chat_id);
-                    }
-                    _ => {
-                        self.state.current_chat = None;
-                        self.emit_current_chat();
-                    }
-                }
+                self.sync_current_chat_to_router();
 
                 self.emit_router();
             }
@@ -738,10 +800,6 @@ impl AppCore {
                     return;
                 }
 
-                let Some(sess) = self.session.as_mut() else {
-                    return;
-                };
-
                 let peer_pubkey = match PublicKey::parse(&peer_npub) {
                     Ok(p) => p,
                     Err(e) => {
@@ -750,8 +808,21 @@ impl AppCore {
                     }
                 };
 
+                self.set_busy(|b| b.creating_chat = true);
+
                 // Allow "note to self" flow for local/offline testing.
-                if peer_pubkey == sess.keys.public_key() {
+                let my_pubkey = match self.session.as_ref() {
+                    Some(s) => s.keys.public_key(),
+                    None => {
+                        self.set_busy(|b| b.creating_chat = false);
+                        return;
+                    }
+                };
+                if peer_pubkey == my_pubkey {
+                    let Some(sess) = self.session.as_mut() else {
+                        self.set_busy(|b| b.creating_chat = false);
+                        return;
+                    };
                     let config = NostrGroupConfigData {
                         name: "Note to self".to_string(),
                         description: DEFAULT_GROUP_DESCRIPTION.to_string(),
@@ -759,7 +830,7 @@ impl AppCore {
                         image_key: None,
                         image_nonce: None,
                         relays: group_relays.clone(),
-                        admins: vec![sess.keys.public_key()],
+                        admins: vec![my_pubkey],
                     };
 
                     let group_result =
@@ -769,6 +840,7 @@ impl AppCore {
                         {
                             Ok(r) => r,
                             Err(e) => {
+                                self.set_busy(|b| b.creating_chat = false);
                                 self.toast(format!("Create chat failed: {e}"));
                                 return;
                             }
@@ -779,10 +851,12 @@ impl AppCore {
                     self.open_chat_screen(&chat_id);
                     self.refresh_current_chat(&chat_id);
                     self.emit_router();
+                    self.set_busy(|b| b.creating_chat = false);
                     return;
                 }
 
                 if !network_enabled {
+                    self.set_busy(|b| b.creating_chat = false);
                     self.toast("Network disabled (set PIKA_DISABLE_NETWORK=0)");
                     return;
                 }

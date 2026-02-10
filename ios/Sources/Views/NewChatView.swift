@@ -3,11 +3,11 @@ import SwiftUI
 struct NewChatView: View {
     let manager: AppManager
     @State private var npubInput = ""
-    @State private var isLoading = false
 
     var body: some View {
         let peer = npubInput.trimmingCharacters(in: .whitespacesAndNewlines)
         let isValidPeer = PeerKeyValidator.isValidPeer(peer)
+        let isLoading = manager.state.busy.creatingChat
 
         VStack(spacing: 12) {
             TextField("Peer npub", text: $npubInput)
@@ -25,7 +25,6 @@ struct NewChatView: View {
             }
 
             Button {
-                isLoading = true
                 manager.dispatch(.createChat(peerNpub: peer))
             } label: {
                 if isLoading {
@@ -46,9 +45,5 @@ struct NewChatView: View {
         }
         .padding(16)
         .navigationTitle("New Chat")
-        // Reset loading on error (errors produce toasts).
-        .onChange(of: manager.state.toast) { _, new in
-            if new != nil { isLoading = false }
-        }
     }
 }

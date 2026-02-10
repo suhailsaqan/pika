@@ -19,7 +19,6 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -40,14 +39,9 @@ import androidx.compose.material3.MaterialTheme
 @OptIn(ExperimentalMaterial3Api::class)
 fun NewChatScreen(manager: AppManager, padding: PaddingValues) {
     var npub by remember { mutableStateOf("") }
-    var isLoading by remember { mutableStateOf(false) }
     val peer = npub.trim()
     val isValidPeer = PeerKeyValidator.isValidPeer(peer)
-
-    // Reset loading on error (errors produce toasts).
-    LaunchedEffect(manager.state.toast) {
-        if (manager.state.toast != null) isLoading = false
-    }
+    val isLoading = manager.state.busy.creatingChat
 
     Scaffold(
         modifier = Modifier.padding(padding),
@@ -89,7 +83,6 @@ fun NewChatScreen(manager: AppManager, padding: PaddingValues) {
             }
             Button(
                 onClick = {
-                    isLoading = true
                     manager.dispatch(AppAction.CreateChat(peer))
                 },
                 enabled = isValidPeer && !isLoading,

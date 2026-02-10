@@ -1467,6 +1467,8 @@ data class AppState (
     , 
     var `auth`: AuthState
     , 
+    var `busy`: BusyState
+    , 
     var `chatList`: List<ChatSummary>
     , 
     var `currentChat`: ChatViewState?
@@ -1491,6 +1493,7 @@ public object FfiConverterTypeAppState: FfiConverterRustBuffer<AppState> {
             FfiConverterULong.read(buf),
             FfiConverterTypeRouter.read(buf),
             FfiConverterTypeAuthState.read(buf),
+            FfiConverterTypeBusyState.read(buf),
             FfiConverterSequenceTypeChatSummary.read(buf),
             FfiConverterOptionalTypeChatViewState.read(buf),
             FfiConverterOptionalString.read(buf),
@@ -1501,6 +1504,7 @@ public object FfiConverterTypeAppState: FfiConverterRustBuffer<AppState> {
             FfiConverterULong.allocationSize(value.`rev`) +
             FfiConverterTypeRouter.allocationSize(value.`router`) +
             FfiConverterTypeAuthState.allocationSize(value.`auth`) +
+            FfiConverterTypeBusyState.allocationSize(value.`busy`) +
             FfiConverterSequenceTypeChatSummary.allocationSize(value.`chatList`) +
             FfiConverterOptionalTypeChatViewState.allocationSize(value.`currentChat`) +
             FfiConverterOptionalString.allocationSize(value.`toast`)
@@ -1510,9 +1514,60 @@ public object FfiConverterTypeAppState: FfiConverterRustBuffer<AppState> {
             FfiConverterULong.write(value.`rev`, buf)
             FfiConverterTypeRouter.write(value.`router`, buf)
             FfiConverterTypeAuthState.write(value.`auth`, buf)
+            FfiConverterTypeBusyState.write(value.`busy`, buf)
             FfiConverterSequenceTypeChatSummary.write(value.`chatList`, buf)
             FfiConverterOptionalTypeChatViewState.write(value.`currentChat`, buf)
             FfiConverterOptionalString.write(value.`toast`, buf)
+    }
+}
+
+
+
+/**
+ * "In flight" flags for long-ish operations that the UI should reflect.
+ *
+ * Spec-v1 allows ephemeral UI state to remain native (scroll position, focus, etc),
+ * but UX-relevant async operation state should live in Rust to avoid native-side
+ * heuristics (e.g., resetting spinners on toast).
+ */
+data class BusyState (
+    var `creatingAccount`: kotlin.Boolean
+    , 
+    var `loggingIn`: kotlin.Boolean
+    , 
+    var `creatingChat`: kotlin.Boolean
+    
+){
+    
+
+    
+
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeBusyState: FfiConverterRustBuffer<BusyState> {
+    override fun read(buf: ByteBuffer): BusyState {
+        return BusyState(
+            FfiConverterBoolean.read(buf),
+            FfiConverterBoolean.read(buf),
+            FfiConverterBoolean.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: BusyState) = (
+            FfiConverterBoolean.allocationSize(value.`creatingAccount`) +
+            FfiConverterBoolean.allocationSize(value.`loggingIn`) +
+            FfiConverterBoolean.allocationSize(value.`creatingChat`)
+    )
+
+    override fun write(value: BusyState, buf: ByteBuffer) {
+            FfiConverterBoolean.write(value.`creatingAccount`, buf)
+            FfiConverterBoolean.write(value.`loggingIn`, buf)
+            FfiConverterBoolean.write(value.`creatingChat`, buf)
     }
 }
 
@@ -2091,6 +2146,16 @@ sealed class AppUpdate {
         companion object
     }
     
+    data class BusyChanged(
+        val `rev`: kotlin.ULong, 
+        val `busy`: com.pika.app.rust.BusyState) : AppUpdate()
+        
+    {
+        
+
+        companion object
+    }
+    
     data class ChatListChanged(
         val `rev`: kotlin.ULong, 
         val `chatList`: List<com.pika.app.rust.ChatSummary>) : AppUpdate()
@@ -2154,15 +2219,19 @@ public object FfiConverterTypeAppUpdate : FfiConverterRustBuffer<AppUpdate>{
                 FfiConverterULong.read(buf),
                 FfiConverterTypeAuthState.read(buf),
                 )
-            5 -> AppUpdate.ChatListChanged(
+            5 -> AppUpdate.BusyChanged(
+                FfiConverterULong.read(buf),
+                FfiConverterTypeBusyState.read(buf),
+                )
+            6 -> AppUpdate.ChatListChanged(
                 FfiConverterULong.read(buf),
                 FfiConverterSequenceTypeChatSummary.read(buf),
                 )
-            6 -> AppUpdate.CurrentChatChanged(
+            7 -> AppUpdate.CurrentChatChanged(
                 FfiConverterULong.read(buf),
                 FfiConverterOptionalTypeChatViewState.read(buf),
                 )
-            7 -> AppUpdate.ToastChanged(
+            8 -> AppUpdate.ToastChanged(
                 FfiConverterULong.read(buf),
                 FfiConverterOptionalString.read(buf),
                 )
@@ -2202,6 +2271,14 @@ public object FfiConverterTypeAppUpdate : FfiConverterRustBuffer<AppUpdate>{
                 4UL
                 + FfiConverterULong.allocationSize(value.`rev`)
                 + FfiConverterTypeAuthState.allocationSize(value.`auth`)
+            )
+        }
+        is AppUpdate.BusyChanged -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterULong.allocationSize(value.`rev`)
+                + FfiConverterTypeBusyState.allocationSize(value.`busy`)
             )
         }
         is AppUpdate.ChatListChanged -> {
@@ -2257,20 +2334,26 @@ public object FfiConverterTypeAppUpdate : FfiConverterRustBuffer<AppUpdate>{
                 FfiConverterTypeAuthState.write(value.`auth`, buf)
                 Unit
             }
-            is AppUpdate.ChatListChanged -> {
+            is AppUpdate.BusyChanged -> {
                 buf.putInt(5)
+                FfiConverterULong.write(value.`rev`, buf)
+                FfiConverterTypeBusyState.write(value.`busy`, buf)
+                Unit
+            }
+            is AppUpdate.ChatListChanged -> {
+                buf.putInt(6)
                 FfiConverterULong.write(value.`rev`, buf)
                 FfiConverterSequenceTypeChatSummary.write(value.`chatList`, buf)
                 Unit
             }
             is AppUpdate.CurrentChatChanged -> {
-                buf.putInt(6)
+                buf.putInt(7)
                 FfiConverterULong.write(value.`rev`, buf)
                 FfiConverterOptionalTypeChatViewState.write(value.`currentChat`, buf)
                 Unit
             }
             is AppUpdate.ToastChanged -> {
-                buf.putInt(7)
+                buf.putInt(8)
                 FfiConverterULong.write(value.`rev`, buf)
                 FfiConverterOptionalString.write(value.`toast`, buf)
                 Unit

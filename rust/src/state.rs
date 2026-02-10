@@ -5,6 +5,7 @@ pub struct AppState {
     pub rev: u64,
     pub router: Router,
     pub auth: AuthState,
+    pub busy: BusyState,
     pub chat_list: Vec<ChatSummary>,
     pub current_chat: Option<ChatViewState>,
     pub toast: Option<String>,
@@ -19,9 +20,32 @@ impl AppState {
                 screen_stack: vec![],
             },
             auth: AuthState::LoggedOut,
+            busy: BusyState::idle(),
             chat_list: vec![],
             current_chat: None,
             toast: None,
+        }
+    }
+}
+
+/// "In flight" flags for long-ish operations that the UI should reflect.
+///
+/// Spec-v1 allows ephemeral UI state to remain native (scroll position, focus, etc),
+/// but UX-relevant async operation state should live in Rust to avoid native-side
+/// heuristics (e.g., resetting spinners on toast).
+#[derive(uniffi::Record, Clone, Debug, PartialEq, Eq)]
+pub struct BusyState {
+    pub creating_account: bool,
+    pub logging_in: bool,
+    pub creating_chat: bool,
+}
+
+impl BusyState {
+    pub fn idle() -> Self {
+        Self {
+            creating_account: false,
+            logging_in: false,
+            creating_chat: false,
         }
     }
 }

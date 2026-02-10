@@ -13,7 +13,6 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -29,12 +28,10 @@ import com.pika.app.ui.TestTags
 @Composable
 fun LoginScreen(manager: AppManager, padding: PaddingValues) {
     var nsec by remember { mutableStateOf("") }
-    var isLoading by remember { mutableStateOf(false) }
-
-    // Reset loading on error (errors produce toasts).
-    LaunchedEffect(manager.state.toast) {
-        if (manager.state.toast != null) isLoading = false
-    }
+    val busy = manager.state.busy
+    val createBusy = busy.creatingAccount
+    val loginBusy = busy.loggingIn
+    val anyBusy = createBusy || loginBusy
 
     Column(
         modifier =
@@ -49,13 +46,12 @@ fun LoginScreen(manager: AppManager, padding: PaddingValues) {
 
         Button(
             onClick = {
-                isLoading = true
                 manager.dispatch(AppAction.CreateAccount)
             },
-            enabled = !isLoading,
+            enabled = !anyBusy,
             modifier = Modifier.testTag(TestTags.LOGIN_CREATE_ACCOUNT),
         ) {
-            if (isLoading) {
+            if (createBusy) {
                 CircularProgressIndicator(
                     modifier = Modifier.size(20.dp),
                     strokeWidth = 2.dp,
@@ -71,20 +67,19 @@ fun LoginScreen(manager: AppManager, padding: PaddingValues) {
             value = nsec,
             onValueChange = { nsec = it },
             singleLine = true,
-            enabled = !isLoading,
+            enabled = !anyBusy,
             label = { Text("nsec (mock)") },
             modifier = Modifier.fillMaxWidth().testTag(TestTags.LOGIN_NSEC),
         )
 
         Button(
             onClick = {
-                isLoading = true
                 manager.loginWithNsec(nsec)
             },
-            enabled = !isLoading,
+            enabled = !anyBusy,
             modifier = Modifier.testTag(TestTags.LOGIN_LOGIN),
         ) {
-            if (isLoading) {
+            if (loginBusy) {
                 CircularProgressIndicator(
                     modifier = Modifier.size(20.dp),
                     strokeWidth = 2.dp,

@@ -3,6 +3,7 @@ import SwiftUI
 struct ContentView: View {
     @Bindable var manager: AppManager
     @State private var visibleToast: String? = nil
+    @State private var navPath: [Screen] = []
 
     var body: some View {
         let router = manager.state.router
@@ -11,14 +12,25 @@ struct ContentView: View {
             case .login:
                 LoginView(manager: manager)
             default:
-                NavigationStack(path: $manager.state.router.screenStack) {
+                NavigationStack(path: $navPath) {
                     screenView(manager: manager, screen: router.defaultScreen)
                         .navigationDestination(for: Screen.self) { screen in
                             screenView(manager: manager, screen: screen)
                         }
                 }
-                .onChange(of: manager.state.router.screenStack) { old, new in
-                    // Only report platform-initiated pops.
+                .onAppear {
+                    // Initial mount: seed the path from Rust.
+                    navPath = manager.state.router.screenStack
+                }
+                // Drive native navigation from Rust's router, but avoid feeding those changes
+                // back to Rust as "platform pops".
+                .onChange(of: manager.state.router.screenStack) { _, new in
+                    navPath = new
+                }
+                .onChange(of: navPath) { old, new in
+                    // Ignore Rust-driven syncs.
+                    if new == manager.state.router.screenStack { return }
+                    // Only report platform-initiated pops (e.g. swipe-back).
                     if new.count < old.count {
                         manager.dispatch(.updateScreenStack(stack: new))
                     }
@@ -69,7 +81,7 @@ private func screenView(manager: AppManager, screen: Screen) -> some View {
         ChatListView(manager: manager)
     case .newChat:
         NewChatView(manager: manager)
-    case .chat:
-        ChatView(manager: manager)
+    case .chat(let chatId):
+        ChatView(manager: manager, chatId: chatId)
     }
 }

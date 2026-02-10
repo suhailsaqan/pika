@@ -123,6 +123,9 @@ final class AppManager: AppReconciler {
         case .authChanged(_, let auth):
             state.auth = auth
             state.rev = updateRev
+        case .busyChanged(_, let busy):
+            state.busy = busy
+            state.rev = updateRev
         case .chatListChanged(_, let list):
             state.chatList = list
             state.rev = updateRev
@@ -186,6 +189,7 @@ private extension AppUpdate {
         case .accountCreated(let rev, _, _, _): return rev
         case .routerChanged(let rev, _): return rev
         case .authChanged(let rev, _): return rev
+        case .busyChanged(let rev, _): return rev
         case .chatListChanged(let rev, _): return rev
         case .currentChatChanged(let rev, _): return rev
         case .toastChanged(let rev, _): return rev
