@@ -330,18 +330,39 @@ fn boot_sim(dev_dir: &Path, udid: &str, verbose: bool) -> Result<(), CliError> {
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .status();
-    // bootstatus may not exist; ignore.
-    human_log(verbose, "simctl bootstatus -b");
-    let _ = Command::new("/usr/bin/xcrun")
-        .env("DEVELOPER_DIR", dev_dir)
+
+    // Avoid an unbounded `simctl bootstatus -b` wait in CI; poll with timeout.
+    human_log(verbose, "waiting for simulator boot");
+    let start = Instant::now();
+    while start.elapsed() < Duration::from_secs(180) {
+        if simulator_is_booted(dev_dir, udid)? {
+            return Ok(());
+        }
+        thread::sleep(Duration::from_secs(1));
+    }
+
+    Err(CliError::operational(format!(
+        "simulator did not boot in time: {udid}"
+    )))
+}
+
+fn simulator_is_booted(dev_dir: &Path, udid: &str) -> Result<bool, CliError> {
+    let mut cmd = Command::new("/usr/bin/xcrun");
+    cmd.env("DEVELOPER_DIR", dev_dir)
         .arg("simctl")
-        .arg("bootstatus")
-        .arg(udid)
-        .arg("-b")
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status();
-    Ok(())
+        .arg("list")
+        .arg("devices");
+    let out = run_capture(cmd)?;
+    if !out.status.success() {
+        return Err(CliError::operational("failed to list simulators"));
+    }
+    let s = String::from_utf8_lossy(&out.stdout);
+    for line in s.lines() {
+        if line.contains(udid) && line.contains("(Booted)") {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 fn maybe_write_ios_relay_config(
