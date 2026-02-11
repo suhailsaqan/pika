@@ -20,7 +20,7 @@ jobs:
     if: github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'pre-merge')
     runs-on: blacksmith-16vcpu-ubuntu-2404
     environment:
-      name: ${{ github.event_name == 'pull_request' && github.actor != 'justinmoon' && 'ci-approval' || 'ci-auto' }}
+      name: ${{ github.event_name == 'pull_request' && github.actor != 'justinmoon' && github.actor != 'futurepaul' && 'ci-approval' || 'ci-auto' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -50,7 +50,7 @@ jobs:
     if: github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'pre-merge')
     runs-on: blacksmith-16vcpu-ubuntu-2404
     environment:
-      name: ${{ github.event_name == 'pull_request' && github.actor != 'justinmoon' && 'ci-approval' || 'ci-auto' }}
+      name: ${{ github.event_name == 'pull_request' && github.actor != 'justinmoon' && github.actor != 'futurepaul' && 'ci-approval' || 'ci-auto' }}
     steps:
       - uses: actions/checkout@v4
 
