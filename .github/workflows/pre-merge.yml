@@ -14,10 +14,6 @@ on:
           - pre-merge
           - nightly
         default: pre-merge
-      run_macos_ios:
-        description: "When mode=nightly, run macOS iOS lane"
-        type: boolean
-        default: true
 
 jobs:
   check-pika:
@@ -123,39 +119,13 @@ jobs:
 
       - run: nix develop .#default -c just rmp-nightly-linux
 
-  nightly-macos-ios:
-    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'nightly' && github.event.inputs.run_macos_ios == 'true')
-    runs-on: warp-macos-15-arm64-6x
-    permissions:
-      contents: read
-      id-token: write
-    steps:
-      - uses: actions/checkout@v4
-      - uses: nixbuild/nix-quick-install-action@v30
-      - uses: DeterminateSystems/magic-nix-cache-action@v13
-      - uses: WarpBuilds/cache@v1
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-
-      - run: xcodebuild -version
-      - run: nix develop .#default -c just rmp-nightly-macos
-
   nightly:
     if: always() && (github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'nightly'))
-    needs: [nightly-linux, nightly-macos-ios]
+    needs: [nightly-linux]
     runs-on: ubuntu-latest
     steps:
       - run: |
           if [[ "${{ needs.nightly-linux.result }}" != "success" ]]; then
             echo "nightly-linux failed"
-            exit 1
-          fi
-          if [[ "${{ needs.nightly-macos-ios.result }}" != "success" && "${{ needs.nightly-macos-ios.result }}" != "skipped" ]]; then
-            echo "nightly-macos-ios failed"
             exit 1
           fi
