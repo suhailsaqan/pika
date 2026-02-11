@@ -24,7 +24,7 @@ RMP checks are integrated into the repo's single CI entrypoint, not a separate w
 
 ## Nightly
 
-- Workflow: `.github/workflows/rmp-init-smoke.yml` (workflow name: `nightly`)
+- Workflow: `.github/workflows/pre-merge.yml` in `mode=nightly`
 - Linux lane (`nightly-linux`): `just rmp-nightly-linux`
   - scaffolds project
   - ensures Android AVD

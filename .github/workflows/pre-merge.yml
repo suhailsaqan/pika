@@ -3,10 +3,25 @@ name: pre-merge
 on:
   pull_request:
     branches: [master]
+  schedule:
+    - cron: '0 8 * * *'
   workflow_dispatch:
+    inputs:
+      mode:
+        description: "Which lane to run"
+        type: choice
+        options:
+          - pre-merge
+          - nightly
+        default: pre-merge
+      run_macos_ios:
+        description: "When mode=nightly, run macOS iOS lane"
+        type: boolean
+        default: true
 
 jobs:
   check-pika:
+    if: github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'pre-merge')
     runs-on: blacksmith-16vcpu-ubuntu-2404
     steps:
       - uses: actions/checkout@v4
@@ -34,6 +49,7 @@ jobs:
       - run: nix develop .#default -c just pre-merge-pika
 
   check-rmp:
+    if: github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'pre-merge')
     runs-on: blacksmith-16vcpu-ubuntu-2404
     steps:
       - uses: actions/checkout@v4
@@ -61,8 +77,8 @@ jobs:
       - run: nix develop .#rmp -c just pre-merge-rmp
 
   pre-merge:
+    if: always() && (github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'pre-merge'))
     needs: [check-pika, check-rmp]
-    if: always()
     runs-on: ubuntu-latest
     steps:
       - run: |
@@ -72,5 +88,57 @@ jobs:
           fi
           if [[ "${{ needs.check-rmp.result }}" != "success" ]]; then
             echo "check-rmp failed"
+            exit 1
+          fi
+
+  nightly-linux:
+    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'nightly')
+    runs-on: blacksmith-16vcpu-ubuntu-2404
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: useblacksmith/stickydisk@v1
+        with:
+          key: ${{ github.repository }}-nix-v1-${{ runner.os }}
+          path: /nix
+      - name: Fix /nix ownership
+        run: |
+          if [ -d /nix ] && [ "$(stat -c %u /nix)" != "$(id -u)" ]; then
+            sudo chown -R $(id -u):$(id -g) /nix
+          fi
+      - uses: nixbuild/nix-quick-install-action@v30
+
+      - uses: useblacksmith/stickydisk@v1
+        with:
+          key: ${{ github.repository }}-cargo-home-v1-${{ runner.os }}
+          path: ~/.cargo
+      - uses: useblacksmith/stickydisk@v1
+        with:
+          key: ${{ github.repository }}-cargo-target-v1-${{ runner.os }}
+          path: target
+
+      - run: nix develop .#default -c just rmp-nightly-linux
+
+  nightly-macos-ios:
+    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'nightly' && github.event.inputs.run_macos_ios == 'true')
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: nixbuild/nix-quick-install-action@v30
+      - run: xcodebuild -version
+      - run: nix develop .#default -c just rmp-nightly-macos
+
+  nightly:
+    if: always() && (github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'nightly'))
+    needs: [nightly-linux, nightly-macos-ios]
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          if [[ "${{ needs.nightly-linux.result }}" != "success" ]]; then
+            echo "nightly-linux failed"
+            exit 1
+          fi
+          if [[ "${{ needs.nightly-macos-ios.result }}" != "success" && "${{ needs.nightly-macos-ios.result }}" != "skipped" ]]; then
+            echo "nightly-macos-ios failed"
             exit 1
           fi
