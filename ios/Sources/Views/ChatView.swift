@@ -62,6 +62,13 @@ private struct MessageRow: View {
                     .background(message.isMine ? Color.blue : Color.gray.opacity(0.2))
                     .foregroundStyle(message.isMine ? Color.white : Color.primary)
                     .clipShape(RoundedRectangle(cornerRadius: 16))
+                    .contextMenu {
+                        Button {
+                            UIPasteboard.general.string = message.content
+                        } label: {
+                            Label("Copy", systemImage: "doc.on.doc")
+                        }
+                    }
 
                 if message.isMine {
                     Text(deliveryText(message.delivery))
