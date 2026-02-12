@@ -130,15 +130,15 @@ pub fn init(
             &ios_dir.join("project.yml"),
             &tpl_ios_project_yml(&bundle_id, &lib_name),
         )?;
-        write_text(&ios_dir.join("Info.plist"), &tpl_ios_info_plist(&display_name))?;
+        write_text(
+            &ios_dir.join("Info.plist"),
+            &tpl_ios_info_plist(&display_name),
+        )?;
         write_text(
             &src_dir.join("App.swift"),
             &tpl_ios_app_swift(&display_name),
         )?;
-        write_text(
-            &src_dir.join("AppManager.swift"),
-            &tpl_ios_app_manager(),
-        )?;
+        write_text(&src_dir.join("AppManager.swift"), &tpl_ios_app_manager())?;
         write_text(
             &src_dir.join("ContentView.swift"),
             &tpl_ios_content_view(&display_name),
@@ -210,18 +210,12 @@ pub fn init(
             &ui_dir.join("MainApp.kt"),
             &tpl_android_main_app(kotlin_pkg, &display_name),
         )?;
-        write_text(
-            &theme_dir.join("Theme.kt"),
-            &tpl_android_theme(kotlin_pkg),
-        )?;
+        write_text(&theme_dir.join("Theme.kt"), &tpl_android_theme(kotlin_pkg))?;
         write_text(
             &res_dir.join("values/strings.xml"),
             &tpl_android_strings(&display_name),
         )?;
-        write_text(
-            &res_dir.join("values/themes.xml"),
-            &tpl_android_themes(),
-        )?;
+        write_text(&res_dir.join("values/themes.xml"), &tpl_android_themes())?;
         // Placeholder empty Kotlin file so Gradle's ensureUniffiGenerated doesn't fail
         // before bindings are generated.
         write_text(
