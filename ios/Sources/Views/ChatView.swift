@@ -6,59 +6,53 @@ struct ChatView: View {
     let onSendMessage: @MainActor (String) -> Void
     @State private var messageText = ""
     @State private var scrollPosition: String?
+    @State private var isAtBottom = false
 
     private static let bottomAnchorId = "chat-bottom-anchor"
     private let scrollButtonBottomPadding: CGFloat = 12
 
     var body: some View {
         if let chat = state.chat, chat.chatId == chatId {
-            ScrollViewReader { proxy in
-                let scrollView = ScrollView {
-                    VStack(spacing: 0) {
-                        LazyVStack(spacing: 8) {
-                            ForEach(chat.messages, id: \.id) { msg in
-                                MessageRow(message: msg)
-                                    .id(msg.id)
-                            }
+            ScrollView {
+                VStack(spacing: 0) {
+                    LazyVStack(spacing: 8) {
+                        ForEach(chat.messages, id: \.id) { msg in
+                            MessageRow(message: msg)
+                                .id(msg.id)
                         }
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 10)
-
-                        BottomAnchor()
-                            .id(Self.bottomAnchorId)
                     }
-                    .scrollTargetLayout()
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 10)
+
+                    BottomAnchor()
+                        .id(Self.bottomAnchorId)
                 }
-                .scrollTargetBehavior(.viewAligned)
-                .overlay(alignment: .bottomTrailing) {
-                    if showScrollButton(for: chat) {
-                        Button {
-                            scrollToBottom(proxy, animated: true, chat: chat)
-                        } label: {
-                            Image(systemName: "arrow.down")
-                                .font(.footnote.weight(.semibold))
-                                .padding(10)
+                .scrollTargetLayout()
+            }
+            .scrollPosition(id: $scrollPosition, anchor: .bottom)
+            .onChange(of: scrollPosition) { _, newPosition in
+                isAtBottom = newPosition == Self.bottomAnchorId
+            }
+            .overlay(alignment: .bottomTrailing) {
+                if !isAtBottom {
+                    Button {
+                        withAnimation(.easeOut(duration: 0.2)) {
+                            scrollPosition = Self.bottomAnchorId
                         }
-                        .foregroundStyle(.primary)
-                        .background(.ultraThinMaterial, in: Circle())
-                        .overlay(Circle().strokeBorder(.quaternary, lineWidth: 0.5))
-                        .padding(.trailing, 16)
-                        .padding(.bottom, scrollButtonBottomPadding)
-                        .accessibilityLabel("Scroll to bottom")
+                    } label: {
+                        Image(systemName: "arrow.down")
+                            .font(.footnote.weight(.semibold))
+                            .padding(10)
                     }
-                }
-                .modifier(FloatingInputBarModifier(content: { messageInputBar(chat: chat) }))
-
-                if #available(iOS 18.0, *) {
-                    scrollView
-                        .scrollPosition(id: $scrollPosition, anchor: .bottom)
-                        .defaultScrollAnchor(.bottom, for: .initialOffset)
-                } else {
-                    scrollView
-                        .scrollPosition(id: $scrollPosition)
-                        .defaultScrollAnchor(.bottom)
+                    .foregroundStyle(.primary)
+                    .background(.ultraThinMaterial, in: Circle())
+                    .overlay(Circle().strokeBorder(.quaternary, lineWidth: 0.5))
+                    .padding(.trailing, 16)
+                    .padding(.bottom, scrollButtonBottomPadding)
+                    .accessibilityLabel("Scroll to bottom")
                 }
             }
+            .modifier(FloatingInputBarModifier(content: { messageInputBar(chat: chat) }))
             .navigationTitle(chat.peerName ?? chat.peerNpub)
             .navigationBarTitleDisplayMode(.inline)
         } else {
@@ -76,34 +70,6 @@ struct ChatView: View {
         onSendMessage(trimmed)
         messageText = ""
     }
-
-    private func scrollToBottom(_ proxy: ScrollViewProxy, animated: Bool, chat: ChatViewState) {
-        if #available(iOS 18.0, *) {
-            scrollPosition = Self.bottomAnchorId
-        } else {
-            scrollPosition = chat.messages.last?.id ?? Self.bottomAnchorId
-        }
-        let action = {
-            proxy.scrollTo(Self.bottomAnchorId, anchor: .bottom)
-        }
-        if animated {
-            withAnimation(.easeOut(duration: 0.2)) {
-                action()
-            }
-        } else {
-            action()
-        }
-    }
-
-    private func showScrollButton(for chat: ChatViewState) -> Bool {
-        guard let position = scrollPosition else { return false }
-        if #available(iOS 18.0, *) {
-            return position != Self.bottomAnchorId
-        }
-        guard let lastId = chat.messages.last?.id else { return false }
-        return position != lastId
-    }
-
 
     @ViewBuilder
     private func messageInputBar(chat: ChatViewState) -> some View {
