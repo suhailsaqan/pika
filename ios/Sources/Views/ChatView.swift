@@ -8,10 +8,9 @@ struct ChatView: View {
     @State private var scrollViewHeight: CGFloat = 0
     @State private var bottomMarkerMaxY: CGFloat = .infinity
     @State private var isAtBottom = true
-    @State private var pendingInitialScroll = false
 
     private static let bottomAnchorId = "chat-bottom-anchor"
-    private let scrollButtonBottomPadding: CGFloat = 28
+    private let scrollButtonBottomPadding: CGFloat = 12
 
     var body: some View {
         if let chat = state.chat, chat.chatId == chatId {
@@ -43,21 +42,6 @@ struct ChatView: View {
                     .onPreferenceChange(BottomMarkerKey.self) { newMaxY in
                         bottomMarkerMaxY = newMaxY
                         updateIsAtBottom()
-                        if pendingInitialScroll && newMaxY.isFinite {
-                            pendingInitialScroll = false
-                            scrollToBottom(proxy, animated: false)
-                        }
-                    }
-                    .onChange(of: chat.messages.count) { _, _ in
-                        if pendingInitialScroll {
-                            pendingInitialScroll = false
-                            scrollToBottom(proxy, animated: false)
-                        } else if isAtBottom {
-                            scrollToBottom(proxy, animated: true)
-                        }
-                    }
-                    .task(id: chat.chatId) {
-                        pendingInitialScroll = true
                     }
                     .overlay(alignment: .bottomTrailing) {
                         if !isAtBottom {
@@ -76,11 +60,6 @@ struct ChatView: View {
                             .accessibilityLabel("Scroll to bottom")
                         }
                     }
-#if DEBUG
-                    .overlay(alignment: .topTrailing) {
-                        debugOverlay
-                    }
-#endif
                     .modifier(FloatingInputBarModifier(content: { messageInputBar(chat: chat) }))
                 }
             }
@@ -121,29 +100,6 @@ struct ChatView: View {
         }
     }
 
-#if DEBUG
-    private var debugOverlay: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text("debug scroll")
-                .font(.caption2.weight(.semibold))
-            Text("isAtBottom: \(isAtBottom ? "true" : "false")")
-            Text("bottomMaxY: \(formatMetric(bottomMarkerMaxY))")
-            Text("scrollH: \(formatMetric(scrollViewHeight))")
-            Text("msgs: \(state.chat?.messages.count ?? 0)")
-        }
-        .font(.caption2)
-        .foregroundStyle(.white)
-        .padding(6)
-        .background(.black.opacity(0.7), in: RoundedRectangle(cornerRadius: 6))
-        .padding(.trailing, 8)
-        .padding(.top, 8)
-    }
-
-    private func formatMetric(_ value: CGFloat) -> String {
-        guard value.isFinite else { return "∞" }
-        return String(format: "%.1f", value)
-    }
-#endif
 
     @ViewBuilder
     private func messageInputBar(chat: ChatViewState) -> some View {
