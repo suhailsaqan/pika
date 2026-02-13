@@ -6,8 +6,10 @@ import UIKit
 struct MyNpubQrSheet: View {
     let npub: String
     let nsecProvider: @MainActor () -> String?
+    let onLogout: @MainActor () -> Void
     @Environment(\.dismiss) private var dismiss
     @State private var showNsec = false
+    @State private var showLogoutConfirm = false
 
     var body: some View {
         NavigationStack {
@@ -82,6 +84,13 @@ struct MyNpubQrSheet: View {
                 }
 
                 Spacer()
+
+                Button("Log out") {
+                    showLogoutConfirm = true
+                }
+                .buttonStyle(.bordered)
+                .tint(.red)
+                .accessibilityIdentifier(TestIds.chatListLogout)
             }
             .padding(16)
             .navigationTitle("My Profile")
@@ -90,6 +99,15 @@ struct MyNpubQrSheet: View {
                     Button("Close") { dismiss() }
                         .accessibilityIdentifier(TestIds.chatListMyNpubClose)
                 }
+            }
+            .confirmationDialog("Log out?", isPresented: $showLogoutConfirm, titleVisibility: .visible) {
+                Button("Log out", role: .destructive) {
+                    onLogout()
+                    dismiss()
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("You can log back in with your nsec.")
             }
         }
     }
@@ -111,7 +129,8 @@ struct MyNpubQrSheet: View {
 #Preview("My npub") {
     MyNpubQrSheet(
         npub: PreviewAppState.sampleNpub,
-        nsecProvider: { nil }
+        nsecProvider: { nil },
+        onLogout: {}
     )
 }
 #endif
