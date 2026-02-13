@@ -39,6 +39,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.pika.app.AppManager
 import com.pika.app.rust.AppAction
+import com.pika.app.rust.CallState
+import com.pika.app.rust.CallStatus
 import com.pika.app.rust.ChatMessage
 import com.pika.app.rust.MessageDeliveryState
 import androidx.compose.material.icons.Icons
@@ -88,6 +90,11 @@ fun ChatScreen(manager: AppManager, chatId: String, padding: PaddingValues) {
         Column(
             modifier = Modifier.fillMaxSize().padding(inner),
         ) {
+            CallControls(
+                manager = manager,
+                chatId = chat.chatId,
+            )
+
             LazyColumn(
                 modifier = Modifier.weight(1f).fillMaxWidth().testTag(TestTags.CHAT_MESSAGE_LIST),
                 reverseLayout = true,
@@ -127,6 +134,110 @@ fun ChatScreen(manager: AppManager, chatId: String, padding: PaddingValues) {
         }
     }
 }
+
+@Composable
+private fun CallControls(manager: AppManager, chatId: String) {
+    val activeCall = manager.state.activeCall
+    val callForChat = if (activeCall?.chatId == chatId) activeCall else null
+    val hasLiveCallElsewhere = activeCall?.let { it.chatId != chatId && isLiveCallStatus(it.status) } ?: false
+
+    Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp)) {
+        if (callForChat != null) {
+            Text(
+                text = callStatusText(callForChat),
+                style = MaterialTheme.typography.labelLarge,
+            )
+            callForChat.debug?.let { debug ->
+                Text(
+                    text = "tx ${debug.txFrames}  rx ${debug.rxFrames}  drop ${debug.rxDropped}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Spacer(Modifier.height(6.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                when (callForChat.status) {
+                    is CallStatus.Ringing -> {
+                        Button(
+                            onClick = { manager.dispatch(AppAction.AcceptCall(chatId)) },
+                            modifier = Modifier.testTag(TestTags.CHAT_CALL_ACCEPT),
+                        ) {
+                            Text("Accept")
+                        }
+                        Button(
+                            onClick = { manager.dispatch(AppAction.RejectCall(chatId)) },
+                            modifier = Modifier.testTag(TestTags.CHAT_CALL_REJECT),
+                        ) {
+                            Text("Reject")
+                        }
+                    }
+                    is CallStatus.Offering, is CallStatus.Connecting, is CallStatus.Active -> {
+                        Button(
+                            onClick = { manager.dispatch(AppAction.ToggleMute) },
+                            modifier = Modifier.testTag(TestTags.CHAT_CALL_MUTE),
+                        ) {
+                            Text(if (callForChat.isMuted) "Unmute" else "Mute")
+                        }
+                        Button(
+                            onClick = { manager.dispatch(AppAction.EndCall) },
+                            modifier = Modifier.testTag(TestTags.CHAT_CALL_END),
+                        ) {
+                            Text("End")
+                        }
+                    }
+                    is CallStatus.Ended -> {
+                        Button(
+                            onClick = { manager.dispatch(AppAction.StartCall(chatId)) },
+                            modifier = Modifier.testTag(TestTags.CHAT_CALL_START),
+                        ) {
+                            Text("Start Again")
+                        }
+                    }
+                }
+            }
+        } else {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Button(
+                    onClick = { manager.dispatch(AppAction.StartCall(chatId)) },
+                    enabled = !hasLiveCallElsewhere,
+                    modifier = Modifier.testTag(TestTags.CHAT_CALL_START),
+                ) {
+                    Text("Start Call")
+                }
+                if (hasLiveCallElsewhere) {
+                    Text(
+                        text = "Another call is active",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        }
+    }
+}
+
+private fun callStatusText(call: CallState): String =
+    when (val status = call.status) {
+        is CallStatus.Offering -> "Calling…"
+        is CallStatus.Ringing -> "Incoming call"
+        is CallStatus.Connecting -> "Connecting…"
+        is CallStatus.Active -> "Call active"
+        is CallStatus.Ended -> "Call ended: ${status.reason}"
+    }
+
+private fun isLiveCallStatus(status: CallStatus): Boolean =
+    when (status) {
+        is CallStatus.Offering,
+        is CallStatus.Ringing,
+        is CallStatus.Connecting,
+        is CallStatus.Active,
+        -> true
+        is CallStatus.Ended -> false
+    }
 
 @Composable
 private fun MessageBubble(message: ChatMessage) {

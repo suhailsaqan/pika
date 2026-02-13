@@ -7,17 +7,21 @@ struct ChatView: View {
 
     var body: some View {
         if let chat = manager.state.currentChat, chat.chatId == chatId {
-            ScrollViewReader { proxy in
-                ScrollView {
-                    LazyVStack(spacing: 8) {
-                        ForEach(chat.messages, id: \.id) { msg in
-                            MessageRow(message: msg)
+            VStack(spacing: 8) {
+                callControls(chat: chat)
+
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        LazyVStack(spacing: 8) {
+                            ForEach(chat.messages, id: \.id) { msg in
+                                MessageRow(message: msg)
+                            }
                         }
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 10)
                     }
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 10)
+                    .modifier(FloatingInputBarModifier(content: { messageInputBar(chat: chat) }))
                 }
-                .modifier(FloatingInputBarModifier(content: { messageInputBar(chat: chat) }))
             }
             .navigationTitle(chat.peerName ?? chat.peerNpub)
             .navigationBarTitleDisplayMode(.inline)
@@ -35,6 +39,96 @@ struct ChatView: View {
         guard !trimmed.isEmpty else { return }
         manager.dispatch(.sendMessage(chatId: chat.chatId, content: trimmed))
         messageText = ""
+    }
+
+    private func isLiveStatus(_ status: CallStatus) -> Bool {
+        switch status {
+        case .offering, .ringing, .connecting, .active:
+            return true
+        case .ended:
+            return false
+        }
+    }
+
+    @ViewBuilder
+    private func callControls(chat: ChatViewState) -> some View {
+        let activeCall = manager.state.activeCall
+        let callForChat = activeCall?.chatId == chat.chatId ? activeCall : nil
+        let hasLiveCallElsewhere = activeCall.map { $0.chatId != chat.chatId && isLiveStatus($0.status) } ?? false
+
+        if let call = callForChat {
+            VStack(alignment: .leading, spacing: 8) {
+                Text(callStatusText(call.status))
+                    .font(.subheadline.weight(.semibold))
+
+                if let debug = call.debug {
+                    Text("tx \(debug.txFrames)  rx \(debug.rxFrames)  drop \(debug.rxDropped)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                HStack(spacing: 8) {
+                    switch call.status {
+                    case .ringing:
+                        Button("Accept") {
+                            manager.dispatch(.acceptCall(chatId: chat.chatId))
+                        }
+                        .accessibilityIdentifier(TestIds.chatCallAccept)
+                        Button("Reject", role: .destructive) {
+                            manager.dispatch(.rejectCall(chatId: chat.chatId))
+                        }
+                        .accessibilityIdentifier(TestIds.chatCallReject)
+                    case .offering, .connecting, .active:
+                        Button(call.isMuted ? "Unmute" : "Mute") {
+                            manager.dispatch(.toggleMute)
+                        }
+                        .accessibilityIdentifier(TestIds.chatCallMute)
+                        Button("End", role: .destructive) {
+                            manager.dispatch(.endCall)
+                        }
+                        .accessibilityIdentifier(TestIds.chatCallEnd)
+                    case .ended:
+                        Button("Start Again") {
+                            manager.dispatch(.startCall(chatId: chat.chatId))
+                        }
+                        .accessibilityIdentifier(TestIds.chatCallStart)
+                    }
+                }
+            }
+            .padding(.horizontal, 12)
+            .padding(.top, 8)
+        } else {
+            HStack {
+                Button("Start Call") {
+                    manager.dispatch(.startCall(chatId: chat.chatId))
+                }
+                .disabled(hasLiveCallElsewhere)
+                .accessibilityIdentifier(TestIds.chatCallStart)
+                if hasLiveCallElsewhere {
+                    Text("Another call is active")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+            }
+            .padding(.horizontal, 12)
+            .padding(.top, 8)
+        }
+    }
+
+    private func callStatusText(_ status: CallStatus) -> String {
+        switch status {
+        case .offering:
+            return "Calling…"
+        case .ringing:
+            return "Incoming call"
+        case .connecting:
+            return "Connecting…"
+        case .active:
+            return "Call active"
+        case let .ended(reason):
+            return "Call ended: \(reason)"
+        }
     }
 
     @ViewBuilder
