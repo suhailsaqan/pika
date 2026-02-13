@@ -69,6 +69,11 @@ struct ChatView: View {
                         .accessibilityLabel("Scroll to bottom")
                     }
                 }
+#if DEBUG
+                .overlay(alignment: .topTrailing) {
+                    debugOverlay
+                }
+#endif
                 .modifier(FloatingInputBarModifier(content: { messageInputBar(chat: chat) }))
             }
             .navigationTitle(chat.peerName ?? chat.peerNpub)
@@ -107,6 +112,25 @@ struct ChatView: View {
             action()
         }
     }
+
+#if DEBUG
+    private var debugOverlay: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text("debug scroll")
+                .font(.caption2.weight(.semibold))
+            Text("isAtBottom: \(isAtBottom ? "true" : "false")")
+            Text("bottomMaxY: \(Int(bottomMarkerMaxY))")
+            Text("scrollH: \(Int(scrollViewHeight))")
+            Text("msgs: \(state.chat?.messages.count ?? 0)")
+        }
+        .font(.caption2)
+        .foregroundStyle(.white)
+        .padding(6)
+        .background(.black.opacity(0.7), in: RoundedRectangle(cornerRadius: 6))
+        .padding(.trailing, 8)
+        .padding(.top, 8)
+    }
+#endif
 
     @ViewBuilder
     private func messageInputBar(chat: ChatViewState) -> some View {
