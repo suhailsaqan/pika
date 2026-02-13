@@ -8,7 +8,6 @@ struct ChatView: View {
     @State private var scrollPosition: String?
     @State private var isAtBottom = false
 
-    private static let bottomAnchorId = "chat-bottom-anchor"
     private let scrollButtonBottomPadding: CGFloat = 12
 
     var body: some View {
@@ -23,21 +22,22 @@ struct ChatView: View {
                     }
                     .padding(.horizontal, 12)
                     .padding(.vertical, 10)
-
-                    BottomAnchor()
-                        .id(Self.bottomAnchorId)
                 }
                 .scrollTargetLayout()
             }
             .scrollPosition(id: $scrollPosition, anchor: .bottom)
             .onChange(of: scrollPosition) { _, newPosition in
-                isAtBottom = newPosition == Self.bottomAnchorId
+                guard let bottomId = chat.messages.last?.id else {
+                    isAtBottom = true
+                    return
+                }
+                isAtBottom = newPosition == bottomId
             }
             .overlay(alignment: .bottomTrailing) {
-                if !isAtBottom {
+                if let bottomId = chat.messages.last?.id, !isAtBottom {
                     Button {
                         withAnimation(.easeOut(duration: 0.2)) {
-                            scrollPosition = Self.bottomAnchorId
+                            scrollPosition = bottomId
                         }
                     } label: {
                         Image(systemName: "arrow.down")
@@ -109,12 +109,6 @@ private struct FloatingInputBarModifier<Bar: View>: ViewModifier {
                 content
             }
         }
-    }
-}
-
-private struct BottomAnchor: View {
-    var body: some View {
-        Color.clear.frame(height: 1)
     }
 }
 
