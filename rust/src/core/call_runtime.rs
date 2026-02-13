@@ -196,7 +196,7 @@ impl AudioBackend {
         let normalized = mode
             .map(str::trim)
             .filter(|v| !v.is_empty())
-            .unwrap_or("synthetic")
+            .unwrap_or(default_backend_mode())
             .to_ascii_lowercase();
         match normalized.as_str() {
             "synthetic" => Ok(Self::synthetic()),
@@ -230,6 +230,17 @@ impl AudioBackend {
             #[cfg(target_os = "ios")]
             Self::Cpal(v) => v.play_pcm_frame(pcm),
         }
+    }
+}
+
+fn default_backend_mode() -> &'static str {
+    #[cfg(target_os = "ios")]
+    {
+        "cpal"
+    }
+    #[cfg(not(target_os = "ios"))]
+    {
+        "synthetic"
     }
 }
 

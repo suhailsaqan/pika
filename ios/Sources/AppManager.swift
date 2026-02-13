@@ -7,6 +7,7 @@ final class AppManager: AppReconciler {
     let rust: FfiApp
     var state: AppState
     private var lastRevApplied: UInt64
+    private let callAudioSession = CallAudioSessionCoordinator()
 
     private let nsecStore = KeychainNsecStore()
 
@@ -62,6 +63,7 @@ final class AppManager: AppReconciler {
         let initial = rust.state()
         self.state = initial
         self.lastRevApplied = initial.rev
+        callAudioSession.apply(activeCall: initial.activeCall)
 
         rust.listenForUpdates(reconciler: self)
 
@@ -95,12 +97,14 @@ final class AppManager: AppReconciler {
         switch update {
         case .fullState(let s):
             state = s
+            callAudioSession.apply(activeCall: s.activeCall)
         case .accountCreated(_, let nsec, _, _):
             // Required by spec-v2: native stores nsec; Rust never persists it.
             if !nsec.isEmpty {
                 nsecStore.setNsec(nsec)
             }
             state.rev = updateRev
+            callAudioSession.apply(activeCall: state.activeCall)
         }
     }
 
