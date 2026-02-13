@@ -13,68 +13,69 @@ struct ChatView: View {
 
     var body: some View {
         if let chat = state.chat, chat.chatId == chatId {
-            ScrollViewReader { proxy in
-                ScrollView {
-                    VStack(spacing: 0) {
-                        LazyVStack(spacing: 8) {
-                            ForEach(chat.messages, id: \.id) { msg in
-                                MessageRow(message: msg)
+            GeometryReader { geo in
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        VStack(spacing: 0) {
+                            LazyVStack(spacing: 8) {
+                                ForEach(chat.messages, id: \.id) { msg in
+                                    MessageRow(message: msg)
+                                }
                             }
-                        }
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 10)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 10)
 
-                        BottomAnchor()
-                            .id(Self.bottomAnchorId)
-                    }
-                }
-                .coordinateSpace(name: "chat-scroll")
-                .background(
-                    GeometryReader { geo in
-                        Color.clear.preference(key: ScrollViewHeightKey.self, value: geo.size.height)
-                    }
-                )
-                .onPreferenceChange(ScrollViewHeightKey.self) { newHeight in
-                    scrollViewHeight = newHeight
-                    updateIsAtBottom()
-                }
-                .onPreferenceChange(BottomMarkerKey.self) { newMaxY in
-                    bottomMarkerMaxY = newMaxY
-                    updateIsAtBottom()
-                }
-                .onChange(of: chat.messages.count) { _, _ in
-                    if isAtBottom {
-                        scrollToBottom(proxy, animated: true)
-                    }
-                }
-                .task(id: chat.chatId) {
-                    isAtBottom = true
-                    await Task.yield()
-                    scrollToBottom(proxy, animated: false)
-                }
-                .overlay(alignment: .bottomTrailing) {
-                    if !isAtBottom {
-                        Button {
-                            scrollToBottom(proxy, animated: true)
-                        } label: {
-                            Image(systemName: "arrow.down")
-                                .font(.footnote.weight(.semibold))
-                                .padding(10)
+                            BottomAnchor()
+                                .id(Self.bottomAnchorId)
                         }
-                        .foregroundStyle(.primary)
-                        .background(.ultraThinMaterial, in: Circle())
-                        .overlay(Circle().strokeBorder(.quaternary, lineWidth: 0.5))
-                        .padding(.trailing, 16)
-                        .padding(.bottom, 76)
-                        .accessibilityLabel("Scroll to bottom")
                     }
-                }
+                    .coordinateSpace(name: "chat-scroll")
+                    .onAppear {
+                        scrollViewHeight = geo.size.height
+                        updateIsAtBottom()
+                    }
+                    .onChange(of: geo.size.height) { _, newHeight in
+                        scrollViewHeight = newHeight
+                        updateIsAtBottom()
+                    }
+                    .onPreferenceChange(BottomMarkerKey.self) { newMaxY in
+                        bottomMarkerMaxY = newMaxY
+                        updateIsAtBottom()
+                    }
+                    .onChange(of: chat.messages.count) { _, _ in
+                        if isAtBottom {
+                            scrollToBottom(proxy, animated: true)
+                        }
+                    }
+                    .task(id: chat.chatId) {
+                        isAtBottom = true
+                        await Task.yield()
+                        scrollToBottom(proxy, animated: false)
+                    }
+                    .overlay(alignment: .bottomTrailing) {
+                        if !isAtBottom {
+                            Button {
+                                scrollToBottom(proxy, animated: true)
+                            } label: {
+                                Image(systemName: "arrow.down")
+                                    .font(.footnote.weight(.semibold))
+                                    .padding(10)
+                            }
+                            .foregroundStyle(.primary)
+                            .background(.ultraThinMaterial, in: Circle())
+                            .overlay(Circle().strokeBorder(.quaternary, lineWidth: 0.5))
+                            .padding(.trailing, 16)
+                            .padding(.bottom, 76)
+                            .accessibilityLabel("Scroll to bottom")
+                        }
+                    }
 #if DEBUG
-                .overlay(alignment: .topTrailing) {
-                    debugOverlay
-                }
+                    .overlay(alignment: .topTrailing) {
+                        debugOverlay
+                    }
 #endif
-                .modifier(FloatingInputBarModifier(content: { messageInputBar(chat: chat) }))
+                    .modifier(FloatingInputBarModifier(content: { messageInputBar(chat: chat) }))
+                }
             }
             .navigationTitle(chat.peerName ?? chat.peerNpub)
             .navigationBarTitleDisplayMode(.inline)
@@ -188,13 +189,6 @@ private struct BottomAnchor: View {
                 )
         }
         .frame(height: 1)
-    }
-}
-
-private struct ScrollViewHeightKey: PreferenceKey {
-    static var defaultValue: CGFloat = 0
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
-        value = nextValue()
     }
 }
 
