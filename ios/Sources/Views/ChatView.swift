@@ -5,21 +5,54 @@ struct ChatView: View {
     let state: ChatScreenState
     let onSendMessage: @MainActor (String) -> Void
     @State private var messageText = ""
+    @State private var scrollPosition: String?
+    @State private var isAtBottom = false
+
+    private let scrollButtonBottomPadding: CGFloat = 12
 
     var body: some View {
         if let chat = state.chat, chat.chatId == chatId {
-            ScrollViewReader { proxy in
-                ScrollView {
+            ScrollView {
+                VStack(spacing: 0) {
                     LazyVStack(spacing: 8) {
                         ForEach(chat.messages, id: \.id) { msg in
                             MessageRow(message: msg)
+                                .id(msg.id)
                         }
                     }
                     .padding(.horizontal, 12)
                     .padding(.vertical, 10)
                 }
-                .modifier(FloatingInputBarModifier(content: { messageInputBar(chat: chat) }))
+                .scrollTargetLayout()
             }
+            .scrollPosition(id: $scrollPosition, anchor: .bottom)
+            .onChange(of: scrollPosition) { _, newPosition in
+                guard let bottomId = chat.messages.last?.id else {
+                    isAtBottom = true
+                    return
+                }
+                isAtBottom = newPosition == bottomId
+            }
+            .overlay(alignment: .bottomTrailing) {
+                if let bottomId = chat.messages.last?.id, !isAtBottom {
+                    Button {
+                        withAnimation(.easeOut(duration: 0.2)) {
+                            scrollPosition = bottomId
+                        }
+                    } label: {
+                        Image(systemName: "arrow.down")
+                            .font(.footnote.weight(.semibold))
+                            .padding(10)
+                    }
+                    .foregroundStyle(.primary)
+                    .background(.ultraThinMaterial, in: Circle())
+                    .overlay(Circle().strokeBorder(.quaternary, lineWidth: 0.5))
+                    .padding(.trailing, 16)
+                    .padding(.bottom, scrollButtonBottomPadding)
+                    .accessibilityLabel("Scroll to bottom")
+                }
+            }
+            .modifier(FloatingInputBarModifier(content: { messageInputBar(chat: chat) }))
             .navigationTitle(chat.peerName ?? chat.peerNpub)
             .navigationBarTitleDisplayMode(.inline)
         } else {
