@@ -119,8 +119,8 @@ struct ChatView: View {
             Text("debug scroll")
                 .font(.caption2.weight(.semibold))
             Text("isAtBottom: \(isAtBottom ? "true" : "false")")
-            Text("bottomMaxY: \(Int(bottomMarkerMaxY))")
-            Text("scrollH: \(Int(scrollViewHeight))")
+            Text("bottomMaxY: \(formatMetric(bottomMarkerMaxY))")
+            Text("scrollH: \(formatMetric(scrollViewHeight))")
             Text("msgs: \(state.chat?.messages.count ?? 0)")
         }
         .font(.caption2)
@@ -129,6 +129,11 @@ struct ChatView: View {
         .background(.black.opacity(0.7), in: RoundedRectangle(cornerRadius: 6))
         .padding(.trailing, 8)
         .padding(.top, 8)
+    }
+
+    private func formatMetric(_ value: CGFloat) -> String {
+        guard value.isFinite else { return "∞" }
+        return String(format: "%.1f", value)
     }
 #endif
 
