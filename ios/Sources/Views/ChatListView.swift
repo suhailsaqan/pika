@@ -52,20 +52,25 @@ struct ChatListView: View {
         .navigationTitle("Chats")
         .toolbar {
             ToolbarItem(placement: .topBarLeading) {
-                Button("Logout") { onLogout() }
-                    .accessibilityIdentifier(TestIds.chatListLogout)
-            }
-            ToolbarItem(placement: .topBarTrailing) {
                 if let npub = state.myNpub {
                     Button {
                         showMyNpub = true
                     } label: {
-                        Image(systemName: "person.circle")
+                        AvatarView(
+                            name: nil,
+                            npub: npub,
+                            pictureUrl: nil,
+                            size: 28
+                        )
                     }
-                    .accessibilityLabel("My npub")
+                    .accessibilityLabel("My profile")
                     .accessibilityIdentifier(TestIds.chatListMyNpub)
                     .sheet(isPresented: $showMyNpub) {
-                        MyNpubQrSheet(npub: npub, nsecProvider: nsecProvider)
+                        MyNpubQrSheet(
+                            npub: npub,
+                            nsecProvider: nsecProvider,
+                            onLogout: onLogout
+                        )
                     }
                 }
             }
