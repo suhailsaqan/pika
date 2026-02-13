@@ -24,6 +24,7 @@ fn write_config(data_dir: &str, relay_url: &str, key_package_relay_url: Option<&
         "relay_urls": [relay_url],
         "call_moq_url": "https://moq.local/anon",
         "call_broadcast_prefix": "pika/calls",
+        "call_audio_backend": "synthetic",
     });
     if let Some(kp) = key_package_relay_url {
         v.as_object_mut().unwrap().insert(
@@ -1006,22 +1007,20 @@ fn call_invite_accept_end_flow_over_local_relay() {
         chat_id: chat_id.clone(),
         content: second_invite,
     });
-    wait_until("alice keeps original active call id", Duration::from_secs(10), || {
-        alice
-            .state()
-            .active_call
-            .as_ref()
-            .map(|c| c.call_id == call_id)
-            .unwrap_or(false)
-    });
+    wait_until(
+        "alice keeps original active call id",
+        Duration::from_secs(10),
+        || {
+            alice
+                .state()
+                .active_call
+                .as_ref()
+                .map(|c| c.call_id == call_id)
+                .unwrap_or(false)
+        },
+    );
 
     // Mute should pause local TX frame generation.
-    let alice_tx_before_mute = alice
-        .state()
-        .active_call
-        .as_ref()
-        .and_then(|c| c.debug.as_ref().map(|d| d.tx_frames))
-        .unwrap_or(0);
     alice.dispatch(AppAction::ToggleMute);
     wait_until("alice muted", Duration::from_secs(10), || {
         alice
@@ -1032,6 +1031,13 @@ fn call_invite_accept_end_flow_over_local_relay() {
             .unwrap_or(false)
     });
     std::thread::sleep(Duration::from_millis(250));
+    let alice_tx_muted_baseline = alice
+        .state()
+        .active_call
+        .as_ref()
+        .and_then(|c| c.debug.as_ref().map(|d| d.tx_frames))
+        .unwrap_or(0);
+    std::thread::sleep(Duration::from_millis(250));
     let alice_tx_while_muted = alice
         .state()
         .active_call
@@ -1039,7 +1045,7 @@ fn call_invite_accept_end_flow_over_local_relay() {
         .and_then(|c| c.debug.as_ref().map(|d| d.tx_frames))
         .unwrap_or(0);
     assert_eq!(
-        alice_tx_while_muted, alice_tx_before_mute,
+        alice_tx_while_muted, alice_tx_muted_baseline,
         "mute should pause tx frame counter"
     );
 

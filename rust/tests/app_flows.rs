@@ -10,6 +10,7 @@ fn write_config(data_dir: &str, disable_network: bool) {
         "disable_network": disable_network,
         "call_moq_url": "https://moq.local/anon",
         "call_broadcast_prefix": "pika/calls",
+        "call_audio_backend": "synthetic",
     });
     std::fs::write(path, serde_json::to_vec(&v).unwrap()).unwrap();
 }

@@ -410,6 +410,7 @@ impl AppCore {
             &session,
             &local_pubkey_hex,
             &peer_pubkey_hex,
+            self.config.call_audio_backend.as_deref(),
             self.core_sender.clone(),
         ) {
             self.toast(format!("Call runtime start failed: {e}"));
@@ -568,6 +569,7 @@ impl AppCore {
                     params,
                     &local_pubkey_hex,
                     &peer_pubkey_hex,
+                    self.config.call_audio_backend.as_deref(),
                     self.core_sender.clone(),
                 ) {
                     self.toast(format!("Call runtime start failed: {e}"));
