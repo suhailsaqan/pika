@@ -176,7 +176,7 @@ pub fn resolve_mentions(
             lookup
                 .get(&hex)
                 .cloned()
-                .unwrap_or_else(|| hex[..8].to_string())
+                .unwrap_or_else(|| npub[..npub.len().min(13)].to_string())
         } else {
             npub[..npub.len().min(12)].to_string()
         };
