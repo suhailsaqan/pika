@@ -541,13 +541,34 @@ impl AppCore {
                     Ok(w) => w,
                     Err(e) => {
                         tracing::error!(%e, "process_welcome failed");
-                        self.toast(format!("Welcome processing failed: {e}"));
                         return;
                     }
                 };
 
+                // Skip if we already joined this group (e.g. Welcome re-delivered
+                // from relays after an app restart).  Reprocessing the Welcome
+                // would reset the MLS ratchet state and break message decryption.
+                let nostr_group_hex = hex::encode(welcome.nostr_group_id);
+                // Check both the in-memory index and MDK storage to catch
+                // duplicates even before refresh_all_from_storage() runs.
+                // Only skip if the group is Active (fully joined). Pending
+                // groups from a prior process_welcome haven't been accepted
+                // yet and should not block the accept flow.
+                let already_joined = sess.groups.contains_key(&nostr_group_hex)
+                    || sess.mdk.get_groups().unwrap_or_default().iter().any(|g| {
+                        hex::encode(g.nostr_group_id) == nostr_group_hex
+                            && g.state == mdk_storage_traits::groups::types::GroupState::Active
+                    });
+                if already_joined {
+                    tracing::debug!(
+                        nostr_group_id = %nostr_group_hex,
+                        "welcome skipped (group already exists)"
+                    );
+                    return;
+                }
+
                 tracing::info!(
-                    nostr_group_id = %hex::encode(welcome.nostr_group_id),
+                    nostr_group_id = %nostr_group_hex,
                     group_name = %welcome.group_name,
                     "welcome_accepted"
                 );
