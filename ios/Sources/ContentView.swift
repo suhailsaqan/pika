@@ -95,6 +95,7 @@ private func screenView(manager: AppManager, state: AppState, screen: Screen) ->
             state: chatListState(from: state),
             onLogout: { manager.logout() },
             onOpenChat: { manager.dispatch(.openChat(chatId: $0)) },
+            onArchiveChat: { manager.dispatch(.archiveChat(chatId: $0)) },
             onNewChat: { manager.dispatch(.pushScreen(screen: .newChat)) },
             onNewGroupChat: { manager.dispatch(.pushScreen(screen: .newGroupChat)) },
             onRefreshProfile: { manager.refreshMyProfile() },

@@ -112,6 +112,9 @@ pub struct AppCore {
     // Nostr kind:0 profile cache (survives across session refreshes).
     profiles: HashMap<String, ProfileCache>, // hex pubkey -> cached profile
     my_metadata: Option<Metadata>,
+
+    // Archived chat IDs -- hidden from the chat list but data stays in MDK.
+    archived_chats: HashSet<String>,
 }
 
 impl AppCore {
@@ -153,12 +156,33 @@ impl AppCore {
             local_outbox: HashMap::new(),
             profiles: HashMap::new(),
             my_metadata: None,
+            archived_chats: HashSet::new(),
         };
 
         // Ensure FfiApp.state() has an immediately-available snapshot.
         let snapshot = this.state.clone();
         this.commit_state_snapshot(&snapshot);
         this
+    }
+
+    fn archived_chats_path(&self) -> std::path::PathBuf {
+        std::path::Path::new(&self.data_dir).join("archived_chats.json")
+    }
+
+    fn load_archived_chats(&mut self) {
+        let path = self.archived_chats_path();
+        if let Ok(data) = std::fs::read_to_string(&path) {
+            if let Ok(set) = serde_json::from_str::<HashSet<String>>(&data) {
+                self.archived_chats = set;
+            }
+        }
+    }
+
+    fn save_archived_chats(&self) {
+        let path = self.archived_chats_path();
+        if let Ok(json) = serde_json::to_string(&self.archived_chats) {
+            let _ = std::fs::write(&path, json);
+        }
     }
 
     fn prune_local_outbox(&mut self, chat_id: &str) {
@@ -1054,6 +1078,18 @@ impl AppCore {
                 self.state.auth = AuthState::LoggedOut;
                 self.emit_auth();
                 self.handle_auth_transition(false);
+            }
+            AppAction::ArchiveChat { chat_id } => {
+                self.archived_chats.insert(chat_id.clone());
+                self.save_archived_chats();
+                // If we're viewing this chat, navigate back.
+                self.state
+                    .router
+                    .screen_stack
+                    .retain(|s| !matches!(s, Screen::Chat { chat_id: id } if id == &chat_id));
+                self.state.current_chat = None;
+                self.refresh_chat_list_from_storage();
+                self.emit_router();
             }
             AppAction::ClearToast => {
                 if self.state.toast.is_some() {

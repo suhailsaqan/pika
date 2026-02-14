@@ -5,6 +5,7 @@ struct ChatListView: View {
     let state: ChatListViewState
     let onLogout: @MainActor () -> Void
     let onOpenChat: @MainActor (String) -> Void
+    let onArchiveChat: @MainActor (String) -> Void
     let onNewChat: @MainActor () -> Void
     let onNewGroupChat: @MainActor () -> Void
     let onRefreshProfile: @MainActor () -> Void
@@ -59,6 +60,14 @@ struct ChatListView: View {
                 }
             }
             .buttonStyle(.plain)
+            .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                Button(role: .destructive) {
+                    onArchiveChat(chat.chatId)
+                } label: {
+                    Label("Archive", systemImage: "archivebox")
+                }
+                .tint(.orange)
+            }
         }
         .navigationTitle("Chats")
         .toolbar {
@@ -156,6 +165,7 @@ struct ChatListView: View {
             ),
             onLogout: {},
             onOpenChat: { _ in },
+            onArchiveChat: { _ in },
             onNewChat: {},
             onNewGroupChat: {},
             onRefreshProfile: {},
@@ -176,6 +186,7 @@ struct ChatListView: View {
             ),
             onLogout: {},
             onOpenChat: { _ in },
+            onArchiveChat: { _ in },
             onNewChat: {},
             onNewGroupChat: {},
             onRefreshProfile: {},
@@ -196,6 +207,7 @@ struct ChatListView: View {
             ),
             onLogout: {},
             onOpenChat: { _ in },
+            onArchiveChat: { _ in },
             onNewChat: {},
             onNewGroupChat: {},
             onRefreshProfile: {},

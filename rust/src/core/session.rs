@@ -58,6 +58,7 @@ impl AppCore {
             self.start_notifications_loop();
         }
 
+        self.load_archived_chats();
         self.refresh_all_from_storage();
         self.refresh_my_profile(false);
         self.refresh_follow_list();

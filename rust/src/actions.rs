@@ -71,6 +71,11 @@ pub enum AppAction {
         name: String,
     },
 
+    // Chat management
+    ArchiveChat {
+        chat_id: String,
+    },
+
     // UI
     ClearToast,
 
@@ -123,6 +128,9 @@ impl AppAction {
             AppAction::RemoveGroupMembers { .. } => "RemoveGroupMembers",
             AppAction::LeaveGroup { .. } => "LeaveGroup",
             AppAction::RenameGroup { .. } => "RenameGroup",
+
+            // Chat management
+            AppAction::ArchiveChat { .. } => "ArchiveChat",
 
             // UI
             AppAction::ClearToast => "ClearToast",

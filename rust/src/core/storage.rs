@@ -37,6 +37,10 @@ impl AppCore {
         for g in groups {
             let chat_id = hex::encode(g.nostr_group_id);
 
+            if self.archived_chats.contains(&chat_id) {
+                continue;
+            }
+
             // Get all members except self.
             let all_members: BTreeSet<PublicKey> =
                 sess.mdk.get_members(&g.mls_group_id).unwrap_or_default();
