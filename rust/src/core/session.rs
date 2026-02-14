@@ -197,67 +197,45 @@ impl AppCore {
 
         let client = sess.client.clone();
         let tx = self.core_sender.clone();
+
+        // Report success immediately so the UI isn't blocked.
+        let _ = tx.send(CoreMsg::Internal(Box::new(
+            InternalEvent::KeyPackagePublished {
+                ok: true,
+                error: None,
+            },
+        )));
+
         self.runtime.spawn(async move {
-            // Ensure these relays exist in the pool. (Session startup adds defaults, but config can change.)
             for r in relays.iter().cloned() {
                 let _ = client.add_relay(r).await;
             }
             client.connect().await;
             client.wait_for_connection(Duration::from_secs(4)).await;
 
-            // Best-effort with retries: some relays require NIP-42 auth before accepting
-            // protected events. They will emit an AUTH challenge; we respond in the
-            // notifications loop, then retry publishing.
-            let mut last_err: Option<String> = None;
+            // Best-effort with retries: some relays require NIP-42 auth before
+            // accepting protected events (NIP-70).
             for attempt in 0..5u8 {
-                let out = client.send_event_to(&relays, &event).await;
-                match out {
+                match client.send_event_to(&relays, &event).await {
+                    Ok(output) if !output.success.is_empty() => return,
                     Ok(output) => {
-                        if !output.success.is_empty() {
-                            let _ = tx.send(CoreMsg::Internal(Box::new(
-                                InternalEvent::KeyPackagePublished {
-                                    ok: true,
-                                    error: None,
-                                },
-                            )));
-                            return;
-                        }
-                        // Aggregate a representative error string.
-                        let err = output
-                            .failed
-                            .values()
-                            .next()
-                            .cloned()
-                            .unwrap_or_else(|| "no relay accepted event".into());
-                        last_err = Some(err.clone());
-
-                        // Retry on common transient causes (auth-required / policy blocks).
-                        // This keeps v2 usable on relays that require a NIP-42 AUTH handshake
-                        // before accepting NIP-70 protected events.
-                        let should_retry = err.contains("event marked as protected")
-                            || err.contains("protected")
+                        let err = output.failed.values().next().cloned().unwrap_or_default();
+                        let should_retry = err.contains("protected")
                             || err.contains("auth")
                             || err.contains("AUTH");
                         if !should_retry {
-                            break;
+                            tracing::warn!(err, "key package publish rejected");
+                            return;
                         }
                     }
                     Err(e) => {
-                        last_err = Some(e.to_string());
+                        tracing::warn!(%e, "key package publish error");
                     }
                 }
-
-                // Backoff: 250ms, 500ms, 1s, 2s, 4s (bounded).
                 let delay_ms = 250u64.saturating_mul(1u64 << attempt);
                 tokio::time::sleep(std::time::Duration::from_millis(delay_ms)).await;
             }
-
-            let _ = tx.send(CoreMsg::Internal(Box::new(
-                InternalEvent::KeyPackagePublished {
-                    ok: false,
-                    error: last_err,
-                },
-            )));
+            tracing::warn!("key package publish failed after retries");
         });
     }
 

@@ -1410,43 +1410,19 @@ impl AppCore {
                     return;
                 }
 
-                let tx = self.core_sender.clone();
+                // Optimistic: report success immediately so the UI doesn't
+                // block on relay round-trips. The broadcast runs in the background.
+                let _ = self.core_sender.send(CoreMsg::Internal(Box::new(
+                    InternalEvent::PublishMessageResult {
+                        chat_id,
+                        rumor_id: rumor_id_hex,
+                        ok: true,
+                        error: None,
+                    },
+                )));
                 self.runtime.spawn(async move {
-                    let out = client.send_event_to(relays, &wrapper).await;
-                    match out {
-                        Ok(output) => {
-                            let ok = !output.success.is_empty();
-                            let err = if ok {
-                                None
-                            } else {
-                                Some(
-                                    output
-                                        .failed
-                                        .values()
-                                        .next()
-                                        .cloned()
-                                        .unwrap_or_else(|| "no relay accepted event".into()),
-                                )
-                            };
-                            let _ = tx.send(CoreMsg::Internal(Box::new(
-                                InternalEvent::PublishMessageResult {
-                                    chat_id,
-                                    rumor_id: rumor_id_hex,
-                                    ok,
-                                    error: err,
-                                },
-                            )));
-                        }
-                        Err(e) => {
-                            let _ = tx.send(CoreMsg::Internal(Box::new(
-                                InternalEvent::PublishMessageResult {
-                                    chat_id,
-                                    rumor_id: rumor_id_hex,
-                                    ok: false,
-                                    error: Some(e.to_string()),
-                                },
-                            )));
-                        }
+                    if let Err(e) = client.send_event_to(relays, &wrapper).await {
+                        tracing::warn!(%e, "message broadcast failed");
                     }
                 });
             }
@@ -1511,43 +1487,17 @@ impl AppCore {
                     )));
                     return;
                 }
-                let tx = self.core_sender.clone();
+                let _ = self.core_sender.send(CoreMsg::Internal(Box::new(
+                    InternalEvent::PublishMessageResult {
+                        chat_id,
+                        rumor_id: ps.rumor_id_hex,
+                        ok: true,
+                        error: None,
+                    },
+                )));
                 self.runtime.spawn(async move {
-                    let out = client.send_event_to(relays, &ps.wrapper_event).await;
-                    match out {
-                        Ok(output) => {
-                            let ok = !output.success.is_empty();
-                            let err = if ok {
-                                None
-                            } else {
-                                Some(
-                                    output
-                                        .failed
-                                        .values()
-                                        .next()
-                                        .cloned()
-                                        .unwrap_or_else(|| "no relay accepted event".into()),
-                                )
-                            };
-                            let _ = tx.send(CoreMsg::Internal(Box::new(
-                                InternalEvent::PublishMessageResult {
-                                    chat_id,
-                                    rumor_id: ps.rumor_id_hex,
-                                    ok,
-                                    error: err,
-                                },
-                            )));
-                        }
-                        Err(e) => {
-                            let _ = tx.send(CoreMsg::Internal(Box::new(
-                                InternalEvent::PublishMessageResult {
-                                    chat_id,
-                                    rumor_id: ps.rumor_id_hex,
-                                    ok: false,
-                                    error: Some(e.to_string()),
-                                },
-                            )));
-                        }
+                    if let Err(e) = client.send_event_to(relays, &ps.wrapper_event).await {
+                        tracing::warn!(%e, "message retry broadcast failed");
                     }
                 });
             }
@@ -2009,46 +1959,21 @@ impl AppCore {
         let chat_id = chat_id.to_string();
         let mls_group_id_clone = mls_group_id.clone();
 
+        // Optimistic: report success immediately so group operations don't
+        // block on slow/dead relays. The broadcast continues in the background.
+        let _ = tx.send(CoreMsg::Internal(Box::new(
+            InternalEvent::GroupEvolutionPublished {
+                chat_id: chat_id.clone(),
+                mls_group_id: mls_group_id_clone,
+                welcome_rumors,
+                added_pubkeys,
+                ok: true,
+                error: None,
+            },
+        )));
         self.runtime.spawn(async move {
-            let out = client.send_event_to(&relays, &event).await;
-            match out {
-                Ok(output) => {
-                    let ok = !output.success.is_empty();
-                    let err = if ok {
-                        None
-                    } else {
-                        Some(
-                            output
-                                .failed
-                                .values()
-                                .next()
-                                .cloned()
-                                .unwrap_or_else(|| "no relay accepted".into()),
-                        )
-                    };
-                    let _ = tx.send(CoreMsg::Internal(Box::new(
-                        InternalEvent::GroupEvolutionPublished {
-                            chat_id,
-                            mls_group_id: mls_group_id_clone,
-                            welcome_rumors,
-                            added_pubkeys,
-                            ok,
-                            error: err,
-                        },
-                    )));
-                }
-                Err(e) => {
-                    let _ = tx.send(CoreMsg::Internal(Box::new(
-                        InternalEvent::GroupEvolutionPublished {
-                            chat_id,
-                            mls_group_id: mls_group_id_clone,
-                            welcome_rumors: None,
-                            added_pubkeys: vec![],
-                            ok: false,
-                            error: Some(e.to_string()),
-                        },
-                    )));
-                }
+            if let Err(e) = client.send_event_to(&relays, &event).await {
+                tracing::warn!(%e, chat_id, "evolution event broadcast failed");
             }
         });
     }

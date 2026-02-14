@@ -783,7 +783,9 @@ fn send_failure_then_retry_succeeds_over_local_relay() {
 
     let chat_id = app.state().current_chat.as_ref().unwrap().chat_id.clone();
 
-    // Force publish failure for kind 445.
+    // Publishing is now fire-and-forget (optimistic): the app reports
+    // Sent immediately regardless of relay acceptance.  Verify that even
+    // when the relay rejects kind-445 events, the UI still shows Sent.
     {
         let mut st = relay.state.lock().unwrap();
         st.reject_kind445 = true;
@@ -795,42 +797,18 @@ fn send_failure_then_retry_succeeds_over_local_relay() {
         content: content.into(),
     });
 
-    wait_until("message failed", Duration::from_secs(10), || {
-        app.state()
-            .current_chat
-            .as_ref()
-            .and_then(|c| c.messages.iter().find(|m| m.content == content))
-            .map(|m| matches!(m.delivery, pika_core::MessageDeliveryState::Failed { .. }))
-            .unwrap_or(false)
-    });
-
-    let msg_id = app
-        .state()
-        .current_chat
-        .as_ref()
-        .and_then(|c| c.messages.iter().find(|m| m.content == content))
-        .map(|m| m.id.clone())
-        .expect("missing message");
-
-    // Allow publishes and retry.
-    {
-        let mut st = relay.state.lock().unwrap();
-        st.reject_kind445 = false;
-    }
-
-    app.dispatch(AppAction::RetryMessage {
-        chat_id: chat_id.clone(),
-        message_id: msg_id,
-    });
-
-    wait_until("message sent", Duration::from_secs(10), || {
-        app.state()
-            .current_chat
-            .as_ref()
-            .and_then(|c| c.messages.iter().find(|m| m.content == content))
-            .map(|m| matches!(m.delivery, pika_core::MessageDeliveryState::Sent))
-            .unwrap_or(false)
-    });
+    wait_until(
+        "message optimistically sent",
+        Duration::from_secs(10),
+        || {
+            app.state()
+                .current_chat
+                .as_ref()
+                .and_then(|c| c.messages.iter().find(|m| m.content == content))
+                .map(|m| matches!(m.delivery, pika_core::MessageDeliveryState::Sent))
+                .unwrap_or(false)
+        },
+    );
 
     drop(relay);
     relay_thread.join().unwrap();
@@ -879,6 +857,20 @@ fn duplicate_group_message_does_not_duplicate_in_ui() {
             .iter()
             .any(|e| e.kind == Kind::MlsKeyPackageRelays && e.pubkey == bob_pubkey)
     });
+
+    // Key package publishing is fire-and-forget (optimistic), so we must
+    // wait for the event to actually land on the relay before Alice tries
+    // to fetch it.
+    wait_until(
+        "bob key package published to kp relay",
+        Duration::from_secs(10),
+        || {
+            let st = kp_relay.state.lock().unwrap();
+            st.events
+                .iter()
+                .any(|e| e.kind == Kind::MlsKeyPackage && e.pubkey == bob_pubkey)
+        },
+    );
 
     // Create DM (key package fetch + giftwrap welcome).
     alice.dispatch(AppAction::CreateChat {
