@@ -9,6 +9,7 @@ use flume::Sender;
 use pika_media::codec_opus::{OpusCodec, OpusPacket};
 use pika_media::crypto::{decrypt_frame, encrypt_frame, FrameInfo, FrameKeyMaterial};
 use pika_media::jitter::JitterBuffer;
+use pika_media::network::NetworkRelay;
 use pika_media::session::{
     InMemoryRelay, MediaFrame, MediaSession, MediaSessionError, SessionConfig,
 };
@@ -93,6 +94,52 @@ fn shared_relay_for(session: &CallSessionParams) -> InMemoryRelay {
     map.entry(key).or_default().clone()
 }
 
+fn is_real_moq_url(url: &str) -> bool {
+    url.starts_with("https://") || url.starts_with("http://")
+}
+
+enum MediaTransport {
+    InMemory(MediaSession),
+    Network(NetworkRelay),
+}
+
+impl MediaTransport {
+    fn connect(&mut self) -> Result<(), MediaSessionError> {
+        match self {
+            Self::InMemory(session) => session.connect(),
+            Self::Network(relay) => relay.connect(),
+        }
+    }
+
+    fn subscribe(
+        &self,
+        track: &TrackAddress,
+    ) -> Result<std::sync::mpsc::Receiver<MediaFrame>, MediaSessionError> {
+        match self {
+            Self::InMemory(session) => session.subscribe(track),
+            Self::Network(relay) => relay.subscribe(track),
+        }
+    }
+
+    fn publish(
+        &self,
+        track: &TrackAddress,
+        frame: MediaFrame,
+    ) -> Result<usize, MediaSessionError> {
+        match self {
+            Self::InMemory(session) => session.publish(track, frame),
+            Self::Network(relay) => relay.publish(track, frame),
+        }
+    }
+
+    fn disconnect(&mut self) {
+        match self {
+            Self::InMemory(session) => session.disconnect(),
+            Self::Network(relay) => relay.disconnect(),
+        }
+    }
+}
+
 impl CallRuntime {
     #[allow(clippy::too_many_arguments)]
     pub(super) fn on_call_connecting(
@@ -105,15 +152,21 @@ impl CallRuntime {
     ) -> Result<(), String> {
         self.on_call_ended(call_id);
 
-        let relay = shared_relay_for(session);
-        let mut media = MediaSession::with_relay(
-            SessionConfig {
-                moq_url: session.moq_url.clone(),
-                relay_auth: session.relay_auth.clone(),
-            },
-            relay,
-        );
-        media.connect().map_err(to_string_error)?;
+        let mut transport = if is_real_moq_url(&session.moq_url) {
+            MediaTransport::Network(
+                NetworkRelay::new(&session.moq_url).map_err(to_string_error)?,
+            )
+        } else {
+            let relay = shared_relay_for(session);
+            MediaTransport::InMemory(MediaSession::with_relay(
+                SessionConfig {
+                    moq_url: session.moq_url.clone(),
+                    relay_auth: session.relay_auth.clone(),
+                },
+                relay,
+            ))
+        };
+        transport.connect().map_err(to_string_error)?;
 
         let media_ctx = media_crypto;
         let local_path =
@@ -127,7 +180,7 @@ impl CallRuntime {
             broadcast_path: peer_path,
             track_name: "audio0".to_string(),
         };
-        let rx = media.subscribe(&subscribe_track).map_err(to_string_error)?;
+        let rx = transport.subscribe(&subscribe_track).map_err(to_string_error)?;
         let tx_keys = media_ctx.tx_keys;
         let rx_keys = media_ctx.rx_keys;
 
@@ -217,7 +270,7 @@ impl CallRuntime {
                             keyframe: true,
                             payload: encrypted_payload,
                         };
-                        if media.publish(&publish_track, frame).is_ok() {
+                        if transport.publish(&publish_track, frame).is_ok() {
                             tx_frames = tx_frames.saturating_add(1);
                             seq = seq.saturating_add(1);
                         }
