@@ -218,6 +218,8 @@ impl NetworkRelay {
                 let track = Track::new(&track_name);
                 let mut track_cons = broadcast_cons.subscribe_track(&track);
 
+                tracing::info!("subscriber: starting group receive loop");
+
                 let mut seq = 0u64;
                 loop {
                     match track_cons.next_group().await {
@@ -232,17 +234,28 @@ impl NetworkRelay {
                                     };
                                     seq += 1;
                                     if tx.send(frame).is_err() {
-                                        break; // receiver dropped
+                                        tracing::info!("subscriber: receiver dropped, stopping");
+                                        break;
                                     }
                                 }
                                 Ok(None) => continue,
-                                Err(_) => break,
+                                Err(e) => {
+                                    tracing::warn!("subscriber: read_frame error: {e}");
+                                    break;
+                                }
                             }
                         }
-                        Ok(None) => break, // track closed
-                        Err(_) => break,
+                        Ok(None) => {
+                            tracing::info!("subscriber: track closed (no more groups)");
+                            break;
+                        }
+                        Err(e) => {
+                            tracing::warn!("subscriber: next_group error: {e}");
+                            break;
+                        }
                     }
                 }
+                tracing::info!("subscriber: loop ended after {seq} frames");
             });
         });
 
