@@ -168,16 +168,44 @@ pub trait MediaTransport: Send + Sync {
 - Tests / synthetic mode → `InMemoryTransport`
 - Real calls → `NetworkTransport`
 
-## Quick Wins for Immediate Progress
+## Validated Results
 
-1. **Fix the MOQ relay cert** (Layer 0) — unblocks everything downstream.
-2. **Write the QUIC probe** (Layer 1) — confirms infra works, 30 min of code.
-3. **Scope the `moq-native` integration** — look at `moq-native`'s API surface. How does it do pub/sub? What's the session lifecycle? This determines Layer 2 effort.
+### Layer 0: MOQ Relay Cert Fix ✅
+- Fixed `~/configs/hosts/hetzner/moq.nix` to use wildcard cert path (`wildcard_.justinmoon.com/`)
+- Deployed via `just switch hetzner`
+- `moq-relay.service` now running, listening on UDP/443
 
-```bash
-# Check if moq crates are available
-cargo search moq-lite
-cargo search moq-native
-# Or look at the upstream repo referenced in ~/configs/flake.nix:
-# github:kixelated/moq
+### Layer 1: QUIC Connectivity ✅
+- Built `moq-cli` from `~/code/moq` with quinn feature
+- Successfully connected and established MOQ session with `moq.justinmoon.com`
+
+### Layer 2: MOQ Pub/Sub ✅
+- Custom `pubsub_test` example in moq-native: 15/20 frames through real relay
+- Some reordering (expected: QUIC uses independent streams per group)
+
+### Layer 2.5: pika-media NetworkRelay ✅
+- Added `moq-native`/`moq-lite` deps behind `network` feature flag
+- Implemented `NetworkRelay` in `crates/pika-media/src/network.rs`
+- Bridges async MOQ pub/sub into sync `mpsc::Receiver<MediaFrame>` interface
+- `network_relay_test` example: 20/20 frames through real relay
+- Wired `call_runtime.rs` to auto-select `NetworkRelay` for `https://` URLs, `InMemoryRelay` for tests
+
+### Layer 3: Full-Duplex Encrypted Audio ✅
+- `duplex_test` example: two parties, each publish+subscribe, frame encryption/decryption
+- Both directions flow: ~96% delivery (best run), ~60-70% (under sustained load)
+- 1 crypto error per side (expected: warmup frames are unencrypted)
+
+### Remaining: Layer 4 (CLI-to-Bot) and Layer 5 (iPhone)
+- Need to add call signaling commands to `pika-cli` or test directly against deployed streambot
+- iPhone testing (Layer 5) only needed after Layer 4 passes
+
+## Architecture Reference
+
+```
+call_runtime.rs
+  └─ MediaTransport enum
+       ├─ InMemory(MediaSession)  ← test URLs
+       └─ Network(NetworkRelay)   ← https:// URLs
+              └─ moq-native::Client
+                   └─ QUIC/WebTransport to moq.justinmoon.com
 ```
