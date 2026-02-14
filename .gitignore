@@ -28,3 +28,4 @@ worktrees
 .env
 .env.local
 .cargo/config.toml
+.pika-cli-test

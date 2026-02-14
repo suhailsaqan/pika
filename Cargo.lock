@@ -2990,6 +2990,7 @@ dependencies = [
  "paranoid-android",
  "pika-media",
  "rand 0.8.5",
+ "rustls",
  "serde",
  "serde_json",
  "tempfile",

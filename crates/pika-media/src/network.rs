@@ -240,8 +240,11 @@ impl NetworkRelay {
                                 }
                                 Ok(None) => continue,
                                 Err(e) => {
-                                    tracing::warn!("subscriber: read_frame error: {e}");
-                                    break;
+                                    // Groups can be cancelled when newer groups arrive
+                                    // and the relay expires old ones. This is normal for
+                                    // live media -- just move on to the next group.
+                                    tracing::debug!("subscriber: read_frame error (continuing): {e}");
+                                    continue;
                                 }
                             }
                         }

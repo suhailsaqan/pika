@@ -22,7 +22,7 @@ fn write_config(data_dir: &str, relay_url: &str, key_package_relay_url: Option<&
     let mut v = serde_json::json!({
         "disable_network": false,
         "relay_urls": [relay_url],
-        "call_moq_url": "https://moq.local/anon",
+        "call_moq_url": "ws://moq.local/anon",
         "call_broadcast_prefix": "pika/calls",
         "call_audio_backend": "synthetic",
     });
