@@ -123,7 +123,8 @@ struct ChatView: View {
             }
 
             HStack(spacing: 10) {
-                TextField("Message", text: $messageText)
+                TextField("Message", text: $messageText, axis: .vertical)
+                    .lineLimit(1...6)
                     .onChange(of: messageText) { _, newValue in
                         if chat.isGroup {
                             let triggered = newValue.hasSuffix("@") &&
@@ -135,7 +136,6 @@ struct ChatView: View {
                             }
                         }
                     }
-                    .onSubmit { sendMessage() }
                     .accessibilityIdentifier(TestIds.chatMessageInput)
 
                 Button(action: { sendMessage() }) {
@@ -195,7 +195,7 @@ private struct GlassInputModifier: ViewModifier {
         content
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
-            .background(.ultraThinMaterial, in: Capsule())
+            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 20))
             .padding(12)
     }
 }
