@@ -7,7 +7,7 @@ Goal: full voice comms: real client ↔ `moq.justinmoon.com` ↔ OpenClaw bot (o
 ## Context (identifiers)
 
 - MOQ relay URL (v0 auth root): `https://moq.justinmoon.com/anon`
-- Bot npub: `npub1rtrxx9eyvag0ap3v73c4dvsqq5d2yxwe5d72qxrfpwe5svr96wuqed4p38`
+- Bot npub: `npub1z6ujr8rad5zp9sr9w22rkxm0truulf2jntrks6rlwskhdmqsawpqmnjlcp`
 - Allowed callers (streambot `marmotd --allow-pubkey`):
   - Justin (real): `npub1zxu639qym0esxnn7rzrt48wycmfhdu3e5yvzwx7ja3t84zyc2r8qz8cx2y` (hex `11b9a894...`)
   - Test key: `npub1y2z0c7un9dwmhk4zrpw8df8p0gh0j2x54qhznwqjnp452ju4078srmwp70` (hex `2284fc7b...`)
@@ -93,7 +93,7 @@ Actions (laptop, in this worktree):
   - `export PIKA_TEST_NSEC=...` (from gitignored `.env` or environment)
 - Run:
   - `cd ~/code/pika/worktrees/audio`
-  - `cargo run -p pika_core --bin interop_openclaw_voice -- npub1rtrxx9eyvag0ap3v73c4dvsqq5d2yxwe5d72qxrfpwe5svr96wuqed4p38`
+  - `cargo run -p pika_core --bin interop_openclaw_voice -- npub1z6ujr8rad5zp9sr9w22rkxm0truulf2jntrks6rlwskhdmqsawpqmnjlcp`
 - In parallel, tail server logs:
   - `ssh streambot 'journalctl -u openclaw-gateway -f'`
 
