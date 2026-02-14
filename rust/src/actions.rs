@@ -77,8 +77,20 @@ pub enum AppAction {
     // Lifecycle
     Foregrounded,
 
+    // Peer profile
+    OpenPeerProfile {
+        pubkey: String,
+    },
+    ClosePeerProfile,
+
     // Follow list
     RefreshFollowList,
+    FollowUser {
+        pubkey: String,
+    },
+    UnfollowUser {
+        pubkey: String,
+    },
 }
 
 impl AppAction {
@@ -118,8 +130,14 @@ impl AppAction {
             // Lifecycle
             AppAction::Foregrounded => "Foregrounded",
 
+            // Peer profile
+            AppAction::OpenPeerProfile { .. } => "OpenPeerProfile",
+            AppAction::ClosePeerProfile => "ClosePeerProfile",
+
             // Follow list
             AppAction::RefreshFollowList => "RefreshFollowList",
+            AppAction::FollowUser { .. } => "FollowUser",
+            AppAction::UnfollowUser { .. } => "UnfollowUser",
         }
     }
 }

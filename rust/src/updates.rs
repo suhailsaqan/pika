@@ -110,4 +110,18 @@ pub enum InternalEvent {
     FollowListFetched {
         entries: Vec<(String, Option<String>, Option<String>)>, // (hex_pubkey, name, picture_url)
     },
+
+    // Peer profile fetch result
+    PeerProfileFetched {
+        pubkey: String,
+        name: Option<String>,
+        about: Option<String>,
+        picture_url: Option<String>,
+    },
+
+    // Contact list modification result
+    ContactListModifyFailed {
+        pubkey: String,
+        revert_to: bool, // revert is_followed to this value
+    },
 }

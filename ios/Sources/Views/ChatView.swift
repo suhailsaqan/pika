@@ -6,6 +6,7 @@ struct ChatView: View {
     let state: ChatScreenState
     let onSendMessage: @MainActor (String) -> Void
     let onGroupInfo: (@MainActor () -> Void)?
+    let onTapSender: (@MainActor (String) -> Void)?
     @State private var messageText = ""
     @State private var scrollPosition: String?
     @State private var isAtBottom = false
@@ -14,11 +15,12 @@ struct ChatView: View {
 
     private let scrollButtonBottomPadding: CGFloat = 12
 
-    init(chatId: String, state: ChatScreenState, onSendMessage: @escaping @MainActor (String) -> Void, onGroupInfo: (@MainActor () -> Void)? = nil) {
+    init(chatId: String, state: ChatScreenState, onSendMessage: @escaping @MainActor (String) -> Void, onGroupInfo: (@MainActor () -> Void)? = nil, onTapSender: (@MainActor (String) -> Void)? = nil) {
         self.chatId = chatId
         self.state = state
         self.onSendMessage = onSendMessage
         self.onGroupInfo = onGroupInfo
+        self.onTapSender = onTapSender
     }
 
     var body: some View {
@@ -27,7 +29,7 @@ struct ChatView: View {
                 VStack(spacing: 0) {
                     LazyVStack(spacing: 8) {
                         ForEach(groupedMessages(chat)) { group in
-                            MessageGroupRow(group: group, showSender: chat.isGroup, onSendMessage: onSendMessage)
+                            MessageGroupRow(group: group, showSender: chat.isGroup, onSendMessage: onSendMessage, onTapSender: onTapSender)
                         }
                     }
                     .padding(.horizontal, 12)
@@ -63,7 +65,7 @@ struct ChatView: View {
                 }
             }
             .modifier(FloatingInputBarModifier(content: { messageInputBar(chat: chat) }))
-            .navigationTitle(chatTitle(chat))
+            .navigationTitle(chat.isGroup ? chatTitle(chat) : "")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 if chat.isGroup {
@@ -74,6 +76,25 @@ struct ChatView: View {
                             Image(systemName: "info.circle")
                         }
                         .accessibilityIdentifier(TestIds.chatGroupInfo)
+                    }
+                } else if let peer = chat.members.first {
+                    ToolbarItem(placement: .principal) {
+                        Button {
+                            onTapSender?(peer.pubkey)
+                        } label: {
+                            HStack(spacing: 8) {
+                                AvatarView(
+                                    name: peer.name,
+                                    npub: peer.npub,
+                                    pictureUrl: peer.pictureUrl,
+                                    size: 24
+                                )
+                                Text(chatTitle(chat))
+                                    .font(.headline)
+                                    .foregroundStyle(.primary)
+                            }
+                        }
+                        .buttonStyle(.plain)
                     }
                 }
             }
@@ -336,6 +357,7 @@ private struct MessageGroupRow: View {
     let group: GroupedChatMessage
     var showSender: Bool = false
     let onSendMessage: @MainActor (String) -> Void
+    var onTapSender: (@MainActor (String) -> Void)?
 
     private let avatarSize: CGFloat = 24
     private let avatarGutterWidth: CGFloat = 28
@@ -361,12 +383,14 @@ private struct MessageGroupRow: View {
             )
             .frame(width: avatarGutterWidth, alignment: .leading)
             .accessibilityHidden(true)
+            .onTapGesture { onTapSender?(group.senderPubkey) }
 
             VStack(alignment: .leading, spacing: 3) {
                 if showSender {
                     Text(displaySenderName)
                         .font(.caption2.weight(.semibold))
                         .foregroundStyle(.secondary)
+                        .onTapGesture { onTapSender?(group.senderPubkey) }
                 }
                 MessageBubbleStack(group: group, onSendMessage: onSendMessage)
             }

@@ -224,6 +224,7 @@ enum PreviewAppState {
             chatList: chatList,
             currentChat: currentChat,
             followList: followList,
+            peerProfile: nil,
             toast: toast
         )
     }

@@ -8,6 +8,7 @@ pub struct AppState {
     pub chat_list: Vec<ChatSummary>,
     pub current_chat: Option<ChatViewState>,
     pub follow_list: Vec<FollowListEntry>,
+    pub peer_profile: Option<PeerProfileState>,
     pub toast: Option<String>,
 }
 
@@ -25,6 +26,7 @@ impl AppState {
             chat_list: vec![],
             current_chat: None,
             follow_list: vec![],
+            peer_profile: None,
             toast: None,
         }
     }
@@ -94,6 +96,16 @@ pub struct MemberInfo {
     pub npub: String,
     pub name: Option<String>,
     pub picture_url: Option<String>,
+}
+
+#[derive(uniffi::Record, Clone, Debug)]
+pub struct PeerProfileState {
+    pub pubkey: String,
+    pub npub: String,
+    pub name: Option<String>,
+    pub about: Option<String>,
+    pub picture_url: Option<String>,
+    pub is_followed: bool,
 }
 
 #[derive(uniffi::Record, Clone, Debug)]

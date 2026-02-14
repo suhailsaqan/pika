@@ -127,8 +127,24 @@ private func screenView(manager: AppManager, state: AppState, screen: Screen) ->
             onSendMessage: { manager.dispatch(.sendMessage(chatId: chatId, content: $0)) },
             onGroupInfo: {
                 manager.dispatch(.pushScreen(screen: .groupInfo(chatId: chatId)))
+            },
+            onTapSender: { pubkey in
+                manager.dispatch(.openPeerProfile(pubkey: pubkey))
             }
         )
+        .sheet(isPresented: Binding(
+            get: { state.peerProfile != nil },
+            set: { if !$0 { manager.dispatch(.closePeerProfile) } }
+        )) {
+            if let profile = state.peerProfile {
+                PeerProfileSheet(
+                    profile: profile,
+                    onFollow: { manager.dispatch(.followUser(pubkey: profile.pubkey)) },
+                    onUnfollow: { manager.dispatch(.unfollowUser(pubkey: profile.pubkey)) },
+                    onClose: { manager.dispatch(.closePeerProfile) }
+                )
+            }
+        }
     case .groupInfo(let chatId):
         GroupInfoView(
             state: groupInfoState(from: state),
@@ -143,8 +159,24 @@ private func screenView(manager: AppManager, state: AppState, screen: Screen) ->
             },
             onRenameGroup: { name in
                 manager.dispatch(.renameGroup(chatId: chatId, name: name))
+            },
+            onTapMember: { pubkey in
+                manager.dispatch(.openPeerProfile(pubkey: pubkey))
             }
         )
+        .sheet(isPresented: Binding(
+            get: { state.peerProfile != nil },
+            set: { if !$0 { manager.dispatch(.closePeerProfile) } }
+        )) {
+            if let profile = state.peerProfile {
+                PeerProfileSheet(
+                    profile: profile,
+                    onFollow: { manager.dispatch(.followUser(pubkey: profile.pubkey)) },
+                    onUnfollow: { manager.dispatch(.unfollowUser(pubkey: profile.pubkey)) },
+                    onClose: { manager.dispatch(.closePeerProfile) }
+                )
+            }
+        }
     }
 }
 

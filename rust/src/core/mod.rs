@@ -47,6 +47,7 @@ struct GroupIndexEntry {
 #[derive(Debug, Clone)]
 struct ProfileCache {
     name: Option<String>,
+    about: Option<String>,
     picture_url: Option<String>,
     fetched_at: i64,
 }
@@ -597,6 +598,7 @@ impl AppCore {
                         hex_pubkey,
                         ProfileCache {
                             name,
+                            about: None,
                             picture_url,
                             fetched_at: now,
                         },
@@ -843,6 +845,7 @@ impl AppCore {
                         hex_pubkey.clone(),
                         ProfileCache {
                             name: name.clone(),
+                            about: None,
                             picture_url: picture_url.clone(),
                             fetched_at: now,
                         },
@@ -873,12 +876,52 @@ impl AppCore {
                 });
                 self.state.follow_list = follow_list;
                 self.set_busy(|b| b.fetching_follow_list = false);
+                // Update peer_profile.is_followed if the sheet is open.
+                if let Some(ref mut pp) = self.state.peer_profile {
+                    pp.is_followed = self.state.follow_list.iter().any(|f| f.pubkey == pp.pubkey);
+                }
                 // Refresh chat list too since profiles were updated.
                 self.refresh_chat_list_from_storage();
                 if let Some(chat) = self.state.current_chat.as_ref() {
                     let chat_id = chat.chat_id.clone();
                     self.refresh_current_chat(&chat_id);
                 }
+            }
+            InternalEvent::PeerProfileFetched {
+                pubkey,
+                name,
+                about,
+                picture_url,
+            } => {
+                // Update cache.
+                let now = now_seconds();
+                self.profiles.insert(
+                    pubkey.clone(),
+                    ProfileCache {
+                        name: name.clone(),
+                        about: about.clone(),
+                        picture_url: picture_url.clone(),
+                        fetched_at: now,
+                    },
+                );
+                // Update peer_profile if it's still showing this pubkey.
+                if let Some(ref mut pp) = self.state.peer_profile {
+                    if pp.pubkey == pubkey {
+                        pp.name = name;
+                        pp.about = about;
+                        pp.picture_url = picture_url;
+                        self.emit_state();
+                    }
+                }
+            }
+            InternalEvent::ContactListModifyFailed { pubkey, revert_to } => {
+                if let Some(ref mut pp) = self.state.peer_profile {
+                    if pp.pubkey == pubkey {
+                        pp.is_followed = revert_to;
+                    }
+                }
+                self.toast("Failed to update follow list".to_string());
+                self.emit_state();
             }
             InternalEvent::GroupMessageReceived { event } => {
                 tracing::debug!(event_id = %event.id.to_hex(), "group_message_received");
@@ -1026,11 +1069,49 @@ impl AppCore {
                     self.refresh_follow_list();
                 }
             }
+            AppAction::OpenPeerProfile { pubkey } => {
+                if !self.is_logged_in() {
+                    return;
+                }
+                let npub = PublicKey::from_hex(&pubkey)
+                    .ok()
+                    .and_then(|pk| pk.to_bech32().ok())
+                    .unwrap_or_else(|| pubkey.clone());
+                let cached = self.profiles.get(&pubkey);
+                let is_followed = self.state.follow_list.iter().any(|f| f.pubkey == pubkey);
+                self.state.peer_profile = Some(crate::state::PeerProfileState {
+                    pubkey: pubkey.clone(),
+                    npub,
+                    name: cached.and_then(|p| p.name.clone()),
+                    about: cached.and_then(|p| p.about.clone()),
+                    picture_url: cached.and_then(|p| p.picture_url.clone()),
+                    is_followed,
+                });
+                self.emit_state();
+                self.fetch_peer_profile(&pubkey);
+                self.refresh_follow_list();
+            }
+            AppAction::ClosePeerProfile => {
+                self.state.peer_profile = None;
+                self.emit_state();
+            }
             AppAction::RefreshFollowList => {
                 if !self.is_logged_in() {
                     return;
                 }
                 self.refresh_follow_list();
+            }
+            AppAction::FollowUser { pubkey } => {
+                if !self.is_logged_in() {
+                    return;
+                }
+                self.follow_user(&pubkey);
+            }
+            AppAction::UnfollowUser { pubkey } => {
+                if !self.is_logged_in() {
+                    return;
+                }
+                self.unfollow_user(&pubkey);
             }
             AppAction::RefreshMyProfile => {
                 if !self.is_logged_in() {

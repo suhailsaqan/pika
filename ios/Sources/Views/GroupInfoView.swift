@@ -7,6 +7,7 @@ struct GroupInfoView: View {
     let onRemoveMember: @MainActor (String) -> Void
     let onLeaveGroup: @MainActor () -> Void
     let onRenameGroup: @MainActor (String) -> Void
+    let onTapMember: (@MainActor (String) -> Void)?
     @State private var npubInput = ""
     @State private var showScanner = false
     @State private var isEditing = false
@@ -58,26 +59,31 @@ struct GroupInfoView: View {
                     }
 
                     ForEach(chat.members, id: \.pubkey) { member in
-                        HStack(spacing: 8) {
-                            AvatarView(
-                                name: member.name,
-                                npub: member.npub,
-                                pictureUrl: member.pictureUrl,
-                                size: 28
-                            )
-                            VStack(alignment: .leading, spacing: 1) {
-                                Text(member.name ?? truncated(member.npub))
-                                    .font(.body)
-                                    .lineLimit(1)
-                                if member.name != nil {
-                                    Text(truncated(member.npub))
-                                        .font(.caption2)
-                                        .foregroundStyle(.tertiary)
+                        Button {
+                            onTapMember?(member.pubkey)
+                        } label: {
+                            HStack(spacing: 8) {
+                                AvatarView(
+                                    name: member.name,
+                                    npub: member.npub,
+                                    pictureUrl: member.pictureUrl,
+                                    size: 28
+                                )
+                                VStack(alignment: .leading, spacing: 1) {
+                                    Text(member.name ?? truncated(member.npub))
+                                        .font(.body)
                                         .lineLimit(1)
+                                    if member.name != nil {
+                                        Text(truncated(member.npub))
+                                            .font(.caption2)
+                                            .foregroundStyle(.tertiary)
+                                            .lineLimit(1)
+                                    }
                                 }
+                                Spacer()
                             }
-                            Spacer()
                         }
+                        .buttonStyle(.plain)
                         .swipeActions(edge: .trailing) {
                             if chat.isAdmin {
                                 Button(role: .destructive) {
@@ -150,7 +156,8 @@ struct GroupInfoView: View {
             onAddMembers: { _ in },
             onRemoveMember: { _ in },
             onLeaveGroup: {},
-            onRenameGroup: { _ in }
+            onRenameGroup: { _ in },
+            onTapMember: nil
         )
     }
 }

@@ -572,6 +572,238 @@ impl AppCore {
         });
     }
 
+    pub(super) fn fetch_peer_profile(&mut self, pubkey_hex: &str) {
+        if !self.is_logged_in() || !self.network_enabled() {
+            return;
+        }
+        let Some(sess) = self.session.as_ref() else {
+            return;
+        };
+        let pk = match PublicKey::from_hex(pubkey_hex) {
+            Ok(pk) => pk,
+            Err(_) => return,
+        };
+        let client = sess.client.clone();
+        let tx = self.core_sender.clone();
+        let pubkey_hex = pubkey_hex.to_string();
+
+        self.runtime.spawn(async move {
+            let filter = Filter::new().author(pk).kind(Kind::Metadata).limit(1);
+            let metadata = client
+                .fetch_events(filter, Duration::from_secs(8))
+                .await
+                .ok()
+                .and_then(|evs| evs.into_iter().max_by_key(|e| e.created_at))
+                .and_then(|e| serde_json::from_str::<serde_json::Value>(&e.content).ok());
+
+            let name = metadata
+                .as_ref()
+                .and_then(|v| {
+                    v.get("display_name")
+                        .and_then(|s| s.as_str())
+                        .filter(|s| !s.is_empty())
+                        .or_else(|| {
+                            v.get("name")
+                                .and_then(|s| s.as_str())
+                                .filter(|s| !s.is_empty())
+                        })
+                })
+                .map(String::from);
+            let about = metadata
+                .as_ref()
+                .and_then(|v| {
+                    v.get("about")
+                        .and_then(|s| s.as_str())
+                        .filter(|s| !s.is_empty())
+                })
+                .map(String::from);
+            let picture_url = metadata
+                .as_ref()
+                .and_then(|v| {
+                    v.get("picture")
+                        .and_then(|s| s.as_str())
+                        .filter(|s| !s.is_empty())
+                })
+                .map(String::from);
+
+            let _ = tx.send(CoreMsg::Internal(Box::new(
+                InternalEvent::PeerProfileFetched {
+                    pubkey: pubkey_hex,
+                    name,
+                    about,
+                    picture_url,
+                },
+            )));
+        });
+    }
+
+    pub(super) fn follow_user(&mut self, pubkey_hex: &str) {
+        self.modify_contact_list(pubkey_hex, true);
+    }
+
+    pub(super) fn unfollow_user(&mut self, pubkey_hex: &str) {
+        self.modify_contact_list(pubkey_hex, false);
+    }
+
+    /// Safely modify the user's contact list (kind 3).
+    ///
+    /// CRITICAL: Kind 3 is a replaceable event -- publishing a new one
+    /// completely replaces the old one. We MUST fetch the absolute latest
+    /// version from relays before modifying, and REFUSE to publish if the
+    /// fetch fails. All existing tags and content are preserved verbatim.
+    fn modify_contact_list(&mut self, pubkey_hex: &str, add: bool) {
+        if !self.is_logged_in() || !self.network_enabled() {
+            return;
+        }
+
+        let target_pk = match PublicKey::from_hex(pubkey_hex) {
+            Ok(pk) => pk,
+            Err(_) => {
+                self.toast("Invalid pubkey");
+                return;
+            }
+        };
+
+        // Extract session fields before mutable borrow for optimistic update.
+        let (my_pubkey, client, keys) = {
+            let Some(sess) = self.session.as_ref() else {
+                return;
+            };
+            (
+                sess.keys.public_key(),
+                sess.client.clone(),
+                sess.keys.clone(),
+            )
+        };
+
+        // Optimistically update the peer_profile.is_followed flag.
+        if let Some(ref mut pp) = self.state.peer_profile {
+            if pp.pubkey == pubkey_hex {
+                pp.is_followed = add;
+                self.emit_state();
+            }
+        }
+
+        let relays = self.default_relays();
+        let tx = self.core_sender.clone();
+        let action_label = if add { "follow" } else { "unfollow" };
+        let pubkey_for_revert = pubkey_hex.to_string();
+
+        self.runtime.spawn(async move {
+            let revert = |tx: &Sender<CoreMsg>| {
+                let _ = tx.send(CoreMsg::Internal(Box::new(
+                    InternalEvent::ContactListModifyFailed {
+                        pubkey: pubkey_for_revert.clone(),
+                        revert_to: !add,
+                    },
+                )));
+            };
+
+            // SAFETY: Always fetch the latest contact list from relays.
+            // Never use a cached version -- stale data would wipe follows.
+            let filter = Filter::new()
+                .author(my_pubkey)
+                .kind(Kind::ContactList)
+                .limit(1);
+            let current = match client.fetch_events(filter, Duration::from_secs(10)).await {
+                Ok(evs) => evs.into_iter().max_by_key(|e| e.created_at),
+                Err(e) => {
+                    tracing::error!(
+                        %e, action = action_label,
+                        "REFUSED to modify contact list: fetch failed, would risk wiping follows"
+                    );
+                    revert(&tx);
+                    return;
+                }
+            };
+
+            // Preserve ALL existing tags and content verbatim.
+            let mut tags: Vec<Tag> = current
+                .as_ref()
+                .map(|e| e.tags.clone().to_vec())
+                .unwrap_or_default();
+            let content = current
+                .as_ref()
+                .map(|e| e.content.clone())
+                .unwrap_or_default();
+
+            let target_hex = target_pk.to_hex();
+
+            if add {
+                let already = tags.iter().any(|t| {
+                    let v = t.as_slice();
+                    v.first().map(|s| s.as_str()) == Some("p")
+                        && v.get(1).map(|s| s.as_str()) == Some(target_hex.as_str())
+                });
+                if already {
+                    return;
+                }
+                tags.push(Tag::public_key(target_pk));
+                tracing::info!(
+                    target = %target_hex,
+                    total_follows = tags.iter()
+                        .filter(|t| t.as_slice().first().map(|s| s.as_str()) == Some("p"))
+                        .count(),
+                    "adding follow"
+                );
+            } else {
+                let before = tags.len();
+                tags.retain(|t| {
+                    let v = t.as_slice();
+                    !(v.first().map(|s| s.as_str()) == Some("p")
+                        && v.get(1).map(|s| s.as_str()) == Some(target_hex.as_str()))
+                });
+                if tags.len() == before {
+                    return;
+                }
+                tracing::info!(
+                    target = %target_hex,
+                    total_follows = tags.iter()
+                        .filter(|t| t.as_slice().first().map(|s| s.as_str()) == Some("p"))
+                        .count(),
+                    "removing follow"
+                );
+            }
+
+            let event = match EventBuilder::new(Kind::ContactList, &content)
+                .tags(tags)
+                .sign_with_keys(&keys)
+            {
+                Ok(ev) => ev,
+                Err(e) => {
+                    tracing::error!(%e, "failed to build contact list event");
+                    revert(&tx);
+                    return;
+                }
+            };
+
+            match client.send_event_to(relays, &event).await {
+                Ok(output) if !output.success.is_empty() => {
+                    tracing::info!(action = action_label, "contact list published");
+                }
+                Ok(output) => {
+                    let err = output
+                        .failed
+                        .values()
+                        .next()
+                        .cloned()
+                        .unwrap_or_else(|| "no relay accepted".into());
+                    tracing::error!(action = action_label, %err, "contact list publish rejected");
+                    revert(&tx);
+                    return;
+                }
+                Err(e) => {
+                    tracing::error!(%e, action = action_label, "contact list publish failed");
+                    revert(&tx);
+                    return;
+                }
+            }
+
+            // Refresh follow list to sync UI.
+            let _ = tx.send(CoreMsg::Action(AppAction::RefreshFollowList));
+        });
+    }
+
     pub(super) fn delete_event_best_effort(&mut self, id: EventId) {
         let Some(sess) = self.session.as_ref() else {
             return;
