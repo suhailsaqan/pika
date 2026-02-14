@@ -184,7 +184,7 @@ private fun MessageBubble(message: ChatMessage, onSendMessage: (String) -> Unit)
     val bubbleColor = if (isMine) PikaBlue else MaterialTheme.colorScheme.surfaceVariant
     val textColor = if (isMine) Color.White else MaterialTheme.colorScheme.onSurfaceVariant
     val align = if (isMine) Alignment.End else Alignment.Start
-    val segments = remember(message.content) { parseMessageSegments(message.content) }
+    val segments = remember(message.displayContent) { parseMessageSegments(message.displayContent) }
 
     Column(modifier = Modifier.fillMaxWidth(), horizontalAlignment = align) {
         for (segment in segments) {
@@ -227,6 +227,7 @@ private fun MessageBubble(message: ChatMessage, onSendMessage: (String) -> Unit)
                     PikaPromptCard(
                         title = segment.title,
                         options = segment.options,
+                        message = message,
                         onSelect = onSendMessage,
                     )
                 }
@@ -237,7 +238,8 @@ private fun MessageBubble(message: ChatMessage, onSendMessage: (String) -> Unit)
 }
 
 @Composable
-private fun PikaPromptCard(title: String, options: List<String>, onSelect: (String) -> Unit) {
+private fun PikaPromptCard(title: String, options: List<String>, message: ChatMessage, onSelect: (String) -> Unit) {
+    val hasVoted = message.myPollVote != null
     Column(
         modifier =
             Modifier
@@ -253,17 +255,38 @@ private fun PikaPromptCard(title: String, options: List<String>, onSelect: (Stri
             color = MaterialTheme.colorScheme.onSurface,
         )
         for (option in options) {
+            val tally = message.pollTally.firstOrNull { it.option == option }
+            val isMyVote = message.myPollVote == option
             TextButton(
-                onClick = { onSelect(option) },
+                onClick = {
+                    val response = "```pika-prompt-response\n{\"prompt_id\":\"${message.id}\",\"selected\":\"$option\"}\n```"
+                    onSelect(response)
+                },
+                enabled = !hasVoted,
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(10.dp),
                 colors =
                     ButtonDefaults.textButtonColors(
-                        containerColor = PikaBlue.copy(alpha = 0.1f),
+                        containerColor = if (isMyVote) PikaBlue.copy(alpha = 0.25f) else PikaBlue.copy(alpha = 0.1f),
                         contentColor = PikaBlue,
+                        disabledContainerColor = if (isMyVote) PikaBlue.copy(alpha = 0.25f) else PikaBlue.copy(alpha = 0.1f),
+                        disabledContentColor = PikaBlue.copy(alpha = 0.7f),
                     ),
             ) {
-                Text(option, modifier = Modifier.fillMaxWidth())
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Text(option)
+                    if (tally != null) {
+                        Text("${tally.count}", style = MaterialTheme.typography.titleSmall)
+                    }
+                }
+            }
+            if (tally != null && tally.voterNames.isNotEmpty()) {
+                Text(
+                    text = tally.voterNames.joinToString(", "),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(start = 12.dp),
+                )
             }
         }
     }

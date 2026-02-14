@@ -252,7 +252,9 @@ enum PreviewAppState {
                 mentions: [],
                 timestamp: 1_709_000_001,
                 isMine: true,
-                delivery: .sent
+                delivery: .sent,
+                pollTally: [],
+                myPollVote: nil
             ),
             ChatMessage(
                 id: "m2",
@@ -263,7 +265,9 @@ enum PreviewAppState {
                 mentions: [],
                 timestamp: 1_709_000_050,
                 isMine: false,
-                delivery: .sent
+                delivery: .sent,
+                pollTally: [],
+                myPollVote: nil
             ),
             ChatMessage(
                 id: "m3",
@@ -274,7 +278,9 @@ enum PreviewAppState {
                 mentions: [],
                 timestamp: 1_709_000_100,
                 isMine: true,
-                delivery: failed ? .failed(reason: "Network timeout") : .pending
+                delivery: failed ? .failed(reason: "Network timeout") : .pending,
+                pollTally: [],
+                myPollVote: nil
             ),
         ]
 
@@ -303,7 +309,9 @@ enum PreviewAppState {
                 mentions: [],
                 timestamp: Int64(1_709_000_200 + idx),
                 isMine: idx.isMultiple(of: 2),
-                delivery: .sent
+                delivery: .sent,
+                pollTally: [],
+                myPollVote: nil
             )
         }
 
@@ -329,7 +337,9 @@ enum PreviewAppState {
                 mentions: [],
                 timestamp: 1_709_001_000,
                 isMine: false,
-                delivery: .sent
+                delivery: .sent,
+                pollTally: [],
+                myPollVote: nil
             ),
             ChatMessage(
                 id: "gm2",
@@ -340,7 +350,9 @@ enum PreviewAppState {
                 mentions: [],
                 timestamp: 1_709_001_005,
                 isMine: false,
-                delivery: .sent
+                delivery: .sent,
+                pollTally: [],
+                myPollVote: nil
             ),
             ChatMessage(
                 id: "gm3",
@@ -351,7 +363,9 @@ enum PreviewAppState {
                 mentions: [],
                 timestamp: 1_709_001_020,
                 isMine: true,
-                delivery: .sent
+                delivery: .sent,
+                pollTally: [],
+                myPollVote: nil
             ),
             ChatMessage(
                 id: "gm4",
@@ -362,7 +376,9 @@ enum PreviewAppState {
                 mentions: [],
                 timestamp: 1_709_001_030,
                 isMine: true,
-                delivery: .pending
+                delivery: .pending,
+                pollTally: [],
+                myPollVote: nil
             ),
             ChatMessage(
                 id: "gm5",
@@ -373,7 +389,9 @@ enum PreviewAppState {
                 mentions: [],
                 timestamp: 1_709_001_040,
                 isMine: false,
-                delivery: .sent
+                delivery: .sent,
+                pollTally: [],
+                myPollVote: nil
             ),
             ChatMessage(
                 id: "gm6",
@@ -384,7 +402,9 @@ enum PreviewAppState {
                 mentions: [],
                 timestamp: 1_709_001_045,
                 isMine: false,
-                delivery: .sent
+                delivery: .sent,
+                pollTally: [],
+                myPollVote: nil
             ),
             ChatMessage(
                 id: "gm7",
@@ -395,7 +415,9 @@ enum PreviewAppState {
                 mentions: [],
                 timestamp: 1_709_001_080,
                 isMine: false,
-                delivery: .sent
+                delivery: .sent,
+                pollTally: [],
+                myPollVote: nil
             ),
         ]
 

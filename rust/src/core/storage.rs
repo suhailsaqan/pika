@@ -1,7 +1,7 @@
 // Storage-derived state refresh + paging.
 
 use super::*;
-use crate::state::{resolve_mentions, MemberInfo};
+use crate::state::{resolve_mentions, MemberInfo, PollTally};
 
 impl AppCore {
     pub(super) fn refresh_all_from_storage(&mut self) {
@@ -118,6 +118,14 @@ impl AppCore {
             };
 
             let unread_count = *self.unread_counts.get(&chat_id).unwrap_or(&0);
+
+            let last_message = last_message.map(|msg| {
+                if msg.contains("```pika-prompt-response\n") {
+                    "Voted in poll".to_string()
+                } else {
+                    msg
+                }
+            });
 
             list.push(ChatSummary {
                 chat_id: chat_id.clone(),
@@ -253,7 +261,7 @@ impl AppCore {
         let my_pubkey_hex = sess.keys.public_key().to_hex();
 
         // Build a sender pubkey -> display name lookup from member info + profile cache.
-        let sender_names: HashMap<String, String> = entry
+        let mut sender_names: HashMap<String, String> = entry
             .members
             .iter()
             .filter_map(|(pk, name, _)| {
@@ -264,6 +272,12 @@ impl AppCore {
                 display.map(|n| (hex, n))
             })
             .collect();
+
+        // Include current user's name so poll tallies show it instead of hex.
+        let my_name = &self.state.my_profile.name;
+        if !my_name.is_empty() {
+            sender_names.insert(my_pubkey_hex.clone(), my_name.clone());
+        }
 
         let desired = *self.loaded_count.get(chat_id).unwrap_or(&50usize);
         let limit = desired.max(50);
@@ -301,6 +315,8 @@ impl AppCore {
                     timestamp: m.created_at.as_secs() as i64,
                     is_mine,
                     delivery,
+                    poll_tally: vec![],
+                    my_poll_vote: None,
                 }
             })
             .collect();
@@ -333,6 +349,8 @@ impl AppCore {
                     timestamp: lm.timestamp,
                     is_mine: true,
                     delivery,
+                    poll_tally: vec![],
+                    my_poll_vote: None,
                 });
             }
             msgs.sort_by(|a, b| a.timestamp.cmp(&b.timestamp).then_with(|| a.id.cmp(&b.id)));
@@ -344,6 +362,8 @@ impl AppCore {
 
         let can_load_older = storage_len == limit;
         self.loaded_count.insert(chat_id.to_string(), storage_len);
+
+        process_poll_tallies(&mut msgs, &my_pubkey_hex);
 
         let is_admin = entry.admin_pubkeys.contains(&my_pubkey_hex);
         let members_for_state: Vec<MemberInfo> = entry
@@ -379,7 +399,7 @@ impl AppCore {
 
         let my_pubkey_hex = sess.keys.public_key().to_hex();
 
-        let sender_names: HashMap<String, String> = entry
+        let mut sender_names: HashMap<String, String> = entry
             .members
             .iter()
             .filter_map(|(pk, name, _)| {
@@ -390,6 +410,11 @@ impl AppCore {
                 display.map(|n| (hex, n))
             })
             .collect();
+
+        let my_name = &self.state.my_profile.name;
+        if !my_name.is_empty() {
+            sender_names.insert(my_pubkey_hex.clone(), my_name.clone());
+        }
 
         let offset = *self.loaded_count.get(chat_id).unwrap_or(&0);
         let page = sess
@@ -437,6 +462,8 @@ impl AppCore {
                     timestamp: m.created_at.as_secs() as i64,
                     is_mine,
                     delivery,
+                    poll_tally: vec![],
+                    my_poll_vote: None,
                 }
             })
             .collect();
@@ -448,8 +475,92 @@ impl AppCore {
                 cur.can_load_older = fetched_len == limit;
                 self.loaded_count
                     .insert(chat_id.to_string(), offset + fetched_len);
+                process_poll_tallies(&mut cur.messages, &my_pubkey_hex);
                 self.emit_current_chat();
             }
         }
+    }
+}
+
+/// Parse a `pika-prompt-response` code block from message content.
+/// Returns `(prompt_id, selected_option)` if found.
+fn parse_poll_response(content: &str) -> Option<(String, String)> {
+    let marker = "```pika-prompt-response\n";
+    let start = content.find(marker)?;
+    let json_start = start + marker.len();
+    let rest = &content[json_start..];
+    let end = rest.find("```")?;
+    let json_str = rest[..end].trim();
+    let v: serde_json::Value = serde_json::from_str(json_str).ok()?;
+    let prompt_id = v.get("prompt_id")?.as_str()?.to_string();
+    let selected = v.get("selected")?.as_str()?.to_string();
+    Some((prompt_id, selected))
+}
+
+/// Scan messages for `pika-prompt-response` blocks, tally votes onto
+/// the matching prompt messages, and remove the response messages.
+fn process_poll_tallies(msgs: &mut Vec<ChatMessage>, my_pubkey_hex: &str) {
+    // Collect votes: (prompt_id, sender_pubkey) -> (option, timestamp, sender_name)
+    // Only keep the latest vote per (sender, prompt_id).
+    let mut latest_votes: HashMap<(String, String), (String, i64, Option<String>)> = HashMap::new();
+    let mut response_indices: Vec<usize> = Vec::new();
+
+    for (i, msg) in msgs.iter().enumerate() {
+        if let Some((prompt_id, selected)) = parse_poll_response(&msg.content) {
+            let key = (prompt_id, msg.sender_pubkey.clone());
+            if latest_votes
+                .get(&key)
+                .map(|(_, ts, _)| msg.timestamp > *ts)
+                .unwrap_or(true)
+            {
+                latest_votes.insert(key, (selected, msg.timestamp, msg.sender_name.clone()));
+            }
+            response_indices.push(i);
+        }
+    }
+
+    if response_indices.is_empty() {
+        return;
+    }
+
+    // Build tallies: prompt_id -> option -> Vec<voter_name>
+    let mut tallies: HashMap<String, HashMap<String, Vec<String>>> = HashMap::new();
+    let mut my_votes: HashMap<String, String> = HashMap::new();
+
+    for ((prompt_id, sender_pubkey), (option, _, sender_name)) in &latest_votes {
+        let voter_name = sender_name
+            .clone()
+            .unwrap_or_else(|| sender_pubkey[..sender_pubkey.len().min(8)].to_string());
+        tallies
+            .entry(prompt_id.clone())
+            .or_default()
+            .entry(option.clone())
+            .or_default()
+            .push(voter_name);
+        if sender_pubkey == my_pubkey_hex {
+            my_votes.insert(prompt_id.clone(), option.clone());
+        }
+    }
+
+    // Attach tallies to matching prompt messages.
+    for msg in msgs.iter_mut() {
+        if let Some(option_tallies) = tallies.get(&msg.id) {
+            let mut poll_tally: Vec<PollTally> = option_tallies
+                .iter()
+                .map(|(option, voters)| PollTally {
+                    option: option.clone(),
+                    count: voters.len() as u32,
+                    voter_names: voters.clone(),
+                })
+                .collect();
+            poll_tally.sort_by(|a, b| b.count.cmp(&a.count));
+            msg.poll_tally = poll_tally;
+            msg.my_poll_vote = my_votes.get(&msg.id).cloned();
+        }
+    }
+
+    // Remove response messages (reverse order to preserve indices).
+    for i in response_indices.into_iter().rev() {
+        msgs.remove(i);
     }
 }

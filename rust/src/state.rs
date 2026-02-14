@@ -139,6 +139,13 @@ pub struct ChatViewState {
 }
 
 #[derive(uniffi::Record, Clone, Debug)]
+pub struct PollTally {
+    pub option: String,
+    pub count: u32,
+    pub voter_names: Vec<String>,
+}
+
+#[derive(uniffi::Record, Clone, Debug)]
 pub struct ChatMessage {
     pub id: String,
     pub sender_pubkey: String,
@@ -149,6 +156,8 @@ pub struct ChatMessage {
     pub timestamp: i64,
     pub is_mine: bool,
     pub delivery: MessageDeliveryState,
+    pub poll_tally: Vec<PollTally>,
+    pub my_poll_vote: Option<String>,
 }
 
 #[derive(uniffi::Record, Clone, Debug)]
