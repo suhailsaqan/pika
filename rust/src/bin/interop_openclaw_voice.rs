@@ -9,6 +9,8 @@
 //! Env:
 //!   PIKA_TEST_NSEC: required (nsec1...)
 //!   PIKA_E2E_RELAYS / PIKA_E2E_KP_RELAYS: optional comma-separated relay URL lists
+//!   PIKA_INTEROP_PRIMAL_ONLY: optional (set to 1 to force signaling relays to only wss://relay.primal.net)
+//!   PIKA_INTEROP_STATE_DIR: optional (override state dir; useful to test persistence/reuse)
 //!   PIKA_CALL_MOQ_URL: optional (default: https://moq.justinmoon.com/anon)
 //!   PIKA_CALL_BROADCAST_PREFIX: optional (default: pika/calls)
 //!
@@ -20,7 +22,9 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
-use nostr_sdk::prelude::{Client, Filter, Keys, Kind, PublicKey, RelayPoolNotification};
+use nostr_sdk::prelude::{
+    Client, Filter, Keys, Kind, PublicKey, RelayPoolNotification, RelayUrl, Timestamp,
+};
 use pika_core::{AppAction, AppReconciler, AppUpdate, AuthState, CallStatus, FfiApp};
 
 const DEFAULT_RELAYS: &[&str] = &[
@@ -45,9 +49,19 @@ fn usage() -> ! {
         "usage: interop_openclaw_voice <bot_npub>\n\
          \n\
          requires env: PIKA_TEST_NSEC\n\
-         optional env: PIKA_E2E_RELAYS, PIKA_E2E_KP_RELAYS, PIKA_CALL_MOQ_URL, PIKA_CALL_BROADCAST_PREFIX\n"
+         optional env: PIKA_E2E_RELAYS, PIKA_E2E_KP_RELAYS, PIKA_INTEROP_PRIMAL_ONLY, PIKA_INTEROP_STATE_DIR, PIKA_CALL_MOQ_URL, PIKA_CALL_BROADCAST_PREFIX\n"
     );
     std::process::exit(2);
+}
+
+fn env_flag(key: &str) -> bool {
+    match std::env::var(key) {
+        Ok(v) => {
+            let t = v.trim();
+            !t.is_empty() && t != "0" && t.to_ascii_lowercase() != "false"
+        }
+        Err(_) => false,
+    }
 }
 
 fn wait_until(what: &str, timeout: Duration, mut f: impl FnMut() -> bool) {
@@ -77,6 +91,9 @@ fn default_relays() -> Vec<String> {
 }
 
 fn relays() -> Vec<String> {
+    if env_flag("PIKA_INTEROP_PRIMAL_ONLY") {
+        return vec!["wss://relay.primal.net".to_string()];
+    }
     parse_csv_env("PIKA_E2E_RELAYS").unwrap_or_else(default_relays)
 }
 
@@ -160,6 +177,31 @@ fn test_nsec() -> String {
     }
     eprintln!("missing PIKA_TEST_NSEC (set env var, or put it in a .env file)");
     std::process::exit(1);
+}
+
+async fn fetch_recent_group_messages_on_relay(
+    relay: RelayUrl,
+    keys: Keys,
+    author: PublicKey,
+    since: Timestamp,
+    timeout: Duration,
+) -> Vec<nostr_sdk::Event> {
+    let client = Client::new(keys);
+    let _ = client.add_relay(relay.clone()).await;
+    client.connect().await;
+    client.wait_for_connection(Duration::from_secs(6)).await;
+
+    let filter = Filter::new()
+        .author(author)
+        .kind(Kind::MlsGroupMessage)
+        .since(since)
+        .limit(50);
+
+    client
+        .fetch_events_from(vec![relay], filter, timeout)
+        .await
+        .map(|events| events.into_iter().collect())
+        .unwrap_or_default()
 }
 
 async fn wait_for_keypackage_on_any_relay(
@@ -247,6 +289,11 @@ fn main() {
     // Must run before any rustls users initialize (nostr-sdk websockets, quinn/moq, etc).
     pika_core::init_rustls_crypto_provider();
 
+    // Make this run self-describing by default.
+    if std::env::var_os("PIKA_DIAG_NOSTR_PUBLISH").is_none() {
+        std::env::set_var("PIKA_DIAG_NOSTR_PUBLISH", "1");
+    }
+
     let mut args = std::env::args().skip(1);
     let bot_npub = args.next().unwrap_or_else(|| usage());
     if args.next().is_some() {
@@ -272,10 +319,20 @@ fn main() {
         }
     };
 
-    // Unique state dir (keep it around on failure for inspection).
-    let data_dir = std::env::temp_dir().join(format!("pika-interop-openclaw-{}", uuid::Uuid::new_v4()));
+    // State dir (keep it around on failure for inspection).
+    let data_dir = if let Ok(p) = std::env::var("PIKA_INTEROP_STATE_DIR") {
+        PathBuf::from(p)
+    } else {
+        std::env::temp_dir().join(format!(
+            "pika-interop-openclaw-{}",
+            uuid::Uuid::new_v4()
+        ))
+    };
+    let data_dir_existed = data_dir.exists();
     fs::create_dir_all(&data_dir).expect("create data dir");
     write_config(&data_dir, &relays, &kp_relays, &moq_url, &broadcast_prefix);
+    eprintln!("state_dir={}", data_dir.to_string_lossy());
+    eprintln!("state_dir_existed={data_dir_existed}");
 
     // Best-effort: confirm the bot key package is visible before attempting CreateChat.
     // If this fails we still proceed, but CreateChat will likely toast an error.
@@ -293,10 +350,16 @@ fn main() {
     let collector = Collector::new();
     app.listen_for_updates(Box::new(collector.clone()));
 
-    app.dispatch(AppAction::Login { nsec });
+    app.dispatch(AppAction::Login { nsec: nsec.clone() });
     wait_until("logged in", Duration::from_secs(20), || {
         matches!(app.state().auth, AuthState::LoggedIn { .. })
     });
+
+    // Best-effort: show local pubkey for correlation with relay/bot logs.
+    match &app.state().auth {
+        AuthState::LoggedIn { pubkey, .. } => eprintln!("local_npub={pubkey}"),
+        other => eprintln!("local_auth_state={other:?}"),
+    }
 
     app.dispatch(AppAction::CreateChat {
         peer_npub: bot_npub.clone(),
@@ -322,14 +385,71 @@ fn main() {
             .is_some()
     });
 
+    // Capture a timestamp for a relay-level sanity check if the call never becomes active.
+    let (diag_relay, diag_keys, diag_author) = {
+        let relay = RelayUrl::parse("wss://relay.primal.net").expect("parse primal relay url");
+        let keys = Keys::parse(&nsec).expect("parse PIKA_TEST_NSEC");
+        let author = keys.public_key();
+        (relay, keys, author)
+    };
+
+    let call_since = Timestamp::now();
     app.dispatch(AppAction::StartCall { chat_id });
-    wait_until("call active", Duration::from_secs(120), || {
-        app.state()
-            .active_call
-            .as_ref()
-            .map(|c| matches!(c.status, CallStatus::Active))
-            .unwrap_or(false)
-    });
+
+    let call_timeout = Duration::from_secs(120);
+    let start = Instant::now();
+    let mut last_status: Option<CallStatus> = None;
+    while start.elapsed() < call_timeout {
+        if let Some(call) = app.state().active_call.as_ref() {
+            let status_str = format!("{:?}", call.status);
+            let last_str = last_status.as_ref().map(|s| format!("{:?}", s));
+            if last_str.as_deref() != Some(&status_str) {
+                eprintln!("call_status={:?}", call.status);
+                last_status = Some(call.status.clone());
+            }
+            if matches!(call.status, CallStatus::Active) {
+                break;
+            }
+        }
+        std::thread::sleep(Duration::from_millis(200));
+    }
+
+    let call_active = app
+        .state()
+        .active_call
+        .as_ref()
+        .map(|c| matches!(c.status, CallStatus::Active))
+        .unwrap_or(false);
+    if !call_active {
+        eprintln!("fail: call did not reach Active within {call_timeout:?}");
+        eprintln!("last_toast={:?}", collector.last_toast());
+        eprintln!("active_call={:?}", app.state().active_call.as_ref().map(|c| &c.status));
+
+        // If the bot never sees the invite, the offer event might not be on primal.
+        // Fetch recent kind-445 events authored by us since StartCall for relay-level visibility.
+        let events = rt.block_on(fetch_recent_group_messages_on_relay(
+            diag_relay,
+            diag_keys,
+            diag_author,
+            call_since,
+            Duration::from_secs(10),
+        ));
+        eprintln!(
+            "diag: primal recent kind-445 authored_by_me since StartCall: count={}",
+            events.len()
+        );
+        for e in events.iter().take(8) {
+            eprintln!(
+                "diag: primal event id={} kind={} created_at={}",
+                e.id.to_hex(),
+                e.kind.as_u16(),
+                e.created_at.as_secs()
+            );
+        }
+
+        eprintln!("state_dir={}", data_dir.to_string_lossy());
+        std::process::exit(1);
+    }
 
     // Wait for debug to show up.
     wait_until("call debug present", Duration::from_secs(30), || {

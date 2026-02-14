@@ -35,6 +35,16 @@ const DEFAULT_GROUP_DESCRIPTION: &str = "";
 
 const LOCAL_OUTBOX_MAX_PER_CHAT: usize = 8;
 
+fn diag_nostr_publish_enabled() -> bool {
+    match std::env::var("PIKA_DIAG_NOSTR_PUBLISH") {
+        Ok(v) => {
+            let t = v.trim();
+            !t.is_empty() && t != "0" && t.to_ascii_lowercase() != "false"
+        }
+        Err(_) => false,
+    }
+}
+
 #[derive(Debug, Clone)]
 struct GroupIndexEntry {
     mls_group_id: GroupId,
@@ -1151,10 +1161,27 @@ impl AppCore {
                 }
 
                 let tx = self.core_sender.clone();
+                let diag = diag_nostr_publish_enabled();
+                let wrapper_id = wrapper.id.to_hex();
+                let wrapper_kind = wrapper.kind.as_u16();
+                let relay_list: Vec<String> = relays.iter().map(|r| r.to_string()).collect();
                 self.runtime.spawn(async move {
                     let out = client.send_event_to(relays, &wrapper).await;
                     match out {
                         Ok(output) => {
+                            if diag {
+                                tracing::info!(
+                                    target: "pika_core::nostr_publish",
+                                    context = "group_message",
+                                    chat_id = %chat_id,
+                                    rumor_id = %rumor_id_hex,
+                                    event_id = %wrapper_id,
+                                    kind = wrapper_kind,
+                                    relays = ?relay_list,
+                                    success = ?output.success,
+                                    failed = ?output.failed,
+                                );
+                            }
                             let ok = !output.success.is_empty();
                             let err = if ok {
                                 None
@@ -1178,6 +1205,18 @@ impl AppCore {
                             )));
                         }
                         Err(e) => {
+                            if diag {
+                                tracing::info!(
+                                    target: "pika_core::nostr_publish",
+                                    context = "group_message",
+                                    chat_id = %chat_id,
+                                    rumor_id = %rumor_id_hex,
+                                    event_id = %wrapper_id,
+                                    kind = wrapper_kind,
+                                    relays = ?relay_list,
+                                    error = %e,
+                                );
+                            }
                             let _ = tx.send(CoreMsg::Internal(Box::new(
                                 InternalEvent::PublishMessageResult {
                                     chat_id,

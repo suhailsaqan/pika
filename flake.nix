@@ -84,6 +84,7 @@
             pkgs.python3
             pkgs.curl
             pkgs.git
+            pkgs.nostr-rs-relay
             pkgs.cargo-ndk
             pkgs.gradle
             rmp

@@ -448,6 +448,14 @@ impl AppCore {
     ) -> Result<(), String> {
         let network_enabled = self.network_enabled();
         let fallback_relays = self.default_relays();
+        let diag = super::diag_nostr_publish_enabled();
+        let signal_type = match parse_call_signal(&payload_json) {
+            Some(ParsedCallSignal::Invite { .. }) => "call.invite",
+            Some(ParsedCallSignal::Accept { .. }) => "call.accept",
+            Some(ParsedCallSignal::Reject { .. }) => "call.reject",
+            Some(ParsedCallSignal::End { .. }) => "call.end",
+            None => "unknown",
+        };
 
         let (client, wrapper, relays) = {
             let Some(sess) = self.session.as_mut() else {
@@ -489,18 +497,40 @@ impl AppCore {
         }
 
         let tx = self.core_sender.clone();
+        let wrapper_id = wrapper.id.to_hex();
+        let wrapper_kind = wrapper.kind.as_u16();
+        let relay_list: Vec<String> = relays.iter().map(|r| r.to_string()).collect();
+        let chat_id = chat_id.to_string();
         self.runtime.spawn(async move {
             let out = client.send_event_to(relays, &wrapper).await;
             let error = match out {
-                Ok(output) if !output.success.is_empty() => None,
-                Ok(output) => Some(
-                    output
-                        .failed
-                        .values()
-                        .next()
-                        .cloned()
-                        .unwrap_or_else(|| "no relay accepted event".to_string()),
-                ),
+                Ok(output) => {
+                    if diag {
+                        tracing::info!(
+                            target: "pika_core::nostr_publish",
+                            context = "call_signal",
+                            signal_type = signal_type,
+                            chat_id = %chat_id,
+                            event_id = %wrapper_id,
+                            kind = wrapper_kind,
+                            relays = ?relay_list,
+                            success = ?output.success,
+                            failed = ?output.failed,
+                        );
+                    }
+                    if !output.success.is_empty() {
+                        None
+                    } else {
+                        Some(
+                            output
+                                .failed
+                                .values()
+                                .next()
+                                .cloned()
+                                .unwrap_or_else(|| "no relay accepted event".to_string()),
+                        )
+                    }
+                }
                 Err(e) => Some(e.to_string()),
             };
             if let Some(err) = error {

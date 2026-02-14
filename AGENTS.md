@@ -22,7 +22,7 @@ The test nsec is stored in `.env` (gitignored) as `PIKA_TEST_NSEC`. Agents and s
 
 ## Bot npub
 
-`npub1rtrxx9eyvag0ap3v73c4dvsqq5d2yxwe5d72qxrfpwe5svr96wuqed4p38`
+`npub1z6ujr8rad5zp9sr9w22rkxm0truulf2jntrks6rlwskhdmqsawpqmnjlcp`
 
 ## Relays
 
