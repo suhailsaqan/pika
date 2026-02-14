@@ -18,68 +18,32 @@ on:
 jobs:
   check-pika:
     if: github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'pre-merge')
-    runs-on: blacksmith-16vcpu-ubuntu-2404
+    runs-on: depot-ubuntu-24.04-16
     environment:
       name: ${{ github.event_name == 'pull_request' && github.actor != 'justinmoon' && github.actor != 'futurepaul' && 'ci-approval' || 'ci-auto' }}
     steps:
       - uses: actions/checkout@v4
-
-      - uses: useblacksmith/stickydisk@v1
-        with:
-          key: ${{ github.repository }}-nix-v1-${{ runner.os }}
-          path: /nix
-      - name: Fix /nix ownership
-        run: |
-          if [ -d /nix ] && [ "$(stat -c %u /nix)" != "$(id -u)" ]; then
-            sudo chown -R $(id -u):$(id -g) /nix
-          fi
       - uses: nixbuild/nix-quick-install-action@v30
-
-      - uses: useblacksmith/stickydisk@v1
-        with:
-          key: ${{ github.repository }}-cargo-home-v1-${{ runner.os }}
-          path: ~/.cargo
-      - uses: useblacksmith/stickydisk@v1
-        with:
-          key: ${{ github.repository }}-cargo-target-v1-${{ runner.os }}
-          path: target
-
+      - uses: DeterminateSystems/magic-nix-cache-action@main
+      - uses: Swatinem/rust-cache@v2
       - run: nix develop .#default -c just pre-merge-pika
 
   check-rmp:
     if: github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'pre-merge')
-    runs-on: blacksmith-16vcpu-ubuntu-2404
+    runs-on: depot-ubuntu-24.04-16
     environment:
       name: ${{ github.event_name == 'pull_request' && github.actor != 'justinmoon' && github.actor != 'futurepaul' && 'ci-approval' || 'ci-auto' }}
     steps:
       - uses: actions/checkout@v4
-
-      - uses: useblacksmith/stickydisk@v1
-        with:
-          key: ${{ github.repository }}-nix-v1-${{ runner.os }}
-          path: /nix
-      - name: Fix /nix ownership
-        run: |
-          if [ -d /nix ] && [ "$(stat -c %u /nix)" != "$(id -u)" ]; then
-            sudo chown -R $(id -u):$(id -g) /nix
-          fi
       - uses: nixbuild/nix-quick-install-action@v30
-
-      - uses: useblacksmith/stickydisk@v1
-        with:
-          key: ${{ github.repository }}-cargo-home-v1-${{ runner.os }}
-          path: ~/.cargo
-      - uses: useblacksmith/stickydisk@v1
-        with:
-          key: ${{ github.repository }}-cargo-target-v1-${{ runner.os }}
-          path: target
-
+      - uses: DeterminateSystems/magic-nix-cache-action@main
+      - uses: Swatinem/rust-cache@v2
       - run: nix develop .#rmp -c just pre-merge-rmp
 
   pre-merge:
     if: always() && (github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'pre-merge'))
     needs: [check-pika, check-rmp]
-    runs-on: ubuntu-latest
+    runs-on: depot-ubuntu-24.04
     steps:
       - run: |
           if [[ "${{ needs.check-pika.result }}" != "success" ]]; then
@@ -93,39 +57,35 @@ jobs:
 
   nightly-linux:
     if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'nightly')
-    runs-on: blacksmith-16vcpu-ubuntu-2404
+    runs-on: depot-ubuntu-24.04-16
     steps:
       - uses: actions/checkout@v4
-
-      - uses: useblacksmith/stickydisk@v1
-        with:
-          key: ${{ github.repository }}-nix-v1-${{ runner.os }}
-          path: /nix
-      - name: Fix /nix ownership
-        run: |
-          if [ -d /nix ] && [ "$(stat -c %u /nix)" != "$(id -u)" ]; then
-            sudo chown -R $(id -u):$(id -g) /nix
-          fi
       - uses: nixbuild/nix-quick-install-action@v30
-
-      - uses: useblacksmith/stickydisk@v1
-        with:
-          key: ${{ github.repository }}-cargo-home-v1-${{ runner.os }}
-          path: ~/.cargo
-      - uses: useblacksmith/stickydisk@v1
-        with:
-          key: ${{ github.repository }}-cargo-target-v1-${{ runner.os }}
-          path: target
-
+      - uses: DeterminateSystems/magic-nix-cache-action@main
+      - uses: Swatinem/rust-cache@v2
       - run: nix develop .#default -c just rmp-nightly-linux
+
+  nightly-macos-ios:
+    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'nightly')
+    runs-on: depot-macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: nixbuild/nix-quick-install-action@v30
+      - uses: DeterminateSystems/magic-nix-cache-action@main
+      - uses: Swatinem/rust-cache@v2
+      - run: nix develop .#default -c just rmp-nightly-macos
 
   nightly:
     if: always() && (github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'nightly'))
-    needs: [nightly-linux]
-    runs-on: ubuntu-latest
+    needs: [nightly-linux, nightly-macos-ios]
+    runs-on: depot-ubuntu-24.04
     steps:
       - run: |
           if [[ "${{ needs.nightly-linux.result }}" != "success" ]]; then
             echo "nightly-linux failed"
+            exit 1
+          fi
+          if [[ "${{ needs.nightly-macos-ios.result }}" != "success" ]]; then
+            echo "nightly-macos-ios failed"
             exit 1
           fi
