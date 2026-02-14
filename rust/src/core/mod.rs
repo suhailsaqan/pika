@@ -927,6 +927,19 @@ impl AppCore {
                 }
             }
             AppAction::Logout => {
+                // Delete the MLS database before tearing down the session so stale
+                // ratchet state doesn't persist across logins.
+                if let Some(sess) = self.session.as_ref() {
+                    let db_path = crate::mdk_support::mdk_db_path(
+                        &self.data_dir,
+                        &sess.keys.public_key().to_hex(),
+                    );
+                    if let Err(e) = std::fs::remove_file(&db_path) {
+                        tracing::warn!(%e, path = %db_path.display(), "failed to delete mdk db on logout");
+                    } else {
+                        tracing::info!(path = %db_path.display(), "deleted mdk db on logout");
+                    }
+                }
                 self.stop_session();
                 self.state.auth = AuthState::LoggedOut;
                 self.emit_auth();
