@@ -150,8 +150,19 @@ struct ChatView: View {
             }
 
             HStack(spacing: 10) {
-                TextField("Message", text: $messageText, axis: .vertical)
-                    .lineLimit(1...6)
+                TextEditor(text: $messageText)
+                    .frame(minHeight: 36, maxHeight: 150)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .scrollContentBackground(.hidden)
+                    .overlay(alignment: .topLeading) {
+                        if messageText.isEmpty {
+                            Text("Message")
+                                .foregroundStyle(.tertiary)
+                                .padding(.leading, 5)
+                                .padding(.top, 8)
+                                .allowsHitTesting(false)
+                        }
+                    }
                     .onChange(of: messageText) { _, newValue in
                         if chat.isGroup {
                             let triggered = newValue.hasSuffix("@") &&
