@@ -11,6 +11,8 @@
 //!   PIKA_E2E_RELAYS / PIKA_E2E_KP_RELAYS: optional comma-separated relay URL lists
 //!   PIKA_CALL_MOQ_URL: optional (default: https://moq.justinmoon.com/anon)
 //!   PIKA_CALL_BROADCAST_PREFIX: optional (default: pika/calls)
+//!   PIKA_INTEROP_MEDIA_WINDOW_SECS: optional (default: 10)
+//!   PIKA_INTEROP_REQUIRE_RX_FRAMES: optional (if set to N>0, fail unless rx_frames increases by >=N)
 //!
 //! Exit code:
 //!   0 on PASS
@@ -117,6 +119,22 @@ fn call_broadcast_prefix() -> String {
         .ok()
         .filter(|s| !s.trim().is_empty())
         .unwrap_or_else(|| DEFAULT_BROADCAST_PREFIX.to_string())
+}
+
+fn media_window() -> Duration {
+    let secs = std::env::var("PIKA_INTEROP_MEDIA_WINDOW_SECS")
+        .ok()
+        .and_then(|s| s.trim().parse::<u64>().ok())
+        .filter(|v| *v > 0)
+        .unwrap_or(10);
+    Duration::from_secs(secs)
+}
+
+fn require_rx_frames() -> u64 {
+    std::env::var("PIKA_INTEROP_REQUIRE_RX_FRAMES")
+        .ok()
+        .and_then(|s| s.trim().parse::<u64>().ok())
+        .unwrap_or(0)
 }
 
 fn find_repo_env_file() -> Option<PathBuf> {
@@ -303,12 +321,18 @@ fn main() {
     let kp_relays = kp_relays();
     let moq_url = call_moq_url();
     let broadcast_prefix = call_broadcast_prefix();
+    let window = media_window();
+    let require_rx = require_rx_frames();
     let nsec = test_nsec();
 
     eprintln!("relays={relays:?}");
     eprintln!("kp_relays={kp_relays:?}");
     eprintln!("call_moq_url={moq_url}");
     eprintln!("call_broadcast_prefix={broadcast_prefix}");
+    eprintln!("media_window={window:?}");
+    if require_rx > 0 {
+        eprintln!("require_rx_frames_delta={require_rx}");
+    }
 
     let bot_pubkey = match PublicKey::parse(&bot_npub) {
         Ok(pk) => pk,
@@ -567,7 +591,6 @@ fn main() {
         .unwrap();
 
     // Let media run for a short window; in synthetic mode this should push tx_frames.
-    let window = Duration::from_secs(10);
     let mut last_toast = collector.last_toast();
     let t0 = Instant::now();
     while t0.elapsed() < window {
@@ -619,6 +642,17 @@ fn main() {
         std::process::exit(1);
     }
 
+    if require_rx > 0 && rx_delta < require_rx {
+        eprintln!(
+            "fail: expected rx_frames to increase by >={require_rx} over {:?}, got delta={rx_delta} (start={}, end={})",
+            window, start.rx_frames, end.rx_frames
+        );
+        if let Some(t) = collector.last_toast() {
+            eprintln!("last_toast={t:?}");
+        }
+        eprintln!("state_dir={}", data_dir.to_string_lossy());
+        std::process::exit(1);
+    }
     if rx_delta == 0 {
         eprintln!("warn: rx_frames did not increase (bot may not be publishing response audio yet)");
     }
