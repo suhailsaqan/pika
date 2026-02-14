@@ -1578,27 +1578,112 @@ public object FfiConverterTypeBusyState: FfiConverterRustBuffer<BusyState> {
 
 
 
+data class Mention (
+    var `npub`: kotlin.String
+    ,
+    var `displayName`: kotlin.String
+    ,
+    var `start`: kotlin.UInt
+    ,
+    var `end`: kotlin.UInt
+
+){
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeMention: FfiConverterRustBuffer<Mention> {
+    override fun read(buf: ByteBuffer): Mention {
+        return Mention(
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterUInt.read(buf),
+            FfiConverterUInt.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: Mention) = (
+            FfiConverterString.allocationSize(value.`npub`) +
+            FfiConverterString.allocationSize(value.`displayName`) +
+            FfiConverterUInt.allocationSize(value.`start`) +
+            FfiConverterUInt.allocationSize(value.`end`)
+    )
+
+    override fun write(value: Mention, buf: ByteBuffer) {
+            FfiConverterString.write(value.`npub`, buf)
+            FfiConverterString.write(value.`displayName`, buf)
+            FfiConverterUInt.write(value.`start`, buf)
+            FfiConverterUInt.write(value.`end`, buf)
+    }
+}
+
+data class PollTally (
+    var `option`: kotlin.String
+    ,
+    var `count`: kotlin.UInt
+    ,
+    var `voterNames`: List<kotlin.String>
+
+){
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypePollTally: FfiConverterRustBuffer<PollTally> {
+    override fun read(buf: ByteBuffer): PollTally {
+        return PollTally(
+            FfiConverterString.read(buf),
+            FfiConverterUInt.read(buf),
+            FfiConverterSequenceString.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: PollTally) = (
+            FfiConverterString.allocationSize(value.`option`) +
+            FfiConverterUInt.allocationSize(value.`count`) +
+            FfiConverterSequenceString.allocationSize(value.`voterNames`)
+    )
+
+    override fun write(value: PollTally, buf: ByteBuffer) {
+            FfiConverterString.write(value.`option`, buf)
+            FfiConverterUInt.write(value.`count`, buf)
+            FfiConverterSequenceString.write(value.`voterNames`, buf)
+    }
+}
+
 data class ChatMessage (
     var `id`: kotlin.String
-    , 
+    ,
     var `senderPubkey`: kotlin.String
-    , 
+    ,
     var `senderName`: kotlin.String?
-    , 
+    ,
     var `content`: kotlin.String
-    , 
+    ,
+    var `displayContent`: kotlin.String
+    ,
+    var `mentions`: List<Mention>
+    ,
     var `timestamp`: kotlin.Long
-    , 
+    ,
     var `isMine`: kotlin.Boolean
-    , 
+    ,
     var `delivery`: MessageDeliveryState
-    
+    ,
+    var `pollTally`: List<PollTally>
+    ,
+    var `myPollVote`: kotlin.String?
+
 ){
-    
 
-    
 
-    
+
+
+
     companion object
 }
 
@@ -1612,9 +1697,13 @@ public object FfiConverterTypeChatMessage: FfiConverterRustBuffer<ChatMessage> {
             FfiConverterString.read(buf),
             FfiConverterOptionalString.read(buf),
             FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterSequenceTypeMention.read(buf),
             FfiConverterLong.read(buf),
             FfiConverterBoolean.read(buf),
             FfiConverterTypeMessageDeliveryState.read(buf),
+            FfiConverterSequenceTypePollTally.read(buf),
+            FfiConverterOptionalString.read(buf),
         )
     }
 
@@ -1623,9 +1712,13 @@ public object FfiConverterTypeChatMessage: FfiConverterRustBuffer<ChatMessage> {
             FfiConverterString.allocationSize(value.`senderPubkey`) +
             FfiConverterOptionalString.allocationSize(value.`senderName`) +
             FfiConverterString.allocationSize(value.`content`) +
+            FfiConverterString.allocationSize(value.`displayContent`) +
+            FfiConverterSequenceTypeMention.allocationSize(value.`mentions`) +
             FfiConverterLong.allocationSize(value.`timestamp`) +
             FfiConverterBoolean.allocationSize(value.`isMine`) +
-            FfiConverterTypeMessageDeliveryState.allocationSize(value.`delivery`)
+            FfiConverterTypeMessageDeliveryState.allocationSize(value.`delivery`) +
+            FfiConverterSequenceTypePollTally.allocationSize(value.`pollTally`) +
+            FfiConverterOptionalString.allocationSize(value.`myPollVote`)
     )
 
     override fun write(value: ChatMessage, buf: ByteBuffer) {
@@ -1633,9 +1726,13 @@ public object FfiConverterTypeChatMessage: FfiConverterRustBuffer<ChatMessage> {
             FfiConverterString.write(value.`senderPubkey`, buf)
             FfiConverterOptionalString.write(value.`senderName`, buf)
             FfiConverterString.write(value.`content`, buf)
+            FfiConverterString.write(value.`displayContent`, buf)
+            FfiConverterSequenceTypeMention.write(value.`mentions`, buf)
             FfiConverterLong.write(value.`timestamp`, buf)
             FfiConverterBoolean.write(value.`isMine`, buf)
             FfiConverterTypeMessageDeliveryState.write(value.`delivery`, buf)
+            FfiConverterSequenceTypePollTally.write(value.`pollTally`, buf)
+            FfiConverterOptionalString.write(value.`myPollVote`, buf)
     }
 }
 
@@ -3011,6 +3108,58 @@ public object FfiConverterSequenceString: FfiConverterRustBuffer<List<kotlin.Str
 }
 
 
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterSequenceTypeMention: FfiConverterRustBuffer<List<Mention>> {
+    override fun read(buf: ByteBuffer): List<Mention> {
+        val len = buf.getInt()
+        return List<Mention>(len) {
+            FfiConverterTypeMention.read(buf)
+        }
+    }
+
+    override fun allocationSize(value: List<Mention>): ULong {
+        val sizeForLength = 4UL
+        val sizeForItems = value.map { FfiConverterTypeMention.allocationSize(it) }.sum()
+        return sizeForLength + sizeForItems
+    }
+
+    override fun write(value: List<Mention>, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        value.iterator().forEach {
+            FfiConverterTypeMention.write(it, buf)
+        }
+    }
+}
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterSequenceTypePollTally: FfiConverterRustBuffer<List<PollTally>> {
+    override fun read(buf: ByteBuffer): List<PollTally> {
+        val len = buf.getInt()
+        return List<PollTally>(len) {
+            FfiConverterTypePollTally.read(buf)
+        }
+    }
+
+    override fun allocationSize(value: List<PollTally>): ULong {
+        val sizeForLength = 4UL
+        val sizeForItems = value.map { FfiConverterTypePollTally.allocationSize(it) }.sum()
+        return sizeForLength + sizeForItems
+    }
+
+    override fun write(value: List<PollTally>, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        value.iterator().forEach {
+            FfiConverterTypePollTally.write(it, buf)
+        }
+    }
+}
 
 
 /**

@@ -441,7 +441,7 @@ private struct MessageBubble: View {
             case .markdown(let text):
                 markdownBubble(text: text)
             case .pikaPrompt(let prompt):
-                PikaPromptView(prompt: prompt, onSelect: onSendMessage)
+                PikaPromptView(prompt: prompt, message: message, onSelect: onSendMessage)
             }
         }
         .contextMenu {
@@ -527,23 +527,52 @@ private func deliveryText(_ d: MessageDeliveryState) -> String {
 
 private struct PikaPromptView: View {
     let prompt: PikaPrompt
+    let message: ChatMessage
     let onSelect: @MainActor (String) -> Void
+
+    private var hasVoted: Bool { message.myPollVote != nil }
+    private var hasTallies: Bool { !message.pollTally.isEmpty }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text(prompt.title)
                 .font(.subheadline.weight(.semibold))
             ForEach(prompt.options, id: \.self) { option in
+                let tally = message.pollTally.first(where: { $0.option == option })
+                let isMyVote = message.myPollVote == option
                 Button {
-                    onSelect(option)
+                    let response = """
+                    ```pika-prompt-response
+                    {"prompt_id":"\(message.id)","selected":"\(option)"}
+                    ```
+                    """
+                    onSelect(response)
                 } label: {
-                    Text(option)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 8)
-                        .background(Color.blue.opacity(0.1))
-                        .foregroundStyle(Color.blue)
-                        .clipShape(RoundedRectangle(cornerRadius: 10))
+                    HStack {
+                        Text(option)
+                        Spacer()
+                        if let tally {
+                            Text("\(tally.count)")
+                                .font(.subheadline.weight(.semibold))
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .background(isMyVote ? Color.blue.opacity(0.25) : Color.blue.opacity(0.1))
+                    .foregroundStyle(Color.blue)
+                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 10)
+                            .strokeBorder(isMyVote ? Color.blue : Color.clear, lineWidth: 1.5)
+                    )
+                }
+                .disabled(hasVoted)
+                if let tally, !tally.voterNames.isEmpty {
+                    Text(tally.voterNames.joined(separator: ", "))
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .padding(.leading, 12)
                 }
             }
         }
@@ -596,7 +625,9 @@ private enum ChatViewPreviewData {
                 mentions: [],
                 timestamp: 1_709_100_001,
                 isMine: false,
-                delivery: .sent
+                delivery: .sent,
+                pollTally: [],
+                myPollVote: nil
             ),
             ChatMessage(
                 id: "incoming-2",
@@ -607,7 +638,9 @@ private enum ChatViewPreviewData {
                 mentions: [],
                 timestamp: 1_709_100_002,
                 isMine: false,
-                delivery: .sent
+                delivery: .sent,
+                pollTally: [],
+                myPollVote: nil
             ),
         ]
     )
@@ -628,7 +661,9 @@ private enum ChatViewPreviewData {
                 mentions: [],
                 timestamp: 1_709_100_010,
                 isMine: true,
-                delivery: .sent
+                delivery: .sent,
+                pollTally: [],
+                myPollVote: nil
             ),
             ChatMessage(
                 id: "outgoing-2",
@@ -639,7 +674,9 @@ private enum ChatViewPreviewData {
                 mentions: [],
                 timestamp: 1_709_100_011,
                 isMine: true,
-                delivery: .pending
+                delivery: .pending,
+                pollTally: [],
+                myPollVote: nil
             ),
         ]
     )
