@@ -448,14 +448,6 @@ impl AppCore {
     ) -> Result<(), String> {
         let network_enabled = self.network_enabled();
         let fallback_relays = self.default_relays();
-        let diag = super::diag_nostr_publish_enabled();
-        let signal_type = match parse_call_signal(&payload_json) {
-            Some(ParsedCallSignal::Invite { .. }) => "call.invite",
-            Some(ParsedCallSignal::Accept { .. }) => "call.accept",
-            Some(ParsedCallSignal::Reject { .. }) => "call.reject",
-            Some(ParsedCallSignal::End { .. }) => "call.end",
-            None => "unknown",
-        };
 
         let (client, wrapper, relays) = {
             let Some(sess) = self.session.as_mut() else {
@@ -498,40 +490,46 @@ impl AppCore {
 
         let tx = self.core_sender.clone();
         let wrapper_id = wrapper.id.to_hex();
-        let wrapper_kind = wrapper.kind.as_u16();
-        let relay_list: Vec<String> = relays.iter().map(|r| r.to_string()).collect();
-        let chat_id = chat_id.to_string();
+        let relays_dbg: Vec<String> = relays.iter().map(|r| r.to_string()).collect();
         self.runtime.spawn(async move {
+            tracing::info!(
+                wrapper_id = %wrapper_id,
+                relays = ?relays_dbg,
+                "{failure_context}: publish start"
+            );
             let out = client.send_event_to(relays, &wrapper).await;
             let error = match out {
-                Ok(output) => {
-                    if diag {
-                        tracing::info!(
-                            target: "pika_core::nostr_publish",
-                            context = "call_signal",
-                            signal_type = signal_type,
-                            chat_id = %chat_id,
-                            event_id = %wrapper_id,
-                            kind = wrapper_kind,
-                            relays = ?relay_list,
-                            success = ?output.success,
-                            failed = ?output.failed,
-                        );
-                    }
-                    if !output.success.is_empty() {
-                        None
-                    } else {
-                        Some(
-                            output
-                                .failed
-                                .values()
-                                .next()
-                                .cloned()
-                                .unwrap_or_else(|| "no relay accepted event".to_string()),
-                        )
-                    }
+                Ok(output) if !output.success.is_empty() => {
+                    tracing::info!(
+                        wrapper_id = %wrapper_id,
+                        ok_relays = ?output.success,
+                        failed_relays = ?output.failed.keys().collect::<Vec<_>>(),
+                        "{failure_context}: publish ok"
+                    );
+                    None
                 }
-                Err(e) => Some(e.to_string()),
+                Ok(output) => {
+                    let err = output
+                        .failed
+                        .values()
+                        .next()
+                        .cloned()
+                        .unwrap_or_else(|| "no relay accepted event".to_string());
+                    tracing::warn!(
+                        wrapper_id = %wrapper_id,
+                        ok_relays = ?output.success,
+                        failed_relays = ?output.failed,
+                        "{failure_context}: publish failed err={err}"
+                    );
+                    Some(err)
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        wrapper_id = %wrapper_id,
+                        "{failure_context}: publish error err={e:#}"
+                    );
+                    Some(e.to_string())
+                }
             };
             if let Some(err) = error {
                 let _ = tx.send(CoreMsg::Internal(Box::new(InternalEvent::Toast(format!(
@@ -628,6 +626,7 @@ impl AppCore {
                 return;
             }
         };
+        tracing::info!(call_id = %call_id, payload = %payload, "call_invite_payload");
         if let Err(e) = self.publish_call_signal(chat_id, payload, "Call invite publish failed") {
             self.toast(e);
             self.end_call_local("publish_failed".to_string());
