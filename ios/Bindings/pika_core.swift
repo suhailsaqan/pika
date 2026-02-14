@@ -684,6 +684,7 @@ public struct AppState: Equatable, Hashable {
     public var rev: UInt64
     public var router: Router
     public var auth: AuthState
+    public var myProfile: MyProfileState
     public var busy: BusyState
     public var chatList: [ChatSummary]
     public var currentChat: ChatViewState?
@@ -691,10 +692,11 @@ public struct AppState: Equatable, Hashable {
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(rev: UInt64, router: Router, auth: AuthState, busy: BusyState, chatList: [ChatSummary], currentChat: ChatViewState?, toast: String?) {
+    public init(rev: UInt64, router: Router, auth: AuthState, myProfile: MyProfileState, busy: BusyState, chatList: [ChatSummary], currentChat: ChatViewState?, toast: String?) {
         self.rev = rev
         self.router = router
         self.auth = auth
+        self.myProfile = myProfile
         self.busy = busy
         self.chatList = chatList
         self.currentChat = currentChat
@@ -720,6 +722,7 @@ public struct FfiConverterTypeAppState: FfiConverterRustBuffer {
                 rev: FfiConverterUInt64.read(from: &buf), 
                 router: FfiConverterTypeRouter.read(from: &buf), 
                 auth: FfiConverterTypeAuthState.read(from: &buf), 
+                myProfile: FfiConverterTypeMyProfileState.read(from: &buf), 
                 busy: FfiConverterTypeBusyState.read(from: &buf), 
                 chatList: FfiConverterSequenceTypeChatSummary.read(from: &buf), 
                 currentChat: FfiConverterOptionTypeChatViewState.read(from: &buf), 
@@ -731,6 +734,7 @@ public struct FfiConverterTypeAppState: FfiConverterRustBuffer {
         FfiConverterUInt64.write(value.rev, into: &buf)
         FfiConverterTypeRouter.write(value.router, into: &buf)
         FfiConverterTypeAuthState.write(value.auth, into: &buf)
+        FfiConverterTypeMyProfileState.write(value.myProfile, into: &buf)
         FfiConverterTypeBusyState.write(value.busy, into: &buf)
         FfiConverterSequenceTypeChatSummary.write(value.chatList, into: &buf)
         FfiConverterOptionTypeChatViewState.write(value.currentChat, into: &buf)
@@ -1166,6 +1170,64 @@ public func FfiConverterTypeMention_lower(_ value: Mention) -> RustBuffer {
 }
 
 
+public struct MyProfileState: Equatable, Hashable {
+    public var name: String
+    public var about: String
+    public var pictureUrl: String?
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(name: String, about: String, pictureUrl: String?) {
+        self.name = name
+        self.about = about
+        self.pictureUrl = pictureUrl
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension MyProfileState: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeMyProfileState: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> MyProfileState {
+        return
+            try MyProfileState(
+                name: FfiConverterString.read(from: &buf), 
+                about: FfiConverterString.read(from: &buf), 
+                pictureUrl: FfiConverterOptionString.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: MyProfileState, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.name, into: &buf)
+        FfiConverterString.write(value.about, into: &buf)
+        FfiConverterOptionString.write(value.pictureUrl, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeMyProfileState_lift(_ buf: RustBuffer) throws -> MyProfileState {
+    return try FfiConverterTypeMyProfileState.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeMyProfileState_lower(_ value: MyProfileState) -> RustBuffer {
+    return FfiConverterTypeMyProfileState.lower(value)
+}
+
+
 public struct Router: Equatable, Hashable {
     public var defaultScreen: Screen
     public var screenStack: [Screen]
@@ -1230,6 +1292,11 @@ public enum AppAction: Equatable, Hashable {
     case restoreSession(nsec: String
     )
     case logout
+    case refreshMyProfile
+    case saveMyProfile(name: String, about: String
+    )
+    case uploadMyProfileImage(imageBase64: String, mimeType: String
+    )
     case pushScreen(screen: Screen
     )
     case updateScreenStack(stack: [Screen]
@@ -1287,45 +1354,53 @@ public struct FfiConverterTypeAppAction: FfiConverterRustBuffer {
         
         case 4: return .logout
         
-        case 5: return .pushScreen(screen: try FfiConverterTypeScreen.read(from: &buf)
+        case 5: return .refreshMyProfile
+        
+        case 6: return .saveMyProfile(name: try FfiConverterString.read(from: &buf), about: try FfiConverterString.read(from: &buf)
         )
         
-        case 6: return .updateScreenStack(stack: try FfiConverterSequenceTypeScreen.read(from: &buf)
+        case 7: return .uploadMyProfileImage(imageBase64: try FfiConverterString.read(from: &buf), mimeType: try FfiConverterString.read(from: &buf)
         )
         
-        case 7: return .createChat(peerNpub: try FfiConverterString.read(from: &buf)
+        case 8: return .pushScreen(screen: try FfiConverterTypeScreen.read(from: &buf)
         )
         
-        case 8: return .sendMessage(chatId: try FfiConverterString.read(from: &buf), content: try FfiConverterString.read(from: &buf)
+        case 9: return .updateScreenStack(stack: try FfiConverterSequenceTypeScreen.read(from: &buf)
         )
         
-        case 9: return .retryMessage(chatId: try FfiConverterString.read(from: &buf), messageId: try FfiConverterString.read(from: &buf)
+        case 10: return .createChat(peerNpub: try FfiConverterString.read(from: &buf)
         )
         
-        case 10: return .openChat(chatId: try FfiConverterString.read(from: &buf)
+        case 11: return .sendMessage(chatId: try FfiConverterString.read(from: &buf), content: try FfiConverterString.read(from: &buf)
         )
         
-        case 11: return .loadOlderMessages(chatId: try FfiConverterString.read(from: &buf), beforeMessageId: try FfiConverterString.read(from: &buf), limit: try FfiConverterUInt32.read(from: &buf)
+        case 12: return .retryMessage(chatId: try FfiConverterString.read(from: &buf), messageId: try FfiConverterString.read(from: &buf)
         )
         
-        case 12: return .createGroupChat(peerNpubs: try FfiConverterSequenceString.read(from: &buf), groupName: try FfiConverterString.read(from: &buf)
+        case 13: return .openChat(chatId: try FfiConverterString.read(from: &buf)
         )
         
-        case 13: return .addGroupMembers(chatId: try FfiConverterString.read(from: &buf), peerNpubs: try FfiConverterSequenceString.read(from: &buf)
+        case 14: return .loadOlderMessages(chatId: try FfiConverterString.read(from: &buf), beforeMessageId: try FfiConverterString.read(from: &buf), limit: try FfiConverterUInt32.read(from: &buf)
         )
         
-        case 14: return .removeGroupMembers(chatId: try FfiConverterString.read(from: &buf), memberPubkeys: try FfiConverterSequenceString.read(from: &buf)
+        case 15: return .createGroupChat(peerNpubs: try FfiConverterSequenceString.read(from: &buf), groupName: try FfiConverterString.read(from: &buf)
         )
         
-        case 15: return .leaveGroup(chatId: try FfiConverterString.read(from: &buf)
+        case 16: return .addGroupMembers(chatId: try FfiConverterString.read(from: &buf), peerNpubs: try FfiConverterSequenceString.read(from: &buf)
         )
         
-        case 16: return .renameGroup(chatId: try FfiConverterString.read(from: &buf), name: try FfiConverterString.read(from: &buf)
+        case 17: return .removeGroupMembers(chatId: try FfiConverterString.read(from: &buf), memberPubkeys: try FfiConverterSequenceString.read(from: &buf)
         )
         
-        case 17: return .clearToast
+        case 18: return .leaveGroup(chatId: try FfiConverterString.read(from: &buf)
+        )
         
-        case 18: return .foregrounded
+        case 19: return .renameGroup(chatId: try FfiConverterString.read(from: &buf), name: try FfiConverterString.read(from: &buf)
+        )
+        
+        case 20: return .clearToast
+        
+        case 21: return .foregrounded
         
         default: throw UniffiInternalError.unexpectedEnumCase
         }
@@ -1353,80 +1428,96 @@ public struct FfiConverterTypeAppAction: FfiConverterRustBuffer {
             writeInt(&buf, Int32(4))
         
         
-        case let .pushScreen(screen):
+        case .refreshMyProfile:
             writeInt(&buf, Int32(5))
+        
+        
+        case let .saveMyProfile(name,about):
+            writeInt(&buf, Int32(6))
+            FfiConverterString.write(name, into: &buf)
+            FfiConverterString.write(about, into: &buf)
+            
+        
+        case let .uploadMyProfileImage(imageBase64,mimeType):
+            writeInt(&buf, Int32(7))
+            FfiConverterString.write(imageBase64, into: &buf)
+            FfiConverterString.write(mimeType, into: &buf)
+            
+        
+        case let .pushScreen(screen):
+            writeInt(&buf, Int32(8))
             FfiConverterTypeScreen.write(screen, into: &buf)
             
         
         case let .updateScreenStack(stack):
-            writeInt(&buf, Int32(6))
+            writeInt(&buf, Int32(9))
             FfiConverterSequenceTypeScreen.write(stack, into: &buf)
             
         
         case let .createChat(peerNpub):
-            writeInt(&buf, Int32(7))
+            writeInt(&buf, Int32(10))
             FfiConverterString.write(peerNpub, into: &buf)
             
         
         case let .sendMessage(chatId,content):
-            writeInt(&buf, Int32(8))
+            writeInt(&buf, Int32(11))
             FfiConverterString.write(chatId, into: &buf)
             FfiConverterString.write(content, into: &buf)
             
         
         case let .retryMessage(chatId,messageId):
-            writeInt(&buf, Int32(9))
+            writeInt(&buf, Int32(12))
             FfiConverterString.write(chatId, into: &buf)
             FfiConverterString.write(messageId, into: &buf)
             
         
         case let .openChat(chatId):
-            writeInt(&buf, Int32(10))
+            writeInt(&buf, Int32(13))
             FfiConverterString.write(chatId, into: &buf)
             
         
         case let .loadOlderMessages(chatId,beforeMessageId,limit):
-            writeInt(&buf, Int32(11))
+            writeInt(&buf, Int32(14))
             FfiConverterString.write(chatId, into: &buf)
             FfiConverterString.write(beforeMessageId, into: &buf)
             FfiConverterUInt32.write(limit, into: &buf)
             
         
         case let .createGroupChat(peerNpubs,groupName):
-            writeInt(&buf, Int32(12))
+            writeInt(&buf, Int32(15))
             FfiConverterSequenceString.write(peerNpubs, into: &buf)
             FfiConverterString.write(groupName, into: &buf)
             
         
         case let .addGroupMembers(chatId,peerNpubs):
-            writeInt(&buf, Int32(13))
+            writeInt(&buf, Int32(16))
             FfiConverterString.write(chatId, into: &buf)
             FfiConverterSequenceString.write(peerNpubs, into: &buf)
             
         
         case let .removeGroupMembers(chatId,memberPubkeys):
-            writeInt(&buf, Int32(14))
+            writeInt(&buf, Int32(17))
             FfiConverterString.write(chatId, into: &buf)
             FfiConverterSequenceString.write(memberPubkeys, into: &buf)
             
         
         case let .leaveGroup(chatId):
-            writeInt(&buf, Int32(15))
+            writeInt(&buf, Int32(18))
             FfiConverterString.write(chatId, into: &buf)
             
         
         case let .renameGroup(chatId,name):
-            writeInt(&buf, Int32(16))
+            writeInt(&buf, Int32(19))
             FfiConverterString.write(chatId, into: &buf)
             FfiConverterString.write(name, into: &buf)
             
         
         case .clearToast:
-            writeInt(&buf, Int32(17))
+            writeInt(&buf, Int32(20))
         
         
         case .foregrounded:
-            writeInt(&buf, Int32(18))
+            writeInt(&buf, Int32(21))
         
         }
     }

@@ -1,5 +1,6 @@
 mod config;
 mod interop;
+mod profile;
 mod session;
 mod storage;
 
@@ -14,7 +15,8 @@ use crate::actions::AppAction;
 use crate::mdk_support::{open_mdk, PikaMdk};
 use crate::state::now_seconds;
 use crate::state::{
-    AuthState, BusyState, ChatMessage, ChatSummary, ChatViewState, MessageDeliveryState, Screen,
+    AuthState, BusyState, ChatMessage, ChatSummary, ChatViewState, MessageDeliveryState,
+    MyProfileState, Screen,
 };
 use crate::updates::{AppUpdate, CoreMsg, InternalEvent};
 
@@ -108,6 +110,7 @@ pub struct AppCore {
 
     // Nostr kind:0 profile cache (survives across session refreshes).
     profiles: HashMap<String, ProfileCache>, // hex pubkey -> cached profile
+    my_metadata: Option<Metadata>,
 }
 
 impl AppCore {
@@ -148,6 +151,7 @@ impl AppCore {
             pending_sends: HashMap::new(),
             local_outbox: HashMap::new(),
             profiles: HashMap::new(),
+            my_metadata: None,
         };
 
         // Ensure FfiApp.state() has an immediately-available snapshot.
@@ -279,6 +283,8 @@ impl AppCore {
             self.pending_sends.clear();
             self.local_outbox.clear();
             self.profiles.clear();
+            self.my_metadata = None;
+            self.state.my_profile = MyProfileState::empty();
             self.last_outgoing_ts = 0;
             self.emit_router();
             self.emit_busy();
@@ -578,6 +584,20 @@ impl AppCore {
                 if let Some(chat) = self.state.current_chat.as_ref() {
                     let chat_id = chat.chat_id.clone();
                     self.refresh_current_chat(&chat_id);
+                }
+            }
+            InternalEvent::MyProfileFetched { metadata } => {
+                self.apply_my_profile_metadata(metadata);
+            }
+            InternalEvent::MyProfileSaved { metadata } => {
+                self.apply_my_profile_metadata(Some(metadata));
+                self.toast("Profile updated");
+            }
+            InternalEvent::MyProfileError { message, toast } => {
+                if toast {
+                    self.toast(message);
+                } else {
+                    tracing::debug!(%message, "profile action failed");
                 }
             }
             InternalEvent::GroupKeyPackagesFetched {
@@ -922,7 +942,24 @@ impl AppCore {
                 // Native should send lifecycle signals as actions. Rust owns all state changes.
                 if self.is_logged_in() {
                     self.refresh_all_from_storage();
+                    self.refresh_my_profile(false);
                 }
+            }
+            AppAction::RefreshMyProfile => {
+                if !self.is_logged_in() {
+                    self.toast("Please log in first");
+                    return;
+                }
+                self.refresh_my_profile(true);
+            }
+            AppAction::SaveMyProfile { name, about } => {
+                self.save_my_profile(name, about);
+            }
+            AppAction::UploadMyProfileImage {
+                image_base64,
+                mime_type,
+            } => {
+                self.upload_my_profile_image(image_base64, mime_type);
             }
 
             // Navigation

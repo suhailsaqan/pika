@@ -11,6 +11,15 @@ pub enum AppAction {
         nsec: String,
     },
     Logout,
+    RefreshMyProfile,
+    SaveMyProfile {
+        name: String,
+        about: String,
+    },
+    UploadMyProfileImage {
+        image_base64: String,
+        mime_type: String,
+    },
 
     // Navigation
     PushScreen {
@@ -78,6 +87,9 @@ impl AppAction {
             AppAction::Login { .. } => "Login",
             AppAction::RestoreSession { .. } => "RestoreSession",
             AppAction::Logout => "Logout",
+            AppAction::RefreshMyProfile => "RefreshMyProfile",
+            AppAction::SaveMyProfile { .. } => "SaveMyProfile",
+            AppAction::UploadMyProfileImage { .. } => "UploadMyProfileImage",
 
             // Navigation
             AppAction::PushScreen { .. } => "PushScreen",

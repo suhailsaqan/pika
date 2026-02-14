@@ -146,6 +146,24 @@ final class AppManager: AppReconciler {
         dispatch(.foregrounded)
     }
 
+    func refreshMyProfile() {
+        dispatch(.refreshMyProfile)
+    }
+
+    func saveMyProfile(name: String, about: String) {
+        dispatch(.saveMyProfile(name: name, about: about))
+    }
+
+    func uploadMyProfileImage(data: Data, mimeType: String) {
+        guard !data.isEmpty else { return }
+        dispatch(
+            .uploadMyProfileImage(
+                imageBase64: data.base64EncodedString(),
+                mimeType: mimeType
+            )
+        )
+    }
+
     func getNsec() -> String? {
         nsecStore.getNsec()
     }

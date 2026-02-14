@@ -3,6 +3,7 @@ pub struct AppState {
     pub rev: u64,
     pub router: Router,
     pub auth: AuthState,
+    pub my_profile: MyProfileState,
     pub busy: BusyState,
     pub chat_list: Vec<ChatSummary>,
     pub current_chat: Option<ChatViewState>,
@@ -18,6 +19,7 @@ impl AppState {
                 screen_stack: vec![],
             },
             auth: AuthState::LoggedOut,
+            my_profile: MyProfileState::empty(),
             busy: BusyState::idle(),
             chat_list: vec![],
             current_chat: None,
@@ -63,6 +65,23 @@ pub enum Screen {
 pub enum AuthState {
     LoggedOut,
     LoggedIn { npub: String, pubkey: String },
+}
+
+#[derive(uniffi::Record, Clone, Debug, PartialEq, Eq)]
+pub struct MyProfileState {
+    pub name: String,
+    pub about: String,
+    pub picture_url: Option<String>,
+}
+
+impl MyProfileState {
+    pub fn empty() -> Self {
+        Self {
+            name: String::new(),
+            about: String::new(),
+            picture_url: None,
+        }
+    }
 }
 
 #[derive(uniffi::Record, Clone, Debug)]

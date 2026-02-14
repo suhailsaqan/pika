@@ -57,12 +57,12 @@ final class PikaUITests: XCTestCase {
         let chatsNavBar = app.navigationBars["Chats"]
         XCTAssertTrue(chatsNavBar.waitForExistence(timeout: 15))
 
-        // Fetch our npub from the "My npub" sheet (avoid clipboard access from UI tests).
+        // Fetch our npub from the profile sheet (avoid clipboard access from UI tests).
         let myNpubBtn = app.buttons.matching(identifier: "chatlist_my_npub").firstMatch
         XCTAssertTrue(myNpubBtn.waitForExistence(timeout: 5))
         myNpubBtn.tap()
 
-        let myNpubNavBar = app.navigationBars["My npub"]
+        let myNpubNavBar = app.navigationBars["Profile"]
         XCTAssertTrue(myNpubNavBar.waitForExistence(timeout: 5))
 
         let npubValue = app.staticTexts.matching(identifier: "chatlist_my_npub_value").firstMatch
@@ -148,7 +148,7 @@ final class PikaUITests: XCTestCase {
         // Close sheet.
         let close = app.buttons.matching(identifier: "chatlist_my_npub_close").firstMatch
         if close.exists { close.tap() }
-        else { app.navigationBars["My npub"].buttons.element(boundBy: 0).tap() }
+        else { app.navigationBars["Profile"].buttons.element(boundBy: 0).tap() }
 
         // Create note-to-self chat.
         let newChat = app.buttons.matching(identifier: "chatlist_new_chat").firstMatch

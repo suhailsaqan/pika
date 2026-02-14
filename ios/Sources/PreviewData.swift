@@ -53,6 +53,7 @@ enum PreviewAppState {
             rev: 10,
             router: Router(defaultScreen: .chatList, screenStack: []),
             auth: .loggedIn(npub: sampleNpub, pubkey: samplePubkey),
+            myProfile: sampleProfile,
             chatList: []
         )
     }
@@ -62,6 +63,7 @@ enum PreviewAppState {
             rev: 11,
             router: Router(defaultScreen: .chatList, screenStack: []),
             auth: .loggedIn(npub: sampleNpub, pubkey: samplePubkey),
+            myProfile: sampleProfile,
             chatList: [
                 chatSummary(
                     id: "chat-1",
@@ -90,6 +92,7 @@ enum PreviewAppState {
             rev: 12,
             router: Router(defaultScreen: .chatList, screenStack: []),
             auth: .loggedIn(npub: sampleNpub, pubkey: samplePubkey),
+            myProfile: sampleProfile,
             chatList: [
                 chatSummary(
                     id: "chat-long-1",
@@ -112,6 +115,7 @@ enum PreviewAppState {
             rev: 13,
             router: Router(defaultScreen: .newChat, screenStack: [.newChat]),
             auth: .loggedIn(npub: sampleNpub, pubkey: samplePubkey),
+            myProfile: sampleProfile,
             busy: BusyState(creatingAccount: false, loggingIn: false, creatingChat: true)
         )
     }
@@ -120,7 +124,8 @@ enum PreviewAppState {
         base(
             rev: 14,
             router: Router(defaultScreen: .newChat, screenStack: [.newChat]),
-            auth: .loggedIn(npub: sampleNpub, pubkey: samplePubkey)
+            auth: .loggedIn(npub: sampleNpub, pubkey: samplePubkey),
+            myProfile: sampleProfile
         )
     }
 
@@ -129,6 +134,7 @@ enum PreviewAppState {
             rev: 30,
             router: Router(defaultScreen: .chat(chatId: "chat-1"), screenStack: [.chat(chatId: "chat-1")]),
             auth: .loggedIn(npub: sampleNpub, pubkey: samplePubkey),
+            myProfile: sampleProfile,
             currentChat: chatViewState(id: "chat-1", name: "Justin", failed: false)
         )
     }
@@ -138,6 +144,7 @@ enum PreviewAppState {
             rev: 31,
             router: Router(defaultScreen: .chat(chatId: "chat-1"), screenStack: [.chat(chatId: "chat-1")]),
             auth: .loggedIn(npub: sampleNpub, pubkey: samplePubkey),
+            myProfile: sampleProfile,
             currentChat: chatViewState(id: "chat-1", name: "Justin", failed: true)
         )
     }
@@ -147,6 +154,7 @@ enum PreviewAppState {
             rev: 32,
             router: Router(defaultScreen: .chat(chatId: "chat-empty"), screenStack: [.chat(chatId: "chat-empty")]),
             auth: .loggedIn(npub: sampleNpub, pubkey: samplePubkey),
+            myProfile: sampleProfile,
             currentChat: ChatViewState(
                 chatId: "chat-empty",
                 isGroup: false,
@@ -164,6 +172,7 @@ enum PreviewAppState {
             rev: 33,
             router: Router(defaultScreen: .chat(chatId: "chat-long"), screenStack: [.chat(chatId: "chat-long")]),
             auth: .loggedIn(npub: sampleNpub, pubkey: samplePubkey),
+            myProfile: sampleProfile,
             currentChat: chatViewStateLongThread()
         )
     }
@@ -173,6 +182,7 @@ enum PreviewAppState {
             rev: 40,
             router: Router(defaultScreen: .chatList, screenStack: []),
             auth: .loggedIn(npub: sampleNpub, pubkey: samplePubkey),
+            myProfile: sampleProfile,
             chatList: chatListPopulated.chatList,
             toast: "Network connection lost."
         )
@@ -182,6 +192,7 @@ enum PreviewAppState {
         rev: UInt64,
         router: Router,
         auth: AuthState,
+        myProfile: MyProfileState = .init(name: "", about: "", pictureUrl: nil),
         busy: BusyState = BusyState(creatingAccount: false, loggingIn: false, creatingChat: false),
         chatList: [ChatSummary] = [],
         currentChat: ChatViewState? = nil,
@@ -191,6 +202,7 @@ enum PreviewAppState {
             rev: rev,
             router: router,
             auth: auth,
+            myProfile: myProfile,
             busy: busy,
             chatList: chatList,
             currentChat: currentChat,
@@ -291,5 +303,10 @@ enum PreviewAppState {
     static let samplePubkey = "11b9a894813efe60d39f8621ae9dc4c6d26de4732411c1cdf4bb15e88898a19c"
     static let samplePeerNpub = "npub1y2z0c7un9dwmhk4zrpw8df8p0gh0j2x54qhznwqjnp452ju4078srmwp70"
     static let samplePeerPubkey = "2284fc7b932b5dbbdaa2185c76a4e17a2ef928d4a82e29b812986b454b957f8f"
+    static let sampleProfile = MyProfileState(
+        name: "Paul Miller",
+        about: "Building Marmot over Nostr.",
+        pictureUrl: "https://blossom.nostr.pub/8dbc6f42ea8bf53f4af89af87eb0d9110fcaf4d263f7d2cb9f29d68f95f6f8ce"
+    )
 }
 #endif

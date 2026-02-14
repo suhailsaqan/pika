@@ -7,6 +7,7 @@ final class AppManagerTests: XCTestCase {
             rev: rev,
             router: Router(defaultScreen: .chatList, screenStack: []),
             auth: .loggedOut,
+            myProfile: MyProfileState(name: "", about: "", pictureUrl: nil),
             busy: BusyState(creatingAccount: false, loggingIn: false, creatingChat: false),
             chatList: [],
             currentChat: nil,

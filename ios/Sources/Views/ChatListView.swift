@@ -1,3 +1,4 @@
+import Foundation
 import SwiftUI
 
 struct ChatListView: View {
@@ -6,6 +7,9 @@ struct ChatListView: View {
     let onOpenChat: @MainActor (String) -> Void
     let onNewChat: @MainActor () -> Void
     let onNewGroupChat: @MainActor () -> Void
+    let onRefreshProfile: @MainActor () -> Void
+    let onSaveProfile: @MainActor (_ name: String, _ about: String) -> Void
+    let onUploadProfilePhoto: @MainActor (_ data: Data, _ mimeType: String) -> Void
     let nsecProvider: @MainActor () -> String?
     @State private var showMyNpub = false
 
@@ -42,17 +46,16 @@ struct ChatListView: View {
                 }
             }
 
-            Group {
+            Button {
+                onOpenChat(chat.chatId)
+            } label: {
                 if chat.unreadCount > 0 {
                     row.badge(Int(chat.unreadCount))
                 } else {
                     row
                 }
             }
-            .contentShape(Rectangle())
-            .onTapGesture {
-                onOpenChat(chat.chatId)
-            }
+            .buttonStyle(.plain)
         }
         .navigationTitle("Chats")
         .toolbar {
@@ -62,9 +65,9 @@ struct ChatListView: View {
                         showMyNpub = true
                     } label: {
                         AvatarView(
-                            name: nil,
+                            name: state.myProfile.name.isEmpty ? nil : state.myProfile.name,
                             npub: npub,
-                            pictureUrl: nil,
+                            pictureUrl: state.myProfile.pictureUrl,
                             size: 28
                         )
                     }
@@ -73,7 +76,11 @@ struct ChatListView: View {
                     .sheet(isPresented: $showMyNpub) {
                         MyNpubQrSheet(
                             npub: npub,
+                            profile: state.myProfile,
                             nsecProvider: nsecProvider,
+                            onRefreshProfile: onRefreshProfile,
+                            onSaveProfile: onSaveProfile,
+                            onUploadPhoto: onUploadProfilePhoto,
                             onLogout: onLogout
                         )
                     }
@@ -141,12 +148,16 @@ struct ChatListView: View {
         ChatListView(
             state: ChatListViewState(
                 chats: PreviewAppState.chatListEmpty.chatList,
-                myNpub: PreviewAppState.sampleNpub
+                myNpub: PreviewAppState.sampleNpub,
+                myProfile: PreviewAppState.chatListEmpty.myProfile
             ),
             onLogout: {},
             onOpenChat: { _ in },
             onNewChat: {},
             onNewGroupChat: {},
+            onRefreshProfile: {},
+            onSaveProfile: { _, _ in },
+            onUploadProfilePhoto: { _, _ in },
             nsecProvider: { nil }
         )
     }
@@ -157,12 +168,16 @@ struct ChatListView: View {
         ChatListView(
             state: ChatListViewState(
                 chats: PreviewAppState.chatListPopulated.chatList,
-                myNpub: PreviewAppState.sampleNpub
+                myNpub: PreviewAppState.sampleNpub,
+                myProfile: PreviewAppState.chatListPopulated.myProfile
             ),
             onLogout: {},
             onOpenChat: { _ in },
             onNewChat: {},
             onNewGroupChat: {},
+            onRefreshProfile: {},
+            onSaveProfile: { _, _ in },
+            onUploadProfilePhoto: { _, _ in },
             nsecProvider: { nil }
         )
     }
@@ -173,12 +188,16 @@ struct ChatListView: View {
         ChatListView(
             state: ChatListViewState(
                 chats: PreviewAppState.chatListLongNames.chatList,
-                myNpub: PreviewAppState.sampleNpub
+                myNpub: PreviewAppState.sampleNpub,
+                myProfile: PreviewAppState.chatListLongNames.myProfile
             ),
             onLogout: {},
             onOpenChat: { _ in },
             onNewChat: {},
             onNewGroupChat: {},
+            onRefreshProfile: {},
+            onSaveProfile: { _, _ in },
+            onUploadProfilePhoto: { _, _ in },
             nsecProvider: { nil }
         )
     }

@@ -93,4 +93,16 @@ pub enum InternalEvent {
     ProfilesFetched {
         profiles: Vec<(String, Option<String>, Option<String>)>, // (hex_pubkey, name, picture_url)
     },
+
+    // Nostr kind:0 profile metadata for the logged-in user.
+    MyProfileFetched {
+        metadata: Option<nostr_sdk::prelude::Metadata>,
+    },
+    MyProfileSaved {
+        metadata: nostr_sdk::prelude::Metadata,
+    },
+    MyProfileError {
+        message: String,
+        toast: bool,
+    },
 }

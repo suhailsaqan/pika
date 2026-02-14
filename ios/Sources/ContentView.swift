@@ -93,6 +93,13 @@ private func screenView(manager: AppManager, state: AppState, screen: Screen) ->
             onOpenChat: { manager.dispatch(.openChat(chatId: $0)) },
             onNewChat: { manager.dispatch(.pushScreen(screen: .newChat)) },
             onNewGroupChat: { manager.dispatch(.pushScreen(screen: .newGroupChat)) },
+            onRefreshProfile: { manager.refreshMyProfile() },
+            onSaveProfile: { name, about in
+                manager.saveMyProfile(name: name, about: about)
+            },
+            onUploadProfilePhoto: { data, mimeType in
+                manager.uploadMyProfileImage(data: data, mimeType: mimeType)
+            },
             nsecProvider: { manager.getNsec() }
         )
     case .newChat:
@@ -145,7 +152,8 @@ private func loginState(from state: AppState) -> LoginViewState {
 private func chatListState(from state: AppState) -> ChatListViewState {
     ChatListViewState(
         chats: state.chatList,
-        myNpub: myNpub(from: state)
+        myNpub: myNpub(from: state),
+        myProfile: state.myProfile
     )
 }
 

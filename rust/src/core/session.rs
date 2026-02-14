@@ -48,6 +48,8 @@ impl AppCore {
             npub,
             pubkey: pubkey_hex,
         };
+        self.my_metadata = None;
+        self.state.my_profile = crate::state::MyProfileState::empty();
         self.emit_auth();
         self.handle_auth_transition(true);
 
@@ -57,6 +59,7 @@ impl AppCore {
         }
 
         self.refresh_all_from_storage();
+        self.refresh_my_profile(false);
 
         if self.network_enabled() {
             self.publish_key_package_relays_best_effort();
