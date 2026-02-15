@@ -63,6 +63,9 @@ fn create_account_navigates_to_chat_list() {
     wait_until("logged in", Duration::from_secs(2), || {
         matches!(app.state().auth, AuthState::LoggedIn { .. })
     });
+    wait_until("navigated to chat list", Duration::from_secs(2), || {
+        app.state().router.default_screen == Screen::ChatList
+    });
 
     let s = app.state();
     assert!(matches!(s.auth, AuthState::LoggedIn { .. }));

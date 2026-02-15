@@ -37,9 +37,9 @@ Scope: clean up project detritus and track next review actions for audio calls.
 ## 4. Fixture Cleanup
 
 - [ ] Consolidate speech fixtures:
-  - [ ] Pick one canonical fixture for “send speech into bot” (either `speech_prompt.wav` or `speech_test.wav`).
-  - [ ] Update tests to reference the canonical fixture.
-  - [ ] Delete the unused fixture.
+  - [x] Canonical fixture: `speech_prompt.wav`.
+  - [x] Update tests to reference the canonical fixture.
+  - [x] Delete the unused fixture.
 
 ## 5. Follow-Up Coverage (Targeted)
 

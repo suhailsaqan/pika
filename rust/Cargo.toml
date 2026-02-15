@@ -16,11 +16,10 @@ hex = "0.4"
 # If you need to develop against a local MDK checkout, use a gitignored
 # `.cargo/config.toml` with a `[patch."https://github.com/marmot-protocol/mdk"]`
 # section instead.
-# Includes upstream fix for https://github.com/marmot-protocol/mdk/issues/168
-# (key packages no longer forced to be NIP-70 protected; option exists to enable it).
-mdk-core = { git = "https://github.com/marmot-protocol/mdk", rev = "d6777f73a35028bbfe638949a4963ecb9f3f4117", features = ["mip04"] }
-mdk-sqlite-storage = { git = "https://github.com/marmot-protocol/mdk", rev = "d6777f73a35028bbfe638949a4963ecb9f3f4117" }
-mdk-storage-traits = { git = "https://github.com/marmot-protocol/mdk", rev = "d6777f73a35028bbfe638949a4963ecb9f3f4117" }
+# MDK is pinned at the workspace root to avoid version skew between workspace members.
+mdk-core = { workspace = true }
+mdk-sqlite-storage = { workspace = true }
+mdk-storage-traits = { workspace = true }
 keyring-core = "0.7"
 nostr-sdk = { version = "0.44.1", features = ["nip59"] }
 pika-media = { path = "../crates/pika-media", features = ["network"] }

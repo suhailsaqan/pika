@@ -25,6 +25,16 @@ use crate::session::{MediaFrame, MediaSessionError};
 use crate::subscription::MediaFrameSubscription;
 use crate::tracks::TrackAddress;
 
+fn is_localhost_host(host: &str) -> bool {
+    if host.eq_ignore_ascii_case("localhost") {
+        return true;
+    }
+    if let Ok(ip) = host.parse::<std::net::IpAddr>() {
+        return ip.is_loopback();
+    }
+    false
+}
+
 struct BroadcastAndTrack {
     _broadcast: BroadcastProducer,
     track: TrackProducer,
@@ -291,7 +301,13 @@ impl NetworkRelayState {
                     MediaSessionError::NotConnected
                 })?;
 
-            let mut tls = pika_tls::client_config();
+            // Local `moq-relay --tls-generate` uses a self-signed certificate.
+            // For deterministic local E2E, accept localhost certs without verification.
+            let mut tls = if is_localhost_host(&host) {
+                pika_tls::client_config_insecure_no_verify()
+            } else {
+                pika_tls::client_config()
+            };
             let alpns: Vec<Vec<u8>> = match url.scheme() {
                 "https" => vec![web_transport_quinn::ALPN.as_bytes().to_vec()],
                 "moqt" | "moql" => moq_lite::ALPNS

@@ -1,10 +1,11 @@
-//! End-to-end call test using the real MOQ relay (us-east.moq.logos.surf).
+//! End-to-end call test using a locally spawned moq-relay.
 //!
 //! Uses a local Nostr relay for MLS signaling but routes all media frames
-//! through the real MOQ relay over QUIC. This validates the full call stack:
-//! call_runtime.rs → NetworkRelay → quinn/webtransport + moq-lite → QUIC → us-east.moq.logos.surf
+//! through a local MOQ relay over QUIC. This validates the full call stack:
+//! call_runtime.rs → NetworkRelay → moq-native → QUIC → local moq-relay
 //!
-//! Requires network access to us-east.moq.logos.surf:443 (UDP/QUIC).
+//! Requires:
+//! - `moq-relay` on PATH (available in `nix develop`)
 
 use std::collections::{HashMap, HashSet};
 use std::net::SocketAddr;
@@ -22,14 +23,15 @@ use tokio::net::TcpListener;
 use tokio::sync::{mpsc, oneshot};
 use tokio_tungstenite::tungstenite::Message;
 
-const REAL_MOQ_URL: &str = "https://us-east.moq.logos.surf/anon";
+#[path = "support/mod.rs"]
+mod support;
 
-fn write_config(data_dir: &str, relay_url: &str, kp_relay_url: Option<&str>) {
+fn write_config(data_dir: &str, relay_url: &str, kp_relay_url: Option<&str>, moq_url: &str) {
     let path = std::path::Path::new(data_dir).join("pika_config.json");
     let mut v = serde_json::json!({
         "disable_network": false,
         "relay_urls": [relay_url],
-        "call_moq_url": REAL_MOQ_URL,
+        "call_moq_url": moq_url,
         "call_broadcast_prefix": "pika/calls",
         "call_audio_backend": "synthetic",
     });
@@ -276,13 +278,18 @@ fn start_local_relay() -> (LocalRelayHandle, JoinHandle<()>) {
 // --- The actual test ---
 
 #[test]
-#[ignore] // requires QUIC egress to us-east.moq.logos.surf:443
+#[ignore] // requires QUIC, plus `moq-relay` installed (use `nix develop`)
 fn call_over_real_moq_relay() {
+    let moq = match support::LocalMoqRelay::spawn() {
+        Some(v) => v,
+        None => return,
+    };
+
     // Both ring and aws-lc-rs are in the dep tree. Must pick one explicitly.
     let _ = rustls::crypto::ring::default_provider().install_default();
 
     // Signaling goes through a local Nostr relay.
-    // Media goes through the real MOQ relay at us-east.moq.logos.surf.
+    // Media goes through a local moq-relay.
     let (relay, relay_thread) = start_local_relay();
 
     let dir_a = tempdir().unwrap();
@@ -291,11 +298,13 @@ fn call_over_real_moq_relay() {
         &dir_a.path().to_string_lossy(),
         &relay.url,
         Some(&relay.url),
+        &moq.url,
     );
     write_config(
         &dir_b.path().to_string_lossy(),
         &relay.url,
         Some(&relay.url),
+        &moq.url,
     );
 
     let alice = FfiApp::new(dir_a.path().to_string_lossy().to_string());
@@ -354,7 +363,7 @@ fn call_over_real_moq_relay() {
             .unwrap_or(false)
     });
 
-    // Bob accepts the call -- this triggers NetworkRelay.connect() to us-east.moq.logos.surf
+    // Bob accepts the call -- this triggers NetworkRelay.connect() to the local moq-relay.
     bob.dispatch(AppAction::AcceptCall {
         chat_id: chat_id.clone(),
     });
@@ -381,7 +390,7 @@ fn call_over_real_moq_relay() {
         },
     );
 
-    // Wait for actual media frames to flow through the real MOQ relay.
+    // Wait for actual media frames to flow through the local moq-relay.
     // Both sides should be transmitting and receiving encrypted Opus frames.
     wait_until(
         "alice active with tx+rx frames through real relay",

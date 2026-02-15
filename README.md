@@ -96,7 +96,7 @@ XCUITest smoke tests exist (requires an installed iOS Simulator runtime + a simu
 just ios-ui-test
 ```
 
-Deterministic local E2E (local docker relay + local Rust bot):
+Deterministic local E2E (local Nostr relay + local Rust bot):
 
 ```bash
 just ios-ui-e2e-local
@@ -139,7 +139,7 @@ Deterministic UI smoke tests exist as Compose instrumentation tests (requires a 
 just android-ui-test
 ```
 
-Deterministic local E2E (local docker relay + local Rust bot):
+Deterministic local E2E (local Nostr relay + local Rust bot):
 
 ```bash
 just android-ui-e2e-local
