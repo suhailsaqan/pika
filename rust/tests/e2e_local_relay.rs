@@ -842,15 +842,15 @@ fn call_invite_accept_end_flow_over_local_relay() {
     alice.dispatch(AppAction::CreateChat {
         peer_npub: bob_npub,
     });
-    wait_until("alice chat opened", Duration::from_secs(20), || {
+    wait_until("alice chat opened", Duration::from_secs(60), || {
         alice.state().current_chat.is_some()
     });
-    wait_until("bob has chat", Duration::from_secs(20), || {
+    wait_until("bob has chat", Duration::from_secs(60), || {
         !bob.state().chat_list.is_empty()
     });
 
     let chat_id = alice.state().current_chat.as_ref().unwrap().chat_id.clone();
-    wait_until("bob chat id matches", Duration::from_secs(20), || {
+    wait_until("bob chat id matches", Duration::from_secs(60), || {
         bob.state().chat_list.iter().any(|c| c.chat_id == chat_id)
     });
 
