@@ -1130,6 +1130,15 @@ fn call_invite_with_invalid_relay_auth_is_rejected() {
         AuthState::LoggedIn { npub: bob_npub, .. } => bob_npub,
         _ => unreachable!(),
     };
+    let bob_pubkey = PublicKey::parse(&bob_npub).expect("bob pubkey");
+
+    // Avoid race: ensure Bob's key package has been published before Alice tries to fetch it.
+    wait_until("bob key package published", Duration::from_secs(10), || {
+        let st = relay.state.lock().unwrap();
+        st.events
+            .iter()
+            .any(|e| e.kind == Kind::MlsKeyPackage && e.pubkey == bob_pubkey)
+    });
 
     alice.dispatch(AppAction::CreateChat {
         peer_npub: bob_npub,
