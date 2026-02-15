@@ -141,6 +141,14 @@ impl AppCore {
             .build()
             .expect("tokio runtime");
 
+        let run_moq_probe = config.moq_probe_on_start == Some(true);
+        let moq_probe_url = config
+            .call_moq_url
+            .as_ref()
+            .map(|s| s.trim())
+            .filter(|s| !s.is_empty())
+            .map(ToString::to_string);
+
         let this = Self {
             state,
             rev: 0,
@@ -165,6 +173,22 @@ impl AppCore {
             call_runtime: call_runtime::CallRuntime::default(),
             call_session_params: None,
         };
+
+        if run_moq_probe {
+            if let Some(moq_url) = moq_probe_url {
+                std::thread::spawn(move || {
+                    tracing::info!(moq_url = %moq_url, "moq probe: starting");
+                    let res =
+                        pika_media::network::NetworkRelay::new(&moq_url).and_then(|r| r.connect());
+                    match res {
+                        Ok(()) => tracing::info!(moq_url = %moq_url, "moq probe: PASS (connected)"),
+                        Err(e) => tracing::error!(moq_url = %moq_url, err = ?e, "moq probe: FAIL"),
+                    }
+                });
+            } else {
+                tracing::warn!("moq probe: enabled but call_moq_url missing");
+            }
+        }
 
         // Ensure FfiApp.state() has an immediately-available snapshot.
         let snapshot = this.state.clone();

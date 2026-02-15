@@ -34,6 +34,6 @@ The bot listens on: `wss://relay.primal.net`, `wss://nos.lol`, `wss://relay.damu
 |------|-----------|-------------|
 | pika | `~/code/pika` | This repo. iOS + Android app, Rust core, pika-cli. |
 | mdk | `~/code/mdk` | Marmot Development Kit. Rust MLS library used by pika and openclaw-marmot. |
-| openclaw-marmot | `~/code/openclaw-marmot` | OpenClaw plugin + Rust sidecar daemon for Marmot messaging. Deployed on the bot server. |
+| openclaw-marmot | `~/code/pika/openclaw-marmot` | OpenClaw plugin + harness for the Marmot sidecar (`marmotd`). |
 | openclaw | `~/code/openclaw` | OpenClaw gateway. The bot framework that hosts the marmot plugin. |
 | infra | `~/code/infra` | NixOS deployment config for the Hetzner server (`openclaw-prod`). |

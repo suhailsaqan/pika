@@ -3,14 +3,14 @@
 //! Validates the full call signaling path using:
 //! - A local Nostr relay for MLS signaling
 //! - A locally spawned `marmotd daemon` as the bot/callee
-//! - The real MOQ relay (us-east.moq.logos.surf) for media transport
+//! - A locally spawned `moq-relay` for media transport
 //!
 //! This exercises the exact same code path as the deployed OpenClaw bot,
 //! but without depending on the remote deployment.
 //!
 //! Requires:
-//! - Network access to us-east.moq.logos.surf:443 (UDP/QUIC)
-//! - `marmotd` built from `third_party/openclaw-marmot` (run `just e2e-local-marmotd`)
+//! - `marmotd` built from the workspace crate `crates/marmotd` (run `just e2e-local-marmotd`)
+//! - `moq-relay` on PATH (available in `nix develop`)
 
 use std::collections::{HashMap, HashSet};
 use std::io::{BufRead, BufReader, Write};
@@ -30,7 +30,8 @@ use tokio::net::TcpListener;
 use tokio::sync::{mpsc, oneshot};
 use tokio_tungstenite::tungstenite::Message;
 
-const REAL_MOQ_URL: &str = "https://us-east.moq.logos.surf/anon";
+#[path = "support/mod.rs"]
+mod support;
 
 fn marmotd_binary() -> String {
     if let Ok(bin) = std::env::var("MARMOTD_BIN") {
@@ -40,17 +41,17 @@ fn marmotd_binary() -> String {
     }
     let repo_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
     repo_root
-        .join("third_party/openclaw-marmot/target/debug/marmotd")
+        .join("target/debug/marmotd")
         .to_string_lossy()
         .to_string()
 }
 
-fn write_config(data_dir: &str, relay_url: &str, kp_relay_url: Option<&str>) {
+fn write_config(data_dir: &str, relay_url: &str, kp_relay_url: Option<&str>, moq_url: &str) {
     let path = std::path::Path::new(data_dir).join("pika_config.json");
     let mut v = serde_json::json!({
         "disable_network": false,
         "relay_urls": [relay_url],
-        "call_moq_url": REAL_MOQ_URL,
+        "call_moq_url": moq_url,
         "call_broadcast_prefix": "pika/calls",
         "call_audio_backend": "synthetic",
     });
@@ -443,7 +444,7 @@ impl Drop for DaemonHandle {
 
 // --- Core test logic (relay URL parameterized) ---
 
-fn run_marmotd_call_test(relay_url: &str) {
+fn run_marmotd_call_test(relay_url: &str, moq_url: &str) {
     let bin = marmotd_binary();
     if !std::path::Path::new(&bin).exists() {
         eprintln!("SKIP: marmotd binary not found at {bin}");
@@ -456,7 +457,7 @@ fn run_marmotd_call_test(relay_url: &str) {
     if std::env::var("OPENAI_API_KEY").is_ok() {
         let fixture = concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/tests/fixtures/speech_test.wav"
+            "/tests/fixtures/speech_prompt.wav"
         );
         if std::path::Path::new(fixture).exists() {
             std::env::set_var("PIKA_AUDIO_FIXTURE", fixture);
@@ -523,6 +524,7 @@ fn run_marmotd_call_test(relay_url: &str) {
         &caller_dir.path().to_string_lossy(),
         extra_relays[0],
         Some(extra_relays[0]),
+        moq_url,
     );
     let caller = FfiApp::new(caller_dir.path().to_string_lossy().to_string());
 
@@ -875,7 +877,7 @@ fn run_marmotd_call_test(relay_url: &str) {
 // --- The actual tests ---
 
 #[test]
-#[ignore] // requires external marmotd binary + QUIC egress
+#[ignore] // requires `marmotd` + `moq-relay` binaries (use `nix develop`)
 fn call_with_local_marmotd() {
     if std::env::var("PIKA_E2E_LOCAL").unwrap_or_default().trim() != "1" {
         eprintln!("SKIP: set PIKA_E2E_LOCAL=1 to run local marmotd tests");
@@ -883,20 +885,30 @@ fn call_with_local_marmotd() {
     }
     let _ = rustls::crypto::ring::default_provider().install_default();
 
+    let moq = match support::LocalMoqRelay::spawn() {
+        Some(v) => v,
+        None => return,
+    };
+
     let (relay, relay_thread) = start_local_relay();
-    run_marmotd_call_test(&relay.url);
+    run_marmotd_call_test(&relay.url, &moq.url);
     drop(relay);
     relay_thread.join().unwrap();
 }
 
 #[test]
-#[ignore] // requires network access to relay.primal.net
+#[ignore] // nondeterministic: public relay
 fn call_with_local_marmotd_primal() {
-    if std::env::var("PIKA_E2E_LOCAL").unwrap_or_default().trim() != "1" {
-        eprintln!("SKIP: set PIKA_E2E_LOCAL=1 to run local marmotd tests");
+    if std::env::var("PIKA_E2E_PUBLIC").ok().as_deref() != Some("1") {
+        eprintln!("SKIP: set PIKA_E2E_PUBLIC=1 to run this test (it uses a public relay)");
         return;
     }
     pika_core::init_rustls_crypto_provider();
 
-    run_marmotd_call_test("wss://relay.primal.net");
+    let moq = match support::LocalMoqRelay::spawn() {
+        Some(v) => v,
+        None => return,
+    };
+
+    run_marmotd_call_test("wss://relay.primal.net", &moq.url);
 }

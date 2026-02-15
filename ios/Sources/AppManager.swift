@@ -19,7 +19,8 @@ final class AppManager: AppReconciler {
         // UI tests need a clean slate and a way to inject relay overrides without relying on
         // external scripts.
         let env = ProcessInfo.processInfo.environment
-        if env["PIKA_UI_TEST_RESET"] == "1" {
+        let uiTestReset = env["PIKA_UI_TEST_RESET"] == "1"
+        if uiTestReset {
             nsecStore.clearNsec()
             try? fm.removeItem(at: dataDirUrl)
         }
@@ -30,35 +31,47 @@ final class AppManager: AppReconciler {
         let kpRelays = (env["PIKA_KEY_PACKAGE_RELAY_URLS"] ?? env["PIKA_KP_RELAY_URLS"])?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let callMoqUrl = (env["PIKA_CALL_MOQ_URL"] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         let callBroadcastPrefix = (env["PIKA_CALL_BROADCAST_PREFIX"] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        let resolvedCallMoqUrl = callMoqUrl.isEmpty ? "https://us-east.moq.logos.surf/anon" : callMoqUrl
-        let resolvedCallBroadcastPrefix = callBroadcastPrefix.isEmpty ? "pika/calls" : callBroadcastPrefix
-        do {
-            let relayItems = relays
-                .split(separator: ",")
-                .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
-                .filter { !$0.isEmpty }
-            var kpItems = kpRelays
-                .split(separator: ",")
-                .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
-                .filter { !$0.isEmpty }
+        let moqProbeOnStart = (env["PIKA_MOQ_PROBE_ON_START"] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let wantsOverride = uiTestReset
+            || !relays.isEmpty
+            || !kpRelays.isEmpty
+            || !callMoqUrl.isEmpty
+            || !callBroadcastPrefix.isEmpty
+            || moqProbeOnStart == "1"
+        if wantsOverride {
+            let resolvedCallMoqUrl = callMoqUrl.isEmpty ? "https://us-east.moq.logos.surf/anon" : callMoqUrl
+            let resolvedCallBroadcastPrefix = callBroadcastPrefix.isEmpty ? "pika/calls" : callBroadcastPrefix
+            do {
+                let relayItems = relays
+                    .split(separator: ",")
+                    .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
+                    .filter { !$0.isEmpty }
+                var kpItems = kpRelays
+                    .split(separator: ",")
+                    .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
+                    .filter { !$0.isEmpty }
 
-            if kpItems.isEmpty {
-                kpItems = relayItems
-            }
+                if kpItems.isEmpty {
+                    kpItems = relayItems
+                }
 
-            var obj: [String: Any] = [
-                "disable_network": false,
-                "call_moq_url": resolvedCallMoqUrl,
-                "call_broadcast_prefix": resolvedCallBroadcastPrefix,
-            ]
-            if !relayItems.isEmpty {
-                obj["relay_urls"] = relayItems
-                obj["key_package_relay_urls"] = kpItems
-            }
+                var obj: [String: Any] = [
+                    "disable_network": false,
+                    "call_moq_url": resolvedCallMoqUrl,
+                    "call_broadcast_prefix": resolvedCallBroadcastPrefix,
+                ]
+                if moqProbeOnStart == "1" {
+                    obj["moq_probe_on_start"] = true
+                }
+                if !relayItems.isEmpty {
+                    obj["relay_urls"] = relayItems
+                    obj["key_package_relay_urls"] = kpItems
+                }
 
-            if let data = try? JSONSerialization.data(withJSONObject: obj, options: []) {
-                let path = dataDirUrl.appendingPathComponent("pika_config.json")
-                try? data.write(to: path, options: .atomic)
+                if let data = try? JSONSerialization.data(withJSONObject: obj, options: []) {
+                    let path = dataDirUrl.appendingPathComponent("pika_config.json")
+                    try? data.write(to: path, options: .atomic)
+                }
             }
         }
 

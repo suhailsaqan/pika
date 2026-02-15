@@ -1,4 +1,4 @@
-use std::sync::Once;
+use std::sync::{Arc, Once};
 
 use rustls::pki_types::pem::PemObject;
 
@@ -64,4 +64,68 @@ pub fn client_config_with_extra_roots_pem(
     Ok(rustls::ClientConfig::builder()
         .with_root_certificates(roots)
         .with_no_client_auth())
+}
+
+/// Build an insecure TLS client config that disables certificate verification.
+///
+/// Only use this for deterministic local tests (e.g. localhost services with self-signed certs).
+pub fn client_config_insecure_no_verify() -> rustls::ClientConfig {
+    init_rustls_crypto_provider();
+
+    #[derive(Debug)]
+    struct NoVerify(Arc<rustls::crypto::CryptoProvider>);
+
+    impl rustls::client::danger::ServerCertVerifier for NoVerify {
+        fn verify_server_cert(
+            &self,
+            _end_entity: &rustls::pki_types::CertificateDer<'_>,
+            _intermediates: &[rustls::pki_types::CertificateDer<'_>],
+            _server_name: &rustls::pki_types::ServerName<'_>,
+            _ocsp: &[u8],
+            _now: rustls::pki_types::UnixTime,
+        ) -> Result<rustls::client::danger::ServerCertVerified, rustls::Error> {
+            Ok(rustls::client::danger::ServerCertVerified::assertion())
+        }
+
+        fn verify_tls12_signature(
+            &self,
+            message: &[u8],
+            cert: &rustls::pki_types::CertificateDer<'_>,
+            dss: &rustls::DigitallySignedStruct,
+        ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
+            rustls::crypto::verify_tls12_signature(
+                message,
+                cert,
+                dss,
+                &self.0.signature_verification_algorithms,
+            )
+        }
+
+        fn verify_tls13_signature(
+            &self,
+            message: &[u8],
+            cert: &rustls::pki_types::CertificateDer<'_>,
+            dss: &rustls::DigitallySignedStruct,
+        ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
+            rustls::crypto::verify_tls13_signature(
+                message,
+                cert,
+                dss,
+                &self.0.signature_verification_algorithms,
+            )
+        }
+
+        fn supported_verify_schemes(&self) -> Vec<rustls::SignatureScheme> {
+            self.0.signature_verification_algorithms.supported_schemes()
+        }
+    }
+
+    let provider = rustls::crypto::CryptoProvider::get_default()
+        .expect("rustls CryptoProvider should be installed")
+        .clone();
+
+    rustls::ClientConfig::builder()
+        .dangerous()
+        .with_custom_certificate_verifier(Arc::new(NoVerify(provider)))
+        .with_no_client_auth()
 }
