@@ -1,5 +1,7 @@
 use std::sync::Once;
 
+use rustls::pki_types::pem::PemObject;
+
 static INIT: Once = Once::new();
 
 /// rustls 0.23 selects a process-level CryptoProvider.
@@ -14,29 +16,52 @@ pub fn init_rustls_crypto_provider() {
     });
 }
 
-/// Build a TLS client config that works across iOS/Android/desktop without requiring
-/// platform-specific initialization.
+/// Build a TLS client config using `webpki-roots` (Mozilla CA bundle).
 ///
-/// Strategy:
-/// - Try OS/native roots via `rustls-native-certs`.
-/// - If that yields 0 roots (common on iOS/Android), fall back to `webpki-roots`
-///   (Mozilla bundle).
+/// This is intentionally simple and deterministic across platforms:
+/// - Full certificate validation + hostname/SNI (rustls defaults).
+/// - Same trust roots on iOS/Android/desktop (no OS trust store integration).
+///
+/// If/when we want OS trust store behavior, switch this crate to
+/// `rustls-platform-verifier` and keep call sites unchanged.
 pub fn client_config() -> rustls::ClientConfig {
     init_rustls_crypto_provider();
 
     let mut roots = rustls::RootCertStore::empty();
-
-    let native = rustls_native_certs::load_native_certs();
-    for cert in native.certs {
-        // Ignore individual bad certs; we only need a working store.
-        let _ = roots.add(cert);
-    }
-
-    if roots.is_empty() {
-        roots.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
-    }
+    roots.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
 
     rustls::ClientConfig::builder()
         .with_root_certificates(roots)
         .with_no_client_auth()
+}
+
+/// Build a TLS client config like [`client_config`] but with additional PEM-encoded
+/// root certificates (e.g. private infra CA).
+///
+/// Fails if the PEM can't be parsed or certificates can't be added to the store.
+pub fn client_config_with_extra_roots_pem(
+    extra_roots_pem: &[u8],
+) -> Result<rustls::ClientConfig, rustls::Error> {
+    init_rustls_crypto_provider();
+
+    let mut roots = rustls::RootCertStore::empty();
+    roots.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
+
+    let mut any = false;
+    for cert in rustls::pki_types::CertificateDer::pem_slice_iter(extra_roots_pem) {
+        any = true;
+        let cert = cert.map_err(|e| {
+            rustls::Error::General(format!("failed to parse extra root cert PEM: {e}"))
+        })?;
+        roots.add(cert)?;
+    }
+    if !any {
+        return Err(rustls::Error::General(
+            "no CERTIFICATE sections found in extra root PEM".to_owned(),
+        ));
+    }
+
+    Ok(rustls::ClientConfig::builder()
+        .with_root_certificates(roots)
+        .with_no_client_auth())
 }

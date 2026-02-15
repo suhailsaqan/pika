@@ -30,7 +30,7 @@ Scope: clean up project detritus and track next review actions for audio calls.
 ## 3. TLS Verification Plan (MOQ)
 
 - [x] Replace `tls_disable_verify` (mobile) with a safer approach:
-  - [x] Use a shared rustls policy (`crates/pika-tls`) that tries native roots and falls back to `webpki-roots`.
+  - [x] Use a shared rustls policy (`crates/pika-tls`) that standardizes on `webpki-roots` (Mozilla bundle) everywhere.
   - [x] Switch MOQ/QUIC transport to `quinn` + `web-transport-quinn` + `moq-lite` (no `moq-native` root-loading).
   - [x] Keep an opt-in device probe: `crates/pika-media/examples/quic_connect_test.rs`.
 

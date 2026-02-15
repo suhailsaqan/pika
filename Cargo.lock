@@ -3184,7 +3184,6 @@ name = "pika-tls"
 version = "0.1.0"
 dependencies = [
  "rustls",
- "rustls-native-certs",
  "webpki-roots 0.26.11",
 ]
 
