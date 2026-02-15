@@ -228,6 +228,25 @@ fn alice_sends_bob_over_public_relays() {
         },
     );
 
+    // Verify Alice's message transitions from Pending to Sent (publish confirmed by relays).
+    wait_until(
+        "alice message delivery state is Sent",
+        Duration::from_secs(30),
+        || {
+            alice
+                .state()
+                .current_chat
+                .as_ref()
+                .and_then(|c| {
+                    c.messages
+                        .iter()
+                        .find(|m| m.content == "hi-from-alice-public")
+                })
+                .map(|m| matches!(m.delivery, pika_core::MessageDeliveryState::Sent))
+                .unwrap_or(false)
+        },
+    );
+
     bob.dispatch(AppAction::OpenChat { chat_id });
     wait_until(
         "bob opened chat has message",
