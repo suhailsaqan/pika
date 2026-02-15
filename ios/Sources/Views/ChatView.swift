@@ -14,6 +14,7 @@ struct ChatView: View {
     @State private var showMentionPicker = false
     @State private var mentionQuery = ""
     @State private var insertedMentions: [(display: String, npub: String)] = []
+    @FocusState private var isInputFocused: Bool
 
     private let scrollButtonBottomPadding: CGFloat = 12
 
@@ -175,9 +176,15 @@ struct ChatView: View {
 
             HStack(spacing: 10) {
                 TextEditor(text: $messageText)
+                    .focused($isInputFocused)
                     .frame(minHeight: 36, maxHeight: 150)
                     .fixedSize(horizontal: false, vertical: true)
                     .scrollContentBackground(.hidden)
+                    .onAppear {
+                        if ProcessInfo.processInfo.isiOSAppOnMac {
+                            isInputFocused = true
+                        }
+                    }
                     .onKeyPress(.return, phases: .down) { keyPress in
                         if keyPress.modifiers.contains(.shift) {
                             return .ignored

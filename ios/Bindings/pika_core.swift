@@ -828,64 +828,6 @@ public func FfiConverterTypeBusyState_lower(_ value: BusyState) -> RustBuffer {
 }
 
 
-public struct PollTally: Equatable, Hashable {
-    public var option: String
-    public var count: UInt32
-    public var voterNames: [String]
-
-    // Default memberwise initializers are never public by default, so we
-    // declare one manually.
-    public init(option: String, count: UInt32, voterNames: [String]) {
-        self.option = option
-        self.count = count
-        self.voterNames = voterNames
-    }
-
-
-
-
-}
-
-#if compiler(>=6)
-extension PollTally: Sendable {}
-#endif
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public struct FfiConverterTypePollTally: FfiConverterRustBuffer {
-    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> PollTally {
-        return
-            try PollTally(
-                option: FfiConverterString.read(from: &buf),
-                count: FfiConverterUInt32.read(from: &buf),
-                voterNames: FfiConverterSequenceString.read(from: &buf)
-        )
-    }
-
-    public static func write(_ value: PollTally, into buf: inout [UInt8]) {
-        FfiConverterString.write(value.option, into: &buf)
-        FfiConverterUInt32.write(value.count, into: &buf)
-        FfiConverterSequenceString.write(value.voterNames, into: &buf)
-    }
-}
-
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public func FfiConverterTypePollTally_lift(_ buf: RustBuffer) throws -> PollTally {
-    return try FfiConverterTypePollTally.lift(buf)
-}
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public func FfiConverterTypePollTally_lower(_ value: PollTally) -> RustBuffer {
-    return FfiConverterTypePollTally.lower(value)
-}
-
-
 public struct ChatMessage: Equatable, Hashable {
     public var id: String
     public var senderPubkey: String
@@ -901,7 +843,7 @@ public struct ChatMessage: Equatable, Hashable {
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(id: String, senderPubkey: String, senderName: String?, content: String, displayContent: String, mentions: [Mention], timestamp: Int64, isMine: Bool, delivery: MessageDeliveryState, pollTally: [PollTally] = [], myPollVote: String? = nil) {
+    public init(id: String, senderPubkey: String, senderName: String?, content: String, displayContent: String, mentions: [Mention], timestamp: Int64, isMine: Bool, delivery: MessageDeliveryState, pollTally: [PollTally], myPollVote: String?) {
         self.id = id
         self.senderPubkey = senderPubkey
         self.senderName = senderName
@@ -915,9 +857,9 @@ public struct ChatMessage: Equatable, Hashable {
         self.myPollVote = myPollVote
     }
 
+    
 
-
-
+    
 }
 
 #if compiler(>=6)
@@ -931,16 +873,16 @@ public struct FfiConverterTypeChatMessage: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> ChatMessage {
         return
             try ChatMessage(
-                id: FfiConverterString.read(from: &buf),
-                senderPubkey: FfiConverterString.read(from: &buf),
-                senderName: FfiConverterOptionString.read(from: &buf),
-                content: FfiConverterString.read(from: &buf),
-                displayContent: FfiConverterString.read(from: &buf),
-                mentions: FfiConverterSequenceTypeMention.read(from: &buf),
-                timestamp: FfiConverterInt64.read(from: &buf),
-                isMine: FfiConverterBool.read(from: &buf),
-                delivery: FfiConverterTypeMessageDeliveryState.read(from: &buf),
-                pollTally: FfiConverterSequenceTypePollTally.read(from: &buf),
+                id: FfiConverterString.read(from: &buf), 
+                senderPubkey: FfiConverterString.read(from: &buf), 
+                senderName: FfiConverterOptionString.read(from: &buf), 
+                content: FfiConverterString.read(from: &buf), 
+                displayContent: FfiConverterString.read(from: &buf), 
+                mentions: FfiConverterSequenceTypeMention.read(from: &buf), 
+                timestamp: FfiConverterInt64.read(from: &buf), 
+                isMine: FfiConverterBool.read(from: &buf), 
+                delivery: FfiConverterTypeMessageDeliveryState.read(from: &buf), 
+                pollTally: FfiConverterSequenceTypePollTally.read(from: &buf), 
                 myPollVote: FfiConverterOptionString.read(from: &buf)
         )
     }
@@ -1438,6 +1380,64 @@ public func FfiConverterTypePeerProfileState_lower(_ value: PeerProfileState) ->
 }
 
 
+public struct PollTally: Equatable, Hashable {
+    public var option: String
+    public var count: UInt32
+    public var voterNames: [String]
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(option: String, count: UInt32, voterNames: [String]) {
+        self.option = option
+        self.count = count
+        self.voterNames = voterNames
+    }
+
+    
+
+    
+}
+
+#if compiler(>=6)
+extension PollTally: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypePollTally: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> PollTally {
+        return
+            try PollTally(
+                option: FfiConverterString.read(from: &buf), 
+                count: FfiConverterUInt32.read(from: &buf), 
+                voterNames: FfiConverterSequenceString.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: PollTally, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.option, into: &buf)
+        FfiConverterUInt32.write(value.count, into: &buf)
+        FfiConverterSequenceString.write(value.voterNames, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypePollTally_lift(_ buf: RustBuffer) throws -> PollTally {
+    return try FfiConverterTypePollTally.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypePollTally_lower(_ value: PollTally) -> RustBuffer {
+    return FfiConverterTypePollTally.lower(value)
+}
+
+
 public struct Router: Equatable, Hashable {
     public var defaultScreen: Screen
     public var screenStack: [Screen]
@@ -1531,6 +1531,8 @@ public enum AppAction: Equatable, Hashable {
     )
     case renameGroup(chatId: String, name: String
     )
+    case archiveChat(chatId: String
+    )
     case clearToast
     case foregrounded
     case openPeerProfile(pubkey: String
@@ -1616,21 +1618,24 @@ public struct FfiConverterTypeAppAction: FfiConverterRustBuffer {
         case 19: return .renameGroup(chatId: try FfiConverterString.read(from: &buf), name: try FfiConverterString.read(from: &buf)
         )
         
-        case 20: return .clearToast
-        
-        case 21: return .foregrounded
-        
-        case 22: return .openPeerProfile(pubkey: try FfiConverterString.read(from: &buf)
+        case 20: return .archiveChat(chatId: try FfiConverterString.read(from: &buf)
         )
         
-        case 23: return .closePeerProfile
+        case 21: return .clearToast
         
-        case 24: return .refreshFollowList
+        case 22: return .foregrounded
         
-        case 25: return .followUser(pubkey: try FfiConverterString.read(from: &buf)
+        case 23: return .openPeerProfile(pubkey: try FfiConverterString.read(from: &buf)
         )
         
-        case 26: return .unfollowUser(pubkey: try FfiConverterString.read(from: &buf)
+        case 24: return .closePeerProfile
+        
+        case 25: return .refreshFollowList
+        
+        case 26: return .followUser(pubkey: try FfiConverterString.read(from: &buf)
+        )
+        
+        case 27: return .unfollowUser(pubkey: try FfiConverterString.read(from: &buf)
         )
         
         default: throw UniffiInternalError.unexpectedEnumCase
@@ -1743,34 +1748,39 @@ public struct FfiConverterTypeAppAction: FfiConverterRustBuffer {
             FfiConverterString.write(name, into: &buf)
             
         
-        case .clearToast:
+        case let .archiveChat(chatId):
             writeInt(&buf, Int32(20))
+            FfiConverterString.write(chatId, into: &buf)
+            
         
-        
-        case .foregrounded:
+        case .clearToast:
             writeInt(&buf, Int32(21))
         
         
-        case let .openPeerProfile(pubkey):
+        case .foregrounded:
             writeInt(&buf, Int32(22))
+        
+        
+        case let .openPeerProfile(pubkey):
+            writeInt(&buf, Int32(23))
             FfiConverterString.write(pubkey, into: &buf)
             
         
         case .closePeerProfile:
-            writeInt(&buf, Int32(23))
-        
-        
-        case .refreshFollowList:
             writeInt(&buf, Int32(24))
         
         
-        case let .followUser(pubkey):
+        case .refreshFollowList:
             writeInt(&buf, Int32(25))
+        
+        
+        case let .followUser(pubkey):
+            writeInt(&buf, Int32(26))
             FfiConverterString.write(pubkey, into: &buf)
             
         
         case let .unfollowUser(pubkey):
-            writeInt(&buf, Int32(26))
+            writeInt(&buf, Int32(27))
             FfiConverterString.write(pubkey, into: &buf)
             
         }
