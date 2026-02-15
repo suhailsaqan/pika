@@ -139,11 +139,19 @@ env_json_for_device() {
   local relays kp_relays
   relays="$(effective_relays)"
   kp_relays="$(effective_kp_relays)"
+  local call_moq_url call_broadcast_prefix moq_probe_on_start
+  # Default to the deployed anonymous MOQ relay; override with PIKA_CALL_MOQ_URL for local setups.
+  call_moq_url="${PIKA_CALL_MOQ_URL:-https://us-east.moq.logos.surf/anon}"
+  call_broadcast_prefix="${PIKA_CALL_BROADCAST_PREFIX:-pika/calls}"
+  moq_probe_on_start="${PIKA_MOQ_PROBE_ON_START:-0}"
   python3 - <<PY
 import json
 print(json.dumps({
   "PIKA_RELAY_URLS": "${relays}",
   "PIKA_KEY_PACKAGE_RELAY_URLS": "${kp_relays}",
+  "PIKA_CALL_MOQ_URL": "${call_moq_url}",
+  "PIKA_CALL_BROADCAST_PREFIX": "${call_broadcast_prefix}",
+  "PIKA_MOQ_PROBE_ON_START": "${moq_probe_on_start}",
 }))
 PY
 }
@@ -215,20 +223,25 @@ import json
 p="${tmp}"
 try:
   obj=json.load(open(p))
-  # Best-effort: handle a few likely shapes.
-  def find_locked(o):
+  # Best-effort: handle multiple devicectl JSON shapes across Xcode versions.
+  def find_lock_state(o):
     if isinstance(o, dict):
       for k,v in o.items():
+        lk = k.lower()
+        if lk in ("passcoderequired",):
+          return bool(v)
+        if lk in ("unlockedsinceboot",):
+          return not bool(v)
         if k.lower() in ("locked","islocked","devicelocked"):
-          return v
-        r=find_locked(v)
+          return bool(v)
+        r=find_lock_state(v)
         if r is not None: return r
     if isinstance(o, list):
       for it in o:
-        r=find_locked(it)
+        r=find_lock_state(it)
         if r is not None: return r
     return None
-  v=find_locked(obj)
+  v=find_lock_state(obj)
   if v is True: print("1")
   elif v is False: print("0")
 except Exception:
@@ -319,6 +332,11 @@ maybe_write_config() {
   local relays kp_relays
   relays="$(effective_relays)"
   kp_relays="$(effective_kp_relays)"
+  local call_moq_url call_broadcast_prefix moq_probe_on_start
+  # Default to the deployed anonymous MOQ relay; override with PIKA_CALL_MOQ_URL for local setups.
+  call_moq_url="${PIKA_CALL_MOQ_URL:-https://us-east.moq.logos.surf/anon}"
+  call_broadcast_prefix="${PIKA_CALL_BROADCAST_PREFIX:-pika/calls}"
+  moq_probe_on_start="${PIKA_MOQ_PROBE_ON_START:-0}"
 
   local json
   json="$(
@@ -328,7 +346,14 @@ relays = "${relays}".strip()
 kp_relays = "${kp_relays}".strip()
 relay_items = [x.strip() for x in relays.split(",") if x.strip()]
 kp_items = [x.strip() for x in kp_relays.split(",") if x.strip()]
-print(json.dumps({"disable_network": False, "relay_urls": relay_items, "key_package_relay_urls": kp_items}))
+print(json.dumps({
+  "disable_network": False,
+  "relay_urls": relay_items,
+  "key_package_relay_urls": kp_items,
+  "call_moq_url": "${call_moq_url}",
+  "call_broadcast_prefix": "${call_broadcast_prefix}",
+  "moq_probe_on_start": True if "${moq_probe_on_start}" == "1" else False,
+}))
 PY
   )"
 

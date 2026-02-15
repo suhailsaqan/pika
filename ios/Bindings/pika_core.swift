@@ -352,7 +352,7 @@ private func uniffiTraitInterfaceCallWithError<T, E>(
         callStatus.pointee.errorBuf = FfiConverterString.lower(String(describing: error))
     }
 }
-// Initial value and increment amount for handles. 
+// Initial value and increment amount for handles.
 // These ensure that SWIFT handles always have the lowest bit set
 fileprivate let UNIFFI_HANDLEMAP_INITIAL: UInt64 = 1
 fileprivate let UNIFFI_HANDLEMAP_DELTA: UInt64 = 2
@@ -539,13 +539,13 @@ fileprivate struct FfiConverterString: FfiConverter {
 
 
 public protocol FfiAppProtocol: AnyObject, Sendable {
-    
-    func dispatch(action: AppAction) 
-    
-    func listenForUpdates(reconciler: AppReconciler) 
-    
+
+    func dispatch(action: AppAction)
+
+    func listenForUpdates(reconciler: AppReconciler)
+
     func state()  -> AppState
-    
+
 }
 open class FfiApp: FfiAppProtocol, @unchecked Sendable {
     fileprivate let handle: UInt64
@@ -605,9 +605,9 @@ public convenience init(dataDir: String) {
         try! rustCall { uniffi_pika_core_fn_free_ffiapp(handle, $0) }
     }
 
-    
 
-    
+
+
 open func dispatch(action: AppAction)  {try! rustCall() {
     uniffi_pika_core_fn_method_ffiapp_dispatch(
             self.uniffiCloneHandle(),
@@ -615,7 +615,7 @@ open func dispatch(action: AppAction)  {try! rustCall() {
     )
 }
 }
-    
+
 open func listenForUpdates(reconciler: AppReconciler)  {try! rustCall() {
     uniffi_pika_core_fn_method_ffiapp_listen_for_updates(
             self.uniffiCloneHandle(),
@@ -623,7 +623,7 @@ open func listenForUpdates(reconciler: AppReconciler)  {try! rustCall() {
     )
 }
 }
-    
+
 open func state() -> AppState  {
     return try!  FfiConverterTypeAppState_lift(try! rustCall() {
     uniffi_pika_core_fn_method_ffiapp_state(
@@ -631,9 +631,9 @@ open func state() -> AppState  {
     )
 })
 }
-    
 
-    
+
+
 }
 
 
@@ -690,11 +690,12 @@ public struct AppState: Equatable, Hashable {
     public var currentChat: ChatViewState?
     public var followList: [FollowListEntry]
     public var peerProfile: PeerProfileState?
+    public var activeCall: CallState?
     public var toast: String?
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(rev: UInt64, router: Router, auth: AuthState, myProfile: MyProfileState, busy: BusyState, chatList: [ChatSummary], currentChat: ChatViewState?, followList: [FollowListEntry], peerProfile: PeerProfileState?, toast: String?) {
+    public init(rev: UInt64, router: Router, auth: AuthState, myProfile: MyProfileState, busy: BusyState, chatList: [ChatSummary], currentChat: ChatViewState?, followList: [FollowListEntry], peerProfile: PeerProfileState?, activeCall: CallState?, toast: String?) {
         self.rev = rev
         self.router = router
         self.auth = auth
@@ -704,12 +705,13 @@ public struct AppState: Equatable, Hashable {
         self.currentChat = currentChat
         self.followList = followList
         self.peerProfile = peerProfile
+        self.activeCall = activeCall
         self.toast = toast
     }
 
-    
 
-    
+
+
 }
 
 #if compiler(>=6)
@@ -723,15 +725,16 @@ public struct FfiConverterTypeAppState: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> AppState {
         return
             try AppState(
-                rev: FfiConverterUInt64.read(from: &buf), 
-                router: FfiConverterTypeRouter.read(from: &buf), 
-                auth: FfiConverterTypeAuthState.read(from: &buf), 
-                myProfile: FfiConverterTypeMyProfileState.read(from: &buf), 
-                busy: FfiConverterTypeBusyState.read(from: &buf), 
-                chatList: FfiConverterSequenceTypeChatSummary.read(from: &buf), 
-                currentChat: FfiConverterOptionTypeChatViewState.read(from: &buf), 
-                followList: FfiConverterSequenceTypeFollowListEntry.read(from: &buf), 
-                peerProfile: FfiConverterOptionTypePeerProfileState.read(from: &buf), 
+                rev: FfiConverterUInt64.read(from: &buf),
+                router: FfiConverterTypeRouter.read(from: &buf),
+                auth: FfiConverterTypeAuthState.read(from: &buf),
+                myProfile: FfiConverterTypeMyProfileState.read(from: &buf),
+                busy: FfiConverterTypeBusyState.read(from: &buf),
+                chatList: FfiConverterSequenceTypeChatSummary.read(from: &buf),
+                currentChat: FfiConverterOptionTypeChatViewState.read(from: &buf),
+                followList: FfiConverterSequenceTypeFollowListEntry.read(from: &buf),
+                peerProfile: FfiConverterOptionTypePeerProfileState.read(from: &buf),
+                activeCall: FfiConverterOptionTypeCallState.read(from: &buf),
                 toast: FfiConverterOptionString.read(from: &buf)
         )
     }
@@ -746,6 +749,7 @@ public struct FfiConverterTypeAppState: FfiConverterRustBuffer {
         FfiConverterOptionTypeChatViewState.write(value.currentChat, into: &buf)
         FfiConverterSequenceTypeFollowListEntry.write(value.followList, into: &buf)
         FfiConverterOptionTypePeerProfileState.write(value.peerProfile, into: &buf)
+        FfiConverterOptionTypeCallState.write(value.activeCall, into: &buf)
         FfiConverterOptionString.write(value.toast, into: &buf)
     }
 }
@@ -766,6 +770,13 @@ public func FfiConverterTypeAppState_lower(_ value: AppState) -> RustBuffer {
 }
 
 
+/**
+ * "In flight" flags for long-ish operations that the UI should reflect.
+ *
+ * Spec-v1 allows ephemeral UI state to remain native (scroll position, focus, etc),
+ * but UX-relevant async operation state should live in Rust to avoid native-side
+ * heuristics (e.g., resetting spinners on toast).
+ */
 public struct BusyState: Equatable, Hashable {
     public var creatingAccount: Bool
     public var loggingIn: Bool
@@ -781,9 +792,9 @@ public struct BusyState: Equatable, Hashable {
         self.fetchingFollowList = fetchingFollowList
     }
 
-    
 
-    
+
+
 }
 
 #if compiler(>=6)
@@ -797,9 +808,9 @@ public struct FfiConverterTypeBusyState: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> BusyState {
         return
             try BusyState(
-                creatingAccount: FfiConverterBool.read(from: &buf), 
-                loggingIn: FfiConverterBool.read(from: &buf), 
-                creatingChat: FfiConverterBool.read(from: &buf), 
+                creatingAccount: FfiConverterBool.read(from: &buf),
+                loggingIn: FfiConverterBool.read(from: &buf),
+                creatingChat: FfiConverterBool.read(from: &buf),
                 fetchingFollowList: FfiConverterBool.read(from: &buf)
         )
     }
@@ -828,6 +839,146 @@ public func FfiConverterTypeBusyState_lower(_ value: BusyState) -> RustBuffer {
 }
 
 
+public struct CallDebugStats: Equatable, Hashable {
+    public var txFrames: UInt64
+    public var rxFrames: UInt64
+    public var rxDropped: UInt64
+    public var jitterBufferMs: UInt32
+    public var lastRttMs: UInt32?
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(txFrames: UInt64, rxFrames: UInt64, rxDropped: UInt64, jitterBufferMs: UInt32, lastRttMs: UInt32?) {
+        self.txFrames = txFrames
+        self.rxFrames = rxFrames
+        self.rxDropped = rxDropped
+        self.jitterBufferMs = jitterBufferMs
+        self.lastRttMs = lastRttMs
+    }
+
+
+
+
+}
+
+#if compiler(>=6)
+extension CallDebugStats: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeCallDebugStats: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> CallDebugStats {
+        return
+            try CallDebugStats(
+                txFrames: FfiConverterUInt64.read(from: &buf),
+                rxFrames: FfiConverterUInt64.read(from: &buf),
+                rxDropped: FfiConverterUInt64.read(from: &buf),
+                jitterBufferMs: FfiConverterUInt32.read(from: &buf),
+                lastRttMs: FfiConverterOptionUInt32.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: CallDebugStats, into buf: inout [UInt8]) {
+        FfiConverterUInt64.write(value.txFrames, into: &buf)
+        FfiConverterUInt64.write(value.rxFrames, into: &buf)
+        FfiConverterUInt64.write(value.rxDropped, into: &buf)
+        FfiConverterUInt32.write(value.jitterBufferMs, into: &buf)
+        FfiConverterOptionUInt32.write(value.lastRttMs, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeCallDebugStats_lift(_ buf: RustBuffer) throws -> CallDebugStats {
+    return try FfiConverterTypeCallDebugStats.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeCallDebugStats_lower(_ value: CallDebugStats) -> RustBuffer {
+    return FfiConverterTypeCallDebugStats.lower(value)
+}
+
+
+public struct CallState: Equatable, Hashable {
+    public var callId: String
+    public var chatId: String
+    public var peerNpub: String
+    public var status: CallStatus
+    public var startedAt: Int64?
+    public var isMuted: Bool
+    public var debug: CallDebugStats?
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(callId: String, chatId: String, peerNpub: String, status: CallStatus, startedAt: Int64?, isMuted: Bool, debug: CallDebugStats?) {
+        self.callId = callId
+        self.chatId = chatId
+        self.peerNpub = peerNpub
+        self.status = status
+        self.startedAt = startedAt
+        self.isMuted = isMuted
+        self.debug = debug
+    }
+
+
+
+
+}
+
+#if compiler(>=6)
+extension CallState: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeCallState: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> CallState {
+        return
+            try CallState(
+                callId: FfiConverterString.read(from: &buf),
+                chatId: FfiConverterString.read(from: &buf),
+                peerNpub: FfiConverterString.read(from: &buf),
+                status: FfiConverterTypeCallStatus.read(from: &buf),
+                startedAt: FfiConverterOptionInt64.read(from: &buf),
+                isMuted: FfiConverterBool.read(from: &buf),
+                debug: FfiConverterOptionTypeCallDebugStats.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: CallState, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.callId, into: &buf)
+        FfiConverterString.write(value.chatId, into: &buf)
+        FfiConverterString.write(value.peerNpub, into: &buf)
+        FfiConverterTypeCallStatus.write(value.status, into: &buf)
+        FfiConverterOptionInt64.write(value.startedAt, into: &buf)
+        FfiConverterBool.write(value.isMuted, into: &buf)
+        FfiConverterOptionTypeCallDebugStats.write(value.debug, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeCallState_lift(_ buf: RustBuffer) throws -> CallState {
+    return try FfiConverterTypeCallState.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeCallState_lower(_ value: CallState) -> RustBuffer {
+    return FfiConverterTypeCallState.lower(value)
+}
+
+
 public struct ChatMessage: Equatable, Hashable {
     public var id: String
     public var senderPubkey: String
@@ -841,10 +992,11 @@ public struct ChatMessage: Equatable, Hashable {
     public var reactions: [ReactionSummary]
     public var pollTally: [PollTally]
     public var myPollVote: String?
+    public var htmlState: String?
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(id: String, senderPubkey: String, senderName: String?, content: String, displayContent: String, mentions: [Mention], timestamp: Int64, isMine: Bool, delivery: MessageDeliveryState, reactions: [ReactionSummary], pollTally: [PollTally], myPollVote: String?) {
+    public init(id: String, senderPubkey: String, senderName: String?, content: String, displayContent: String, mentions: [Mention], timestamp: Int64, isMine: Bool, delivery: MessageDeliveryState, reactions: [ReactionSummary], pollTally: [PollTally], myPollVote: String?, htmlState: String?) {
         self.id = id
         self.senderPubkey = senderPubkey
         self.senderName = senderName
@@ -857,11 +1009,12 @@ public struct ChatMessage: Equatable, Hashable {
         self.reactions = reactions
         self.pollTally = pollTally
         self.myPollVote = myPollVote
+        self.htmlState = htmlState
     }
 
-    
 
-    
+
+
 }
 
 #if compiler(>=6)
@@ -875,18 +1028,19 @@ public struct FfiConverterTypeChatMessage: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> ChatMessage {
         return
             try ChatMessage(
-                id: FfiConverterString.read(from: &buf), 
-                senderPubkey: FfiConverterString.read(from: &buf), 
-                senderName: FfiConverterOptionString.read(from: &buf), 
-                content: FfiConverterString.read(from: &buf), 
-                displayContent: FfiConverterString.read(from: &buf), 
-                mentions: FfiConverterSequenceTypeMention.read(from: &buf), 
-                timestamp: FfiConverterInt64.read(from: &buf), 
-                isMine: FfiConverterBool.read(from: &buf), 
-                delivery: FfiConverterTypeMessageDeliveryState.read(from: &buf), 
-                reactions: FfiConverterSequenceTypeReactionSummary.read(from: &buf), 
-                pollTally: FfiConverterSequenceTypePollTally.read(from: &buf), 
-                myPollVote: FfiConverterOptionString.read(from: &buf)
+                id: FfiConverterString.read(from: &buf),
+                senderPubkey: FfiConverterString.read(from: &buf),
+                senderName: FfiConverterOptionString.read(from: &buf),
+                content: FfiConverterString.read(from: &buf),
+                displayContent: FfiConverterString.read(from: &buf),
+                mentions: FfiConverterSequenceTypeMention.read(from: &buf),
+                timestamp: FfiConverterInt64.read(from: &buf),
+                isMine: FfiConverterBool.read(from: &buf),
+                delivery: FfiConverterTypeMessageDeliveryState.read(from: &buf),
+                reactions: FfiConverterSequenceTypeReactionSummary.read(from: &buf),
+                pollTally: FfiConverterSequenceTypePollTally.read(from: &buf),
+                myPollVote: FfiConverterOptionString.read(from: &buf),
+                htmlState: FfiConverterOptionString.read(from: &buf)
         )
     }
 
@@ -903,6 +1057,7 @@ public struct FfiConverterTypeChatMessage: FfiConverterRustBuffer {
         FfiConverterSequenceTypeReactionSummary.write(value.reactions, into: &buf)
         FfiConverterSequenceTypePollTally.write(value.pollTally, into: &buf)
         FfiConverterOptionString.write(value.myPollVote, into: &buf)
+        FfiConverterOptionString.write(value.htmlState, into: &buf)
     }
 }
 
@@ -943,9 +1098,9 @@ public struct ChatSummary: Equatable, Hashable {
         self.unreadCount = unreadCount
     }
 
-    
 
-    
+
+
 }
 
 #if compiler(>=6)
@@ -959,12 +1114,12 @@ public struct FfiConverterTypeChatSummary: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> ChatSummary {
         return
             try ChatSummary(
-                chatId: FfiConverterString.read(from: &buf), 
-                isGroup: FfiConverterBool.read(from: &buf), 
-                groupName: FfiConverterOptionString.read(from: &buf), 
-                members: FfiConverterSequenceTypeMemberInfo.read(from: &buf), 
-                lastMessage: FfiConverterOptionString.read(from: &buf), 
-                lastMessageAt: FfiConverterOptionInt64.read(from: &buf), 
+                chatId: FfiConverterString.read(from: &buf),
+                isGroup: FfiConverterBool.read(from: &buf),
+                groupName: FfiConverterOptionString.read(from: &buf),
+                members: FfiConverterSequenceTypeMemberInfo.read(from: &buf),
+                lastMessage: FfiConverterOptionString.read(from: &buf),
+                lastMessageAt: FfiConverterOptionInt64.read(from: &buf),
                 unreadCount: FfiConverterUInt32.read(from: &buf)
         )
     }
@@ -1017,9 +1172,9 @@ public struct ChatViewState: Equatable, Hashable {
         self.canLoadOlder = canLoadOlder
     }
 
-    
 
-    
+
+
 }
 
 #if compiler(>=6)
@@ -1033,12 +1188,12 @@ public struct FfiConverterTypeChatViewState: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> ChatViewState {
         return
             try ChatViewState(
-                chatId: FfiConverterString.read(from: &buf), 
-                isGroup: FfiConverterBool.read(from: &buf), 
-                groupName: FfiConverterOptionString.read(from: &buf), 
-                members: FfiConverterSequenceTypeMemberInfo.read(from: &buf), 
-                isAdmin: FfiConverterBool.read(from: &buf), 
-                messages: FfiConverterSequenceTypeChatMessage.read(from: &buf), 
+                chatId: FfiConverterString.read(from: &buf),
+                isGroup: FfiConverterBool.read(from: &buf),
+                groupName: FfiConverterOptionString.read(from: &buf),
+                members: FfiConverterSequenceTypeMemberInfo.read(from: &buf),
+                isAdmin: FfiConverterBool.read(from: &buf),
+                messages: FfiConverterSequenceTypeChatMessage.read(from: &buf),
                 canLoadOlder: FfiConverterBool.read(from: &buf)
         )
     }
@@ -1085,9 +1240,9 @@ public struct FollowListEntry: Equatable, Hashable {
         self.pictureUrl = pictureUrl
     }
 
-    
 
-    
+
+
 }
 
 #if compiler(>=6)
@@ -1101,9 +1256,9 @@ public struct FfiConverterTypeFollowListEntry: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> FollowListEntry {
         return
             try FollowListEntry(
-                pubkey: FfiConverterString.read(from: &buf), 
-                npub: FfiConverterString.read(from: &buf), 
-                name: FfiConverterOptionString.read(from: &buf), 
+                pubkey: FfiConverterString.read(from: &buf),
+                npub: FfiConverterString.read(from: &buf),
+                name: FfiConverterOptionString.read(from: &buf),
                 pictureUrl: FfiConverterOptionString.read(from: &buf)
         )
     }
@@ -1147,9 +1302,9 @@ public struct MemberInfo: Equatable, Hashable {
         self.pictureUrl = pictureUrl
     }
 
-    
 
-    
+
+
 }
 
 #if compiler(>=6)
@@ -1163,9 +1318,9 @@ public struct FfiConverterTypeMemberInfo: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> MemberInfo {
         return
             try MemberInfo(
-                pubkey: FfiConverterString.read(from: &buf), 
-                npub: FfiConverterString.read(from: &buf), 
-                name: FfiConverterOptionString.read(from: &buf), 
+                pubkey: FfiConverterString.read(from: &buf),
+                npub: FfiConverterString.read(from: &buf),
+                name: FfiConverterOptionString.read(from: &buf),
                 pictureUrl: FfiConverterOptionString.read(from: &buf)
         )
     }
@@ -1209,9 +1364,9 @@ public struct Mention: Equatable, Hashable {
         self.end = end
     }
 
-    
 
-    
+
+
 }
 
 #if compiler(>=6)
@@ -1225,9 +1380,9 @@ public struct FfiConverterTypeMention: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> Mention {
         return
             try Mention(
-                npub: FfiConverterString.read(from: &buf), 
-                displayName: FfiConverterString.read(from: &buf), 
-                start: FfiConverterUInt32.read(from: &buf), 
+                npub: FfiConverterString.read(from: &buf),
+                displayName: FfiConverterString.read(from: &buf),
+                start: FfiConverterUInt32.read(from: &buf),
                 end: FfiConverterUInt32.read(from: &buf)
         )
     }
@@ -1269,9 +1424,9 @@ public struct MyProfileState: Equatable, Hashable {
         self.pictureUrl = pictureUrl
     }
 
-    
 
-    
+
+
 }
 
 #if compiler(>=6)
@@ -1285,8 +1440,8 @@ public struct FfiConverterTypeMyProfileState: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> MyProfileState {
         return
             try MyProfileState(
-                name: FfiConverterString.read(from: &buf), 
-                about: FfiConverterString.read(from: &buf), 
+                name: FfiConverterString.read(from: &buf),
+                about: FfiConverterString.read(from: &buf),
                 pictureUrl: FfiConverterOptionString.read(from: &buf)
         )
     }
@@ -1333,9 +1488,9 @@ public struct PeerProfileState: Equatable, Hashable {
         self.isFollowed = isFollowed
     }
 
-    
 
-    
+
+
 }
 
 #if compiler(>=6)
@@ -1349,11 +1504,11 @@ public struct FfiConverterTypePeerProfileState: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> PeerProfileState {
         return
             try PeerProfileState(
-                pubkey: FfiConverterString.read(from: &buf), 
-                npub: FfiConverterString.read(from: &buf), 
-                name: FfiConverterOptionString.read(from: &buf), 
-                about: FfiConverterOptionString.read(from: &buf), 
-                pictureUrl: FfiConverterOptionString.read(from: &buf), 
+                pubkey: FfiConverterString.read(from: &buf),
+                npub: FfiConverterString.read(from: &buf),
+                name: FfiConverterOptionString.read(from: &buf),
+                about: FfiConverterOptionString.read(from: &buf),
+                pictureUrl: FfiConverterOptionString.read(from: &buf),
                 isFollowed: FfiConverterBool.read(from: &buf)
         )
     }
@@ -1397,9 +1552,9 @@ public struct PollTally: Equatable, Hashable {
         self.voterNames = voterNames
     }
 
-    
 
-    
+
+
 }
 
 #if compiler(>=6)
@@ -1413,8 +1568,8 @@ public struct FfiConverterTypePollTally: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> PollTally {
         return
             try PollTally(
-                option: FfiConverterString.read(from: &buf), 
-                count: FfiConverterUInt32.read(from: &buf), 
+                option: FfiConverterString.read(from: &buf),
+                count: FfiConverterUInt32.read(from: &buf),
                 voterNames: FfiConverterSequenceString.read(from: &buf)
         )
     }
@@ -1455,9 +1610,9 @@ public struct ReactionSummary: Equatable, Hashable {
         self.reactedByMe = reactedByMe
     }
 
-    
 
-    
+
+
 }
 
 #if compiler(>=6)
@@ -1471,8 +1626,8 @@ public struct FfiConverterTypeReactionSummary: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> ReactionSummary {
         return
             try ReactionSummary(
-                emoji: FfiConverterString.read(from: &buf), 
-                count: FfiConverterUInt32.read(from: &buf), 
+                emoji: FfiConverterString.read(from: &buf),
+                count: FfiConverterUInt32.read(from: &buf),
                 reactedByMe: FfiConverterBool.read(from: &buf)
         )
     }
@@ -1511,9 +1666,9 @@ public struct Router: Equatable, Hashable {
         self.screenStack = screenStack
     }
 
-    
 
-    
+
+
 }
 
 #if compiler(>=6)
@@ -1527,7 +1682,7 @@ public struct FfiConverterTypeRouter: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> Router {
         return
             try Router(
-                defaultScreen: FfiConverterTypeScreen.read(from: &buf), 
+                defaultScreen: FfiConverterTypeScreen.read(from: &buf),
                 screenStack: FfiConverterSequenceTypeScreen.read(from: &buf)
         )
     }
@@ -1557,7 +1712,7 @@ public func FfiConverterTypeRouter_lower(_ value: Router) -> RustBuffer {
 // See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
 
 public enum AppAction: Equatable, Hashable {
-    
+
     case createAccount
     case login(nsec: String
     )
@@ -1583,6 +1738,14 @@ public enum AppAction: Equatable, Hashable {
     )
     case loadOlderMessages(chatId: String, beforeMessageId: String, limit: UInt32
     )
+    case startCall(chatId: String
+    )
+    case acceptCall(chatId: String
+    )
+    case rejectCall(chatId: String
+    )
+    case endCall
+    case toggleMute
     case createGroupChat(peerNpubs: [String], groupName: String
     )
     case addGroupMembers(chatId: String, peerNpubs: [String]
@@ -1627,236 +1790,272 @@ public struct FfiConverterTypeAppAction: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> AppAction {
         let variant: Int32 = try readInt(&buf)
         switch variant {
-        
+
         case 1: return .createAccount
-        
+
         case 2: return .login(nsec: try FfiConverterString.read(from: &buf)
         )
-        
+
         case 3: return .restoreSession(nsec: try FfiConverterString.read(from: &buf)
         )
-        
+
         case 4: return .logout
-        
+
         case 5: return .refreshMyProfile
-        
+
         case 6: return .saveMyProfile(name: try FfiConverterString.read(from: &buf), about: try FfiConverterString.read(from: &buf)
         )
-        
+
         case 7: return .uploadMyProfileImage(imageBase64: try FfiConverterString.read(from: &buf), mimeType: try FfiConverterString.read(from: &buf)
         )
-        
+
         case 8: return .pushScreen(screen: try FfiConverterTypeScreen.read(from: &buf)
         )
-        
+
         case 9: return .updateScreenStack(stack: try FfiConverterSequenceTypeScreen.read(from: &buf)
         )
-        
+
         case 10: return .createChat(peerNpub: try FfiConverterString.read(from: &buf)
         )
-        
+
         case 11: return .sendMessage(chatId: try FfiConverterString.read(from: &buf), content: try FfiConverterString.read(from: &buf)
         )
-        
+
         case 12: return .retryMessage(chatId: try FfiConverterString.read(from: &buf), messageId: try FfiConverterString.read(from: &buf)
         )
-        
+
         case 13: return .openChat(chatId: try FfiConverterString.read(from: &buf)
         )
-        
+
         case 14: return .loadOlderMessages(chatId: try FfiConverterString.read(from: &buf), beforeMessageId: try FfiConverterString.read(from: &buf), limit: try FfiConverterUInt32.read(from: &buf)
         )
-        
-        case 15: return .createGroupChat(peerNpubs: try FfiConverterSequenceString.read(from: &buf), groupName: try FfiConverterString.read(from: &buf)
+
+        case 15: return .startCall(chatId: try FfiConverterString.read(from: &buf)
         )
-        
-        case 16: return .addGroupMembers(chatId: try FfiConverterString.read(from: &buf), peerNpubs: try FfiConverterSequenceString.read(from: &buf)
+
+        case 16: return .acceptCall(chatId: try FfiConverterString.read(from: &buf)
         )
-        
-        case 17: return .removeGroupMembers(chatId: try FfiConverterString.read(from: &buf), memberPubkeys: try FfiConverterSequenceString.read(from: &buf)
+
+        case 17: return .rejectCall(chatId: try FfiConverterString.read(from: &buf)
         )
-        
-        case 18: return .leaveGroup(chatId: try FfiConverterString.read(from: &buf)
+
+        case 18: return .endCall
+
+        case 19: return .toggleMute
+
+        case 20: return .createGroupChat(peerNpubs: try FfiConverterSequenceString.read(from: &buf), groupName: try FfiConverterString.read(from: &buf)
         )
-        
-        case 19: return .renameGroup(chatId: try FfiConverterString.read(from: &buf), name: try FfiConverterString.read(from: &buf)
+
+        case 21: return .addGroupMembers(chatId: try FfiConverterString.read(from: &buf), peerNpubs: try FfiConverterSequenceString.read(from: &buf)
         )
-        
-        case 20: return .archiveChat(chatId: try FfiConverterString.read(from: &buf)
+
+        case 22: return .removeGroupMembers(chatId: try FfiConverterString.read(from: &buf), memberPubkeys: try FfiConverterSequenceString.read(from: &buf)
         )
-        
-        case 21: return .reactToMessage(chatId: try FfiConverterString.read(from: &buf), messageId: try FfiConverterString.read(from: &buf), emoji: try FfiConverterString.read(from: &buf)
+
+        case 23: return .leaveGroup(chatId: try FfiConverterString.read(from: &buf)
         )
-        
-        case 22: return .clearToast
-        
-        case 23: return .foregrounded
-        
-        case 24: return .openPeerProfile(pubkey: try FfiConverterString.read(from: &buf)
+
+        case 24: return .renameGroup(chatId: try FfiConverterString.read(from: &buf), name: try FfiConverterString.read(from: &buf)
         )
-        
-        case 25: return .closePeerProfile
-        
-        case 26: return .refreshFollowList
-        
-        case 27: return .followUser(pubkey: try FfiConverterString.read(from: &buf)
+
+        case 25: return .archiveChat(chatId: try FfiConverterString.read(from: &buf)
         )
-        
-        case 28: return .unfollowUser(pubkey: try FfiConverterString.read(from: &buf)
+
+        case 26: return .reactToMessage(chatId: try FfiConverterString.read(from: &buf), messageId: try FfiConverterString.read(from: &buf), emoji: try FfiConverterString.read(from: &buf)
         )
-        
+
+        case 27: return .clearToast
+
+        case 28: return .foregrounded
+
+        case 29: return .openPeerProfile(pubkey: try FfiConverterString.read(from: &buf)
+        )
+
+        case 30: return .closePeerProfile
+
+        case 31: return .refreshFollowList
+
+        case 32: return .followUser(pubkey: try FfiConverterString.read(from: &buf)
+        )
+
+        case 33: return .unfollowUser(pubkey: try FfiConverterString.read(from: &buf)
+        )
+
         default: throw UniffiInternalError.unexpectedEnumCase
         }
     }
 
     public static func write(_ value: AppAction, into buf: inout [UInt8]) {
         switch value {
-        
-        
+
+
         case .createAccount:
             writeInt(&buf, Int32(1))
-        
-        
+
+
         case let .login(nsec):
             writeInt(&buf, Int32(2))
             FfiConverterString.write(nsec, into: &buf)
-            
-        
+
+
         case let .restoreSession(nsec):
             writeInt(&buf, Int32(3))
             FfiConverterString.write(nsec, into: &buf)
-            
-        
+
+
         case .logout:
             writeInt(&buf, Int32(4))
-        
-        
+
+
         case .refreshMyProfile:
             writeInt(&buf, Int32(5))
-        
-        
+
+
         case let .saveMyProfile(name,about):
             writeInt(&buf, Int32(6))
             FfiConverterString.write(name, into: &buf)
             FfiConverterString.write(about, into: &buf)
-            
-        
+
+
         case let .uploadMyProfileImage(imageBase64,mimeType):
             writeInt(&buf, Int32(7))
             FfiConverterString.write(imageBase64, into: &buf)
             FfiConverterString.write(mimeType, into: &buf)
-            
-        
+
+
         case let .pushScreen(screen):
             writeInt(&buf, Int32(8))
             FfiConverterTypeScreen.write(screen, into: &buf)
-            
-        
+
+
         case let .updateScreenStack(stack):
             writeInt(&buf, Int32(9))
             FfiConverterSequenceTypeScreen.write(stack, into: &buf)
-            
-        
+
+
         case let .createChat(peerNpub):
             writeInt(&buf, Int32(10))
             FfiConverterString.write(peerNpub, into: &buf)
-            
-        
+
+
         case let .sendMessage(chatId,content):
             writeInt(&buf, Int32(11))
             FfiConverterString.write(chatId, into: &buf)
             FfiConverterString.write(content, into: &buf)
-            
-        
+
+
         case let .retryMessage(chatId,messageId):
             writeInt(&buf, Int32(12))
             FfiConverterString.write(chatId, into: &buf)
             FfiConverterString.write(messageId, into: &buf)
-            
-        
+
+
         case let .openChat(chatId):
             writeInt(&buf, Int32(13))
             FfiConverterString.write(chatId, into: &buf)
-            
-        
+
+
         case let .loadOlderMessages(chatId,beforeMessageId,limit):
             writeInt(&buf, Int32(14))
             FfiConverterString.write(chatId, into: &buf)
             FfiConverterString.write(beforeMessageId, into: &buf)
             FfiConverterUInt32.write(limit, into: &buf)
-            
-        
-        case let .createGroupChat(peerNpubs,groupName):
+
+
+        case let .startCall(chatId):
             writeInt(&buf, Int32(15))
-            FfiConverterSequenceString.write(peerNpubs, into: &buf)
-            FfiConverterString.write(groupName, into: &buf)
-            
-        
-        case let .addGroupMembers(chatId,peerNpubs):
+            FfiConverterString.write(chatId, into: &buf)
+
+
+        case let .acceptCall(chatId):
             writeInt(&buf, Int32(16))
             FfiConverterString.write(chatId, into: &buf)
-            FfiConverterSequenceString.write(peerNpubs, into: &buf)
-            
-        
-        case let .removeGroupMembers(chatId,memberPubkeys):
+
+
+        case let .rejectCall(chatId):
             writeInt(&buf, Int32(17))
             FfiConverterString.write(chatId, into: &buf)
-            FfiConverterSequenceString.write(memberPubkeys, into: &buf)
-            
-        
-        case let .leaveGroup(chatId):
+
+
+        case .endCall:
             writeInt(&buf, Int32(18))
-            FfiConverterString.write(chatId, into: &buf)
-            
-        
-        case let .renameGroup(chatId,name):
+
+
+        case .toggleMute:
             writeInt(&buf, Int32(19))
+
+
+        case let .createGroupChat(peerNpubs,groupName):
+            writeInt(&buf, Int32(20))
+            FfiConverterSequenceString.write(peerNpubs, into: &buf)
+            FfiConverterString.write(groupName, into: &buf)
+
+
+        case let .addGroupMembers(chatId,peerNpubs):
+            writeInt(&buf, Int32(21))
+            FfiConverterString.write(chatId, into: &buf)
+            FfiConverterSequenceString.write(peerNpubs, into: &buf)
+
+
+        case let .removeGroupMembers(chatId,memberPubkeys):
+            writeInt(&buf, Int32(22))
+            FfiConverterString.write(chatId, into: &buf)
+            FfiConverterSequenceString.write(memberPubkeys, into: &buf)
+
+
+        case let .leaveGroup(chatId):
+            writeInt(&buf, Int32(23))
+            FfiConverterString.write(chatId, into: &buf)
+
+
+        case let .renameGroup(chatId,name):
+            writeInt(&buf, Int32(24))
             FfiConverterString.write(chatId, into: &buf)
             FfiConverterString.write(name, into: &buf)
-            
-        
+
+
         case let .archiveChat(chatId):
-            writeInt(&buf, Int32(20))
+            writeInt(&buf, Int32(25))
             FfiConverterString.write(chatId, into: &buf)
-            
-        
+
+
         case let .reactToMessage(chatId,messageId,emoji):
-            writeInt(&buf, Int32(21))
+            writeInt(&buf, Int32(26))
             FfiConverterString.write(chatId, into: &buf)
             FfiConverterString.write(messageId, into: &buf)
             FfiConverterString.write(emoji, into: &buf)
-            
-        
+
+
         case .clearToast:
-            writeInt(&buf, Int32(22))
-        
-        
-        case .foregrounded:
-            writeInt(&buf, Int32(23))
-        
-        
-        case let .openPeerProfile(pubkey):
-            writeInt(&buf, Int32(24))
-            FfiConverterString.write(pubkey, into: &buf)
-            
-        
-        case .closePeerProfile:
-            writeInt(&buf, Int32(25))
-        
-        
-        case .refreshFollowList:
-            writeInt(&buf, Int32(26))
-        
-        
-        case let .followUser(pubkey):
             writeInt(&buf, Int32(27))
-            FfiConverterString.write(pubkey, into: &buf)
-            
-        
-        case let .unfollowUser(pubkey):
+
+
+        case .foregrounded:
             writeInt(&buf, Int32(28))
+
+
+        case let .openPeerProfile(pubkey):
+            writeInt(&buf, Int32(29))
             FfiConverterString.write(pubkey, into: &buf)
-            
+
+
+        case .closePeerProfile:
+            writeInt(&buf, Int32(30))
+
+
+        case .refreshFollowList:
+            writeInt(&buf, Int32(31))
+
+
+        case let .followUser(pubkey):
+            writeInt(&buf, Int32(32))
+            FfiConverterString.write(pubkey, into: &buf)
+
+
+        case let .unfollowUser(pubkey):
+            writeInt(&buf, Int32(33))
+            FfiConverterString.write(pubkey, into: &buf)
+
         }
     }
 }
@@ -1881,7 +2080,7 @@ public func FfiConverterTypeAppAction_lower(_ value: AppAction) -> RustBuffer {
 // See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
 
 public enum AppUpdate: Equatable, Hashable {
-    
+
     /**
      * Primary update stream: always send a full state snapshot.
      *
@@ -1911,33 +2110,33 @@ public struct FfiConverterTypeAppUpdate: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> AppUpdate {
         let variant: Int32 = try readInt(&buf)
         switch variant {
-        
+
         case 1: return .fullState(try FfiConverterTypeAppState.read(from: &buf)
         )
-        
+
         case 2: return .accountCreated(rev: try FfiConverterUInt64.read(from: &buf), nsec: try FfiConverterString.read(from: &buf), pubkey: try FfiConverterString.read(from: &buf), npub: try FfiConverterString.read(from: &buf)
         )
-        
+
         default: throw UniffiInternalError.unexpectedEnumCase
         }
     }
 
     public static func write(_ value: AppUpdate, into buf: inout [UInt8]) {
         switch value {
-        
-        
+
+
         case let .fullState(v1):
             writeInt(&buf, Int32(1))
             FfiConverterTypeAppState.write(v1, into: &buf)
-            
-        
+
+
         case let .accountCreated(rev,nsec,pubkey,npub):
             writeInt(&buf, Int32(2))
             FfiConverterUInt64.write(rev, into: &buf)
             FfiConverterString.write(nsec, into: &buf)
             FfiConverterString.write(pubkey, into: &buf)
             FfiConverterString.write(npub, into: &buf)
-            
+
         }
     }
 }
@@ -1962,7 +2161,7 @@ public func FfiConverterTypeAppUpdate_lower(_ value: AppUpdate) -> RustBuffer {
 // See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
 
 public enum AuthState: Equatable, Hashable {
-    
+
     case loggedOut
     case loggedIn(npub: String, pubkey: String
     )
@@ -1986,29 +2185,29 @@ public struct FfiConverterTypeAuthState: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> AuthState {
         let variant: Int32 = try readInt(&buf)
         switch variant {
-        
+
         case 1: return .loggedOut
-        
+
         case 2: return .loggedIn(npub: try FfiConverterString.read(from: &buf), pubkey: try FfiConverterString.read(from: &buf)
         )
-        
+
         default: throw UniffiInternalError.unexpectedEnumCase
         }
     }
 
     public static func write(_ value: AuthState, into buf: inout [UInt8]) {
         switch value {
-        
-        
+
+
         case .loggedOut:
             writeInt(&buf, Int32(1))
-        
-        
+
+
         case let .loggedIn(npub,pubkey):
             writeInt(&buf, Int32(2))
             FfiConverterString.write(npub, into: &buf)
             FfiConverterString.write(pubkey, into: &buf)
-            
+
         }
     }
 }
@@ -2032,8 +2231,99 @@ public func FfiConverterTypeAuthState_lower(_ value: AuthState) -> RustBuffer {
 // Note that we don't yet support `indirect` for enums.
 // See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
 
+public enum CallStatus: Equatable, Hashable {
+
+    case offering
+    case ringing
+    case connecting
+    case active
+    case ended(reason: String
+    )
+
+
+
+
+
+}
+
+#if compiler(>=6)
+extension CallStatus: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeCallStatus: FfiConverterRustBuffer {
+    typealias SwiftType = CallStatus
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> CallStatus {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+
+        case 1: return .offering
+
+        case 2: return .ringing
+
+        case 3: return .connecting
+
+        case 4: return .active
+
+        case 5: return .ended(reason: try FfiConverterString.read(from: &buf)
+        )
+
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: CallStatus, into buf: inout [UInt8]) {
+        switch value {
+
+
+        case .offering:
+            writeInt(&buf, Int32(1))
+
+
+        case .ringing:
+            writeInt(&buf, Int32(2))
+
+
+        case .connecting:
+            writeInt(&buf, Int32(3))
+
+
+        case .active:
+            writeInt(&buf, Int32(4))
+
+
+        case let .ended(reason):
+            writeInt(&buf, Int32(5))
+            FfiConverterString.write(reason, into: &buf)
+
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeCallStatus_lift(_ buf: RustBuffer) throws -> CallStatus {
+    return try FfiConverterTypeCallStatus.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeCallStatus_lower(_ value: CallStatus) -> RustBuffer {
+    return FfiConverterTypeCallStatus.lower(value)
+}
+
+
+// Note that we don't yet support `indirect` for enums.
+// See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
+
 public enum MessageDeliveryState: Equatable, Hashable {
-    
+
     case pending
     case sent
     case failed(reason: String
@@ -2058,34 +2348,34 @@ public struct FfiConverterTypeMessageDeliveryState: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> MessageDeliveryState {
         let variant: Int32 = try readInt(&buf)
         switch variant {
-        
+
         case 1: return .pending
-        
+
         case 2: return .sent
-        
+
         case 3: return .failed(reason: try FfiConverterString.read(from: &buf)
         )
-        
+
         default: throw UniffiInternalError.unexpectedEnumCase
         }
     }
 
     public static func write(_ value: MessageDeliveryState, into buf: inout [UInt8]) {
         switch value {
-        
-        
+
+
         case .pending:
             writeInt(&buf, Int32(1))
-        
-        
+
+
         case .sent:
             writeInt(&buf, Int32(2))
-        
-        
+
+
         case let .failed(reason):
             writeInt(&buf, Int32(3))
             FfiConverterString.write(reason, into: &buf)
-            
+
         }
     }
 }
@@ -2110,7 +2400,7 @@ public func FfiConverterTypeMessageDeliveryState_lower(_ value: MessageDeliveryS
 // See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
 
 public enum Screen: Equatable, Hashable {
-    
+
     case login
     case chatList
     case chat(chatId: String
@@ -2139,54 +2429,54 @@ public struct FfiConverterTypeScreen: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> Screen {
         let variant: Int32 = try readInt(&buf)
         switch variant {
-        
+
         case 1: return .login
-        
+
         case 2: return .chatList
-        
+
         case 3: return .chat(chatId: try FfiConverterString.read(from: &buf)
         )
-        
+
         case 4: return .newChat
-        
+
         case 5: return .newGroupChat
-        
+
         case 6: return .groupInfo(chatId: try FfiConverterString.read(from: &buf)
         )
-        
+
         default: throw UniffiInternalError.unexpectedEnumCase
         }
     }
 
     public static func write(_ value: Screen, into buf: inout [UInt8]) {
         switch value {
-        
-        
+
+
         case .login:
             writeInt(&buf, Int32(1))
-        
-        
+
+
         case .chatList:
             writeInt(&buf, Int32(2))
-        
-        
+
+
         case let .chat(chatId):
             writeInt(&buf, Int32(3))
             FfiConverterString.write(chatId, into: &buf)
-            
-        
+
+
         case .newChat:
             writeInt(&buf, Int32(4))
-        
-        
+
+
         case .newGroupChat:
             writeInt(&buf, Int32(5))
-        
-        
+
+
         case let .groupInfo(chatId):
             writeInt(&buf, Int32(6))
             FfiConverterString.write(chatId, into: &buf)
-            
+
         }
     }
 }
@@ -2211,9 +2501,9 @@ public func FfiConverterTypeScreen_lower(_ value: Screen) -> RustBuffer {
 
 
 public protocol AppReconciler: AnyObject, Sendable {
-    
-    func reconcile(update: AppUpdate) 
-    
+
+    func reconcile(update: AppUpdate)
+
 }
 
 
@@ -2256,7 +2546,7 @@ fileprivate struct UniffiCallbackInterfaceAppReconciler {
                 )
             }
 
-            
+
             let writeReturn = { () }
             uniffiTraitInterfaceCall(
                 callStatus: uniffiCallStatus,
@@ -2334,6 +2624,30 @@ public func FfiConverterCallbackInterfaceAppReconciler_lower(_ v: AppReconciler)
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterOptionUInt32: FfiConverterRustBuffer {
+    typealias SwiftType = UInt32?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterUInt32.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterUInt32.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterOptionInt64: FfiConverterRustBuffer {
     typealias SwiftType = Int64?
 
@@ -2374,6 +2688,54 @@ fileprivate struct FfiConverterOptionString: FfiConverterRustBuffer {
         switch try readInt(&buf) as Int8 {
         case 0: return nil
         case 1: return try FfiConverterString.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterOptionTypeCallDebugStats: FfiConverterRustBuffer {
+    typealias SwiftType = CallDebugStats?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterTypeCallDebugStats.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterTypeCallDebugStats.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterOptionTypeCallState: FfiConverterRustBuffer {
+    typealias SwiftType = CallState?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterTypeCallState.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterTypeCallState.read(from: &buf)
         default: throw UniffiInternalError.unexpectedOptionalTag
         }
     }

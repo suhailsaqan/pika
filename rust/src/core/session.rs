@@ -176,7 +176,7 @@ impl AppCore {
         let Some(sess) = self.session.as_mut() else {
             return;
         };
-        let (content, tags) = match sess
+        let (content, tags, _hash_ref) = match sess
             .mdk
             .create_key_package_for_event(&sess.keys.public_key(), relays.clone())
         {
@@ -198,15 +198,6 @@ impl AppCore {
 
         let client = sess.client.clone();
         let tx = self.core_sender.clone();
-
-        // Report success immediately so the UI isn't blocked.
-        let _ = tx.send(CoreMsg::Internal(Box::new(
-            InternalEvent::KeyPackagePublished {
-                ok: true,
-                error: None,
-            },
-        )));
-
         self.runtime.spawn(async move {
             for r in relays.iter().cloned() {
                 let _ = client.add_relay(r).await;
@@ -216,27 +207,47 @@ impl AppCore {
 
             // Best-effort with retries: some relays require NIP-42 auth before
             // accepting protected events (NIP-70).
+            let mut last_err: Option<String> = None;
             for attempt in 0..5u8 {
                 match client.send_event_to(&relays, &event).await {
-                    Ok(output) if !output.success.is_empty() => return,
+                    Ok(output) if !output.success.is_empty() => {
+                        let _ = tx.send(CoreMsg::Internal(Box::new(
+                            InternalEvent::KeyPackagePublished {
+                                ok: true,
+                                error: None,
+                            },
+                        )));
+                        return;
+                    }
                     Ok(output) => {
-                        let err = output.failed.values().next().cloned().unwrap_or_default();
+                        let err = output
+                            .failed
+                            .values()
+                            .next()
+                            .cloned()
+                            .unwrap_or_else(|| "no relay accepted event".into());
                         let should_retry = err.contains("protected")
                             || err.contains("auth")
                             || err.contains("AUTH");
                         if !should_retry {
-                            tracing::warn!(err, "key package publish rejected");
-                            return;
+                            last_err = Some(err);
+                            break;
                         }
+                        last_err = Some(err);
                     }
                     Err(e) => {
-                        tracing::warn!(%e, "key package publish error");
+                        last_err = Some(e.to_string());
                     }
                 }
                 let delay_ms = 250u64.saturating_mul(1u64 << attempt);
                 tokio::time::sleep(std::time::Duration::from_millis(delay_ms)).await;
             }
-            tracing::warn!("key package publish failed after retries");
+            let _ = tx.send(CoreMsg::Internal(Box::new(
+                InternalEvent::KeyPackagePublished {
+                    ok: false,
+                    error: last_err,
+                },
+            )));
         });
     }
 

@@ -9,6 +9,7 @@ pub struct AppState {
     pub current_chat: Option<ChatViewState>,
     pub follow_list: Vec<FollowListEntry>,
     pub peer_profile: Option<PeerProfileState>,
+    pub active_call: Option<CallState>,
     pub toast: Option<String>,
 }
 
@@ -27,11 +28,46 @@ impl AppState {
             current_chat: None,
             follow_list: vec![],
             peer_profile: None,
+            active_call: None,
             toast: None,
         }
     }
 }
 
+#[derive(uniffi::Record, Clone, Debug)]
+pub struct CallState {
+    pub call_id: String,
+    pub chat_id: String,
+    pub peer_npub: String,
+    pub status: CallStatus,
+    pub started_at: Option<i64>,
+    pub is_muted: bool,
+    pub debug: Option<CallDebugStats>,
+}
+
+#[derive(uniffi::Enum, Clone, Debug)]
+pub enum CallStatus {
+    Offering,
+    Ringing,
+    Connecting,
+    Active,
+    Ended { reason: String },
+}
+
+#[derive(uniffi::Record, Clone, Debug)]
+pub struct CallDebugStats {
+    pub tx_frames: u64,
+    pub rx_frames: u64,
+    pub rx_dropped: u64,
+    pub jitter_buffer_ms: u32,
+    pub last_rtt_ms: Option<u32>,
+}
+
+/// "In flight" flags for long-ish operations that the UI should reflect.
+///
+/// Spec-v1 allows ephemeral UI state to remain native (scroll position, focus, etc),
+/// but UX-relevant async operation state should live in Rust to avoid native-side
+/// heuristics (e.g., resetting spinners on toast).
 #[derive(uniffi::Record, Clone, Debug, PartialEq, Eq)]
 pub struct BusyState {
     pub creating_account: bool,

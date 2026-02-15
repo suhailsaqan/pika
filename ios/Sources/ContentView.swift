@@ -125,7 +125,13 @@ private func screenView(manager: AppManager, state: AppState, screen: Screen) ->
         ChatView(
             chatId: chatId,
             state: chatScreenState(from: state),
+            activeCall: state.activeCall,
             onSendMessage: { manager.dispatch(.sendMessage(chatId: chatId, content: $0)) },
+            onStartCall: { manager.dispatch(.startCall(chatId: chatId)) },
+            onAcceptCall: { manager.dispatch(.acceptCall(chatId: chatId)) },
+            onRejectCall: { manager.dispatch(.rejectCall(chatId: chatId)) },
+            onEndCall: { manager.dispatch(.endCall) },
+            onToggleMute: { manager.dispatch(.toggleMute) },
             onGroupInfo: {
                 manager.dispatch(.pushScreen(screen: .groupInfo(chatId: chatId)))
             },

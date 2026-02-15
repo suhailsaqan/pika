@@ -1,19 +1,6 @@
 use base64::Engine as _;
 use nostr_sdk::prelude::*;
 
-pub(super) fn extract_relays_from_key_package_relays_event(event: &Event) -> Vec<RelayUrl> {
-    if event.kind != Kind::MlsKeyPackageRelays {
-        return vec![];
-    }
-    let mut out: Vec<RelayUrl> = Vec::new();
-    for t in event.tags.iter() {
-        if let Some(TagStandard::Relay(url)) = t.as_standardized() {
-            out.push(url.clone());
-        }
-    }
-    out
-}
-
 pub(super) fn extract_relays_from_key_package_event(event: &Event) -> Option<Vec<RelayUrl>> {
     for t in event.tags.iter() {
         if t.kind() == TagKind::Relays {
@@ -29,6 +16,22 @@ pub(super) fn extract_relays_from_key_package_event(event: &Event) -> Option<Vec
         }
     }
     None
+}
+
+pub(super) fn extract_relays_from_key_package_relays_event(event: &Event) -> Vec<RelayUrl> {
+    let mut out = Vec::new();
+    for t in event.tags.iter() {
+        let values = t.as_slice();
+        if values.first().map(|s| s.as_str()) != Some("relay") {
+            continue;
+        }
+        if let Some(url) = values.get(1) {
+            if let Ok(u) = RelayUrl::parse(url) {
+                out.push(u);
+            }
+        }
+    }
+    out
 }
 
 // Best-effort compatibility for peers publishing legacy/interop keypackages:

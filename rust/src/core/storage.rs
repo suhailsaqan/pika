@@ -50,13 +50,15 @@ impl AppCore {
                 .cloned()
                 .collect();
 
-            // A group chat is anything with >1 other member, or explicitly named (not "DM").
+            // A group chat is anything with >1 other member, or explicitly named (not "DM") with
+            // at least one other member (so "Note to self" doesn't get treated as a group).
             let explicit_name = if g.name != DEFAULT_GROUP_NAME && !g.name.is_empty() {
                 Some(g.name.clone())
             } else {
                 None
             };
-            let is_group = other_members.len() > 1 || explicit_name.is_some();
+            let is_group =
+                other_members.len() > 1 || (explicit_name.is_some() && !other_members.is_empty());
 
             // Build member info with cached profiles.
             let now = crate::state::now_seconds();
@@ -89,12 +91,17 @@ impl AppCore {
                 })
                 .collect();
 
-            // Fetch newest message for preview.
+            // Do not rely on `last_message_id` being populated in all MDK flows.
+            // For MVP scale, fetching the newest message per group is cheap and robust.
+            // Signal/control messages share the MLS app-message path; skip them in chat previews.
             let newest = sess
                 .mdk
-                .get_messages(&g.mls_group_id, Some(Pagination::new(Some(1), Some(0))))
+                .get_messages(&g.mls_group_id, Some(Pagination::new(Some(20), Some(0))))
                 .ok()
-                .and_then(|v| v.into_iter().next());
+                .and_then(|v| {
+                    v.into_iter()
+                        .find(|m| !super::call_control::is_call_signal_payload(&m.content))
+                });
 
             let stored_last_message = newest.as_ref().map(|m| m.content.clone());
             let stored_last_message_at = newest
@@ -298,12 +305,16 @@ impl AppCore {
             .unwrap_or_default();
 
         let storage_len = messages.len();
+        let visible_messages: Vec<_> = messages
+            .into_iter()
+            .filter(|m| !super::call_control::is_call_signal_payload(&m.content))
+            .collect();
 
         // Separate reactions (kind 7) from regular messages.
         // reaction_target_id -> Vec<(emoji, sender_pubkey)>
         let mut reaction_map: HashMap<String, Vec<(String, String)>> = HashMap::new();
         let mut regular_messages = Vec::new();
-        for m in &messages {
+        for m in &visible_messages {
             if m.kind == nostr_sdk::Kind::Reaction {
                 // Find the target event id from the `e` tag.
                 if let Some(target_id) = m.tags.iter().find_map(|t| {
@@ -328,6 +339,7 @@ impl AppCore {
             regular_messages.push(m);
         }
 
+        // MDK returns descending by created_at; UI wants ascending.
         let mut msgs: Vec<ChatMessage> = regular_messages
             .into_iter()
             .rev()
@@ -508,6 +520,7 @@ impl AppCore {
 
         let mut older: Vec<ChatMessage> = page
             .into_iter()
+            .filter(|m| !super::call_control::is_call_signal_payload(&m.content))
             .rev()
             .map(|m| {
                 let id = m.id.to_hex();

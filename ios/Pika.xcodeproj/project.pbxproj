@@ -3,22 +3,25 @@
 	archiveVersion = 1;
 	classes = {
 	};
-	objectVersion = 63;
+	objectVersion = 77;
 	objects = {
 
 /* Begin PBXBuildFile section */
 		02D9A491B498E051D46EC648 /* KeychainNsecStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5F912C4C8861A3FB74085329 /* KeychainNsecStore.swift */; };
+		08133D47DBB1695B4DE59B21 /* LoadingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01419A0F9FAB3E815A6ECB4A /* LoadingView.swift */; };
 		2A9B2872E6ADB03F5A8FA173 /* LoginView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 53159E06C561F50F6EC97A61 /* LoginView.swift */; };
-		AA1234567890ABCDEF012345 /* LoadingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB1234567890ABCDEF012345 /* LoadingView.swift */; };
+		313101B4B13898A7601D991E /* PeerProfileSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 80C8822654DC43F3670179F2 /* PeerProfileSheet.swift */; };
 		38BA65C125C5EE3586248416 /* KeychainNsecStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 28F1BF02C1AAAEAA33532732 /* KeychainNsecStoreTests.swift */; };
 		3B614972940C843FB662920B /* PikaCore.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 3CD38D8437B178B873D96238 /* PikaCore.xcframework */; };
 		4486E2DC2719F40214340777 /* MarkdownUI in Frameworks */ = {isa = PBXBuildFile; productRef = 653509E9220610E2699954CB /* MarkdownUI */; };
 		4E79E8EB78FF3FEB6FA4E4E4 /* AppManagerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3B07F038CF3D6A3DC2F37122 /* AppManagerTests.swift */; };
 		502171B59272A56AB36AECCF /* PeerKeyValidator.swift in Sources */ = {isa = PBXBuildFile; fileRef = E9B7DE0FCF7AB984004968F9 /* PeerKeyValidator.swift */; };
+		58C517FF149AC254090595C5 /* CallE2ETests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C357146E006B099CACA69E19 /* CallE2ETests.swift */; };
 		5EA0CD4191E6688471F8FAB5 /* ChatView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2FE3F3E8BA33932B132B693 /* ChatView.swift */; };
 		6BA056C64AC7135C3040F3C5 /* ViewState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6BD9687D9985059889C135D7 /* ViewState.swift */; };
 		77E9D3F87F29E747F53DD5F0 /* PikaUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8600EE3AFD44A8B726A64716 /* PikaUITests.swift */; };
 		783CBC6C2A48969656021CD8 /* ChatListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 366C05B721835967C3BE5418 /* ChatListView.swift */; };
+		817D08E342C132B5784F1ED1 /* CallAudioSessionCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11B93B14504401A3B6D1FE8E /* CallAudioSessionCoordinator.swift */; };
 		8DE9696EA83BB0459D17C997 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 48C80C272FFE8C28F8E0A54E /* Assets.xcassets */; };
 		940959C521A572B47CCDC852 /* PreviewData.swift in Sources */ = {isa = PBXBuildFile; fileRef = B3996F560F68B8003EFD45AC /* PreviewData.swift */; };
 		9581B9688EDC90BCBC177E47 /* TestIds.swift in Sources */ = {isa = PBXBuildFile; fileRef = F4FAE9ECBDFC0A976452024F /* TestIds.swift */; };
@@ -52,12 +55,14 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		01419A0F9FAB3E815A6ECB4A /* LoadingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoadingView.swift; sourceTree = "<group>"; };
 		04278E7A5E984011D10BE79F /* GroupInfoView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GroupInfoView.swift; sourceTree = "<group>"; };
 		05B2B1856254D8FE240BC93A /* AppManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppManager.swift; sourceTree = "<group>"; };
 		0705B2EA2A82DFC41EFF9DCF /* MyNpubQrSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MyNpubQrSheet.swift; sourceTree = "<group>"; };
 		09BE97F6BA133265DB078F8A /* NewGroupChatView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NewGroupChatView.swift; sourceTree = "<group>"; };
+		11B93B14504401A3B6D1FE8E /* CallAudioSessionCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CallAudioSessionCoordinator.swift; sourceTree = "<group>"; };
 		2510455883E1CDFB6D589F5C /* pika_core.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = pika_core.swift; sourceTree = "<group>"; };
-		276F120E43A9DF389448FE5C /* .gitkeep */ = {isa = PBXFileReference; lastKnownFileType = text; path = .gitkeep; sourceTree = "<group>"; };
+		276F120E43A9DF389448FE5C /* .gitkeep */ = {isa = PBXFileReference; path = .gitkeep; sourceTree = "<group>"; };
 		28F1BF02C1AAAEAA33532732 /* KeychainNsecStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainNsecStoreTests.swift; sourceTree = "<group>"; };
 		366C05B721835967C3BE5418 /* ChatListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatListView.swift; sourceTree = "<group>"; };
 		3B07F038CF3D6A3DC2F37122 /* AppManagerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppManagerTests.swift; sourceTree = "<group>"; };
@@ -66,20 +71,21 @@
 		48C80C272FFE8C28F8E0A54E /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		4F340333EBF85C4097106B1C /* PikaUITests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = PikaUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		53159E06C561F50F6EC97A61 /* LoginView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoginView.swift; sourceTree = "<group>"; };
-		BB1234567890ABCDEF012345 /* LoadingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoadingView.swift; sourceTree = "<group>"; };
 		5F912C4C8861A3FB74085329 /* KeychainNsecStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainNsecStore.swift; sourceTree = "<group>"; };
 		6BD9687D9985059889C135D7 /* ViewState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ViewState.swift; sourceTree = "<group>"; };
+		80C8822654DC43F3670179F2 /* PeerProfileSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PeerProfileSheet.swift; sourceTree = "<group>"; };
 		8600EE3AFD44A8B726A64716 /* PikaUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PikaUITests.swift; sourceTree = "<group>"; };
 		A62170468ABECD8AAA8B6B6A /* NewChatView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NewChatView.swift; sourceTree = "<group>"; };
 		B083A8885A5C0BDDEFCF5EAC /* QrScannerSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QrScannerSheet.swift; sourceTree = "<group>"; };
 		B2FE3F3E8BA33932B132B693 /* ChatView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatView.swift; sourceTree = "<group>"; };
 		B3996F560F68B8003EFD45AC /* PreviewData.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PreviewData.swift; sourceTree = "<group>"; };
+		C357146E006B099CACA69E19 /* CallE2ETests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CallE2ETests.swift; sourceTree = "<group>"; };
 		E366BE398C3E8FAA39A15A33 /* PikaTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = PikaTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		E9B7DE0FCF7AB984004968F9 /* PeerKeyValidator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PeerKeyValidator.swift; sourceTree = "<group>"; };
 		EB0FD903A8B9CBC1D80EB16D /* AvatarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AvatarView.swift; sourceTree = "<group>"; };
 		EF35ECCAE3B37C651F88A150 /* PikaApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PikaApp.swift; sourceTree = "<group>"; };
 		F4FAE9ECBDFC0A976452024F /* TestIds.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TestIds.swift; sourceTree = "<group>"; };
-		F8FB9846E26624B7638DDA90 /* Pika.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Pika.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		F8FB9846E26624B7638DDA90 /* Pika.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = Pika.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -100,6 +106,7 @@
 			children = (
 				05B2B1856254D8FE240BC93A /* AppManager.swift */,
 				48C80C272FFE8C28F8E0A54E /* Assets.xcassets */,
+				11B93B14504401A3B6D1FE8E /* CallAudioSessionCoordinator.swift */,
 				42E962F7911EF0441F706C10 /* ContentView.swift */,
 				5F912C4C8861A3FB74085329 /* KeychainNsecStore.swift */,
 				E9B7DE0FCF7AB984004968F9 /* PeerKeyValidator.swift */,
@@ -129,11 +136,12 @@
 				366C05B721835967C3BE5418 /* ChatListView.swift */,
 				B2FE3F3E8BA33932B132B693 /* ChatView.swift */,
 				04278E7A5E984011D10BE79F /* GroupInfoView.swift */,
-				BB1234567890ABCDEF012345 /* LoadingView.swift */,
+				01419A0F9FAB3E815A6ECB4A /* LoadingView.swift */,
 				53159E06C561F50F6EC97A61 /* LoginView.swift */,
 				0705B2EA2A82DFC41EFF9DCF /* MyNpubQrSheet.swift */,
 				A62170468ABECD8AAA8B6B6A /* NewChatView.swift */,
 				09BE97F6BA133265DB078F8A /* NewGroupChatView.swift */,
+				80C8822654DC43F3670179F2 /* PeerProfileSheet.swift */,
 				B083A8885A5C0BDDEFCF5EAC /* QrScannerSheet.swift */,
 			);
 			path = Views;
@@ -142,6 +150,7 @@
 		3ECF7FFD917DF02854E9843D /* UITests */ = {
 			isa = PBXGroup;
 			children = (
+				C357146E006B099CACA69E19 /* CallE2ETests.swift */,
 				8600EE3AFD44A8B726A64716 /* PikaUITests.swift */,
 			);
 			path = UITests;
@@ -213,6 +222,7 @@
 			buildConfigurationList = F275E37E9AD9A7F80F625D43 /* Build configuration list for PBXNativeTarget "PikaUITests" */;
 			buildPhases = (
 				6023270A4E630FC9CA92A75C /* Sources */,
+				CA8CF84D02EADB6649924A28 /* Copy .env into test bundle */,
 			);
 			buildRules = (
 			);
@@ -271,6 +281,7 @@
 			packageReferences = (
 				6944C0C3491C1AC429CFFC75 /* XCRemoteSwiftPackageReference "swift-markdown-ui" */,
 			);
+			preferredProjectObjectVersion = 77;
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
@@ -292,11 +303,34 @@
 		};
 /* End PBXResourcesBuildPhase section */
 
+/* Begin PBXShellScriptBuildPhase section */
+		CA8CF84D02EADB6649924A28 /* Copy .env into test bundle */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+			);
+			name = "Copy .env into test bundle";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "ENV_SRC=\"${SRCROOT}/../.env\"\nif [ ! -f \"$ENV_SRC\" ]; then\n  echo \"warning: .env not found at $ENV_SRC\"\n  exit 0\nfi\n\n# Device UI tests run the .xctest bundle inside the *Runner.app/PlugIns*.\n# Put env.test into the .xctest bundle so Bundle(for:) can find it.\ncandidates=()\nif [ -n \"${CODESIGNING_FOLDER_PATH:-}\" ]; then candidates+=(\"$CODESIGNING_FOLDER_PATH\"); fi\nif [ -n \"${WRAPPER_NAME:-}\" ]; then candidates+=(\"${TARGET_BUILD_DIR:-}/${WRAPPER_NAME}\"); fi\nif [ -n \"${WRAPPER_NAME:-}\" ]; then candidates+=(\"${BUILT_PRODUCTS_DIR:-}/${WRAPPER_NAME}\"); fi\nif [ -n \"${XCTRUNNER_PRODUCT_NAME:-}\" ] && [ -n \"${WRAPPER_NAME:-}\" ]; then\n  candidates+=(\"${TARGET_BUILD_DIR:-}/${XCTRUNNER_PRODUCT_NAME}/PlugIns/${WRAPPER_NAME}\")\n  candidates+=(\"${BUILT_PRODUCTS_DIR:-}/${XCTRUNNER_PRODUCT_NAME}/PlugIns/${WRAPPER_NAME}\")\nfi\n\ncopied=0\nfor dst in \"${candidates[@]}\"; do\n  [ -n \"$dst\" ] || continue\n  if [ -d \"$dst\" ]; then\n    cp \"$ENV_SRC\" \"$dst/env.test\"\n    echo \"Copied .env to $dst/env.test\"\n    copied=1\n    break\n  fi\ndone\n\nif [ \"$copied\" != \"1\" ]; then\n  echo \"warning: could not locate .xctest bundle; tried:\"\n  printf '  - %s\\n' \"${candidates[@]}\"\nfi\n";
+		};
+/* End PBXShellScriptBuildPhase section */
+
 /* Begin PBXSourcesBuildPhase section */
 		6023270A4E630FC9CA92A75C /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				58C517FF149AC254090595C5 /* CallE2ETests.swift in Sources */,
 				77E9D3F87F29E747F53DD5F0 /* PikaUITests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -316,17 +350,19 @@
 			files = (
 				A15307C1B4692DC5925858CE /* AppManager.swift in Sources */,
 				F69233C493C4DF364AB6B468 /* AvatarView.swift in Sources */,
+				817D08E342C132B5784F1ED1 /* CallAudioSessionCoordinator.swift in Sources */,
 				783CBC6C2A48969656021CD8 /* ChatListView.swift in Sources */,
 				5EA0CD4191E6688471F8FAB5 /* ChatView.swift in Sources */,
 				FE739725B724B1944145C8EF /* ContentView.swift in Sources */,
 				EEE2F54DC181C7C91E5F7848 /* GroupInfoView.swift in Sources */,
 				02D9A491B498E051D46EC648 /* KeychainNsecStore.swift in Sources */,
-				AA1234567890ABCDEF012345 /* LoadingView.swift in Sources */,
+				08133D47DBB1695B4DE59B21 /* LoadingView.swift in Sources */,
 				2A9B2872E6ADB03F5A8FA173 /* LoginView.swift in Sources */,
 				EDAE180A5D3FEED3C801658F /* MyNpubQrSheet.swift in Sources */,
 				970D12403533E203A33FBEFC /* NewChatView.swift in Sources */,
 				B5F90A17C2DF56BF2B42736E /* NewGroupChatView.swift in Sources */,
 				502171B59272A56AB36AECCF /* PeerKeyValidator.swift in Sources */,
+				313101B4B13898A7601D991E /* PeerProfileSheet.swift in Sources */,
 				F308786C219CC1D169ABFC50 /* PikaApp.swift in Sources */,
 				940959C521A572B47CCDC852 /* PreviewData.swift in Sources */,
 				DE799DF1E97151C517647E61 /* QrScannerSheet.swift in Sources */,
@@ -422,6 +458,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
+				GENERATE_INFOPLIST_FILE = YES;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -438,7 +475,6 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
-				DEVELOPMENT_TEAM = JBLHZ83X6T;
 				FRAMEWORK_SEARCH_PATHS = (
 					"$(inherited)",
 					"\"Frameworks\"",
@@ -459,6 +495,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
+				GENERATE_INFOPLIST_FILE = YES;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -474,6 +511,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
+				GENERATE_INFOPLIST_FILE = YES;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -549,7 +587,6 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
-				DEVELOPMENT_TEAM = JBLHZ83X6T;
 				FRAMEWORK_SEARCH_PATHS = (
 					"$(inherited)",
 					"\"Frameworks\"",
@@ -570,6 +607,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
+				GENERATE_INFOPLIST_FILE = YES;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",

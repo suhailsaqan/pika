@@ -1,3 +1,5 @@
+mod call_control;
+mod call_runtime;
 mod config;
 mod interop;
 mod profile;
@@ -15,8 +17,8 @@ use crate::actions::AppAction;
 use crate::mdk_support::{open_mdk, PikaMdk};
 use crate::state::now_seconds;
 use crate::state::{
-    AuthState, BusyState, ChatMessage, ChatSummary, ChatViewState, MessageDeliveryState,
-    MyProfileState, Screen,
+    AuthState, BusyState, CallDebugStats, CallStatus, ChatMessage, ChatSummary, ChatViewState,
+    MessageDeliveryState, MyProfileState, Screen,
 };
 use crate::updates::{AppUpdate, CoreMsg, InternalEvent};
 
@@ -33,6 +35,16 @@ const DEFAULT_GROUP_NAME: &str = "DM";
 const DEFAULT_GROUP_DESCRIPTION: &str = "";
 
 const LOCAL_OUTBOX_MAX_PER_CHAT: usize = 8;
+
+fn diag_nostr_publish_enabled() -> bool {
+    match std::env::var("PIKA_DIAG_NOSTR_PUBLISH") {
+        Ok(v) => {
+            let t = v.trim();
+            !t.is_empty() && t != "0" && !t.eq_ignore_ascii_case("false")
+        }
+        Err(_) => false,
+    }
+}
 
 #[derive(Debug, Clone)]
 struct GroupIndexEntry {
@@ -115,6 +127,8 @@ pub struct AppCore {
 
     // Archived chat IDs -- hidden from the chat list but data stays in MDK.
     archived_chats: HashSet<String>,
+    call_runtime: call_runtime::CallRuntime,
+    call_session_params: Option<call_control::CallSessionParams>,
 }
 
 impl AppCore {
@@ -133,6 +147,14 @@ impl AppCore {
             .enable_io()
             .build()
             .expect("tokio runtime");
+
+        let run_moq_probe = config.moq_probe_on_start == Some(true);
+        let moq_probe_url = config
+            .call_moq_url
+            .as_ref()
+            .map(|s| s.trim())
+            .filter(|s| !s.is_empty())
+            .map(ToString::to_string);
 
         let this = Self {
             state,
@@ -157,7 +179,25 @@ impl AppCore {
             profiles: HashMap::new(),
             my_metadata: None,
             archived_chats: HashSet::new(),
+            call_runtime: call_runtime::CallRuntime::default(),
+            call_session_params: None,
         };
+
+        if run_moq_probe {
+            if let Some(moq_url) = moq_probe_url {
+                std::thread::spawn(move || {
+                    tracing::info!(moq_url = %moq_url, "moq probe: starting");
+                    let res =
+                        pika_media::network::NetworkRelay::new(&moq_url).and_then(|r| r.connect());
+                    match res {
+                        Ok(()) => tracing::info!(moq_url = %moq_url, "moq probe: PASS (connected)"),
+                        Err(e) => tracing::error!(moq_url = %moq_url, err = ?e, "moq probe: FAIL"),
+                    }
+                });
+            } else {
+                tracing::warn!("moq probe: enabled but call_moq_url missing");
+            }
+        }
 
         // Ensure FfiApp.state() has an immediately-available snapshot.
         let snapshot = this.state.clone();
@@ -245,6 +285,10 @@ impl AppCore {
         self.emit_state();
     }
 
+    fn emit_call_state(&mut self) {
+        self.emit_state();
+    }
+
     fn emit_account_created(&mut self, nsec: String, pubkey: String, npub: String) {
         let rev = self.next_rev();
         // Keep snapshot rev in sync with the update stream even though this is a side-effect update.
@@ -293,13 +337,18 @@ impl AppCore {
 
     fn handle_auth_transition(&mut self, logged_in: bool) {
         if logged_in {
+            self.call_runtime.stop_all();
             self.state.router.default_screen = Screen::ChatList;
             self.state.router.screen_stack.clear();
+            self.state.active_call = None;
+            self.call_session_params = None;
             self.emit_router();
         } else {
+            self.call_runtime.stop_all();
             self.state.router.default_screen = Screen::Login;
             self.state.router.screen_stack.clear();
             self.state.current_chat = None;
+            self.state.active_call = None;
             self.state.chat_list = vec![];
             self.state.busy = BusyState::idle();
             self.loaded_count.clear();
@@ -311,11 +360,18 @@ impl AppCore {
             self.my_metadata = None;
             self.state.my_profile = MyProfileState::empty();
             self.state.follow_list = vec![];
+            self.call_session_params = None;
+            self.my_metadata = None;
+            self.state.my_profile = MyProfileState::empty();
+            self.state.follow_list = vec![];
+            self.state.peer_profile = None;
+            self.call_session_params = None;
             self.last_outgoing_ts = 0;
             self.emit_router();
             self.emit_busy();
             self.emit_chat_list();
             self.emit_current_chat();
+            self.emit_call_state();
         }
     }
 
@@ -395,6 +451,44 @@ impl AppCore {
                 tracing::info!(msg, "toast");
                 self.toast(msg.clone());
             }
+            InternalEvent::CallRuntimeConnected { call_id } => {
+                if let Some(call) = self.state.active_call.as_mut() {
+                    if call.call_id == call_id && matches!(call.status, CallStatus::Connecting) {
+                        call.status = CallStatus::Active;
+                        if call.started_at.is_none() {
+                            call.started_at = Some(now_seconds());
+                        }
+                        self.emit_call_state();
+                    }
+                }
+            }
+            InternalEvent::CallRuntimeStats {
+                call_id,
+                tx_frames,
+                rx_frames,
+                rx_dropped,
+                jitter_buffer_ms,
+                last_rtt_ms,
+            } => {
+                if let Some(call) = self.state.active_call.as_mut() {
+                    if call.call_id == call_id {
+                        if matches!(call.status, CallStatus::Connecting) {
+                            call.status = CallStatus::Active;
+                            if call.started_at.is_none() {
+                                call.started_at = Some(now_seconds());
+                            }
+                        }
+                        call.debug = Some(CallDebugStats {
+                            tx_frames,
+                            rx_frames,
+                            rx_dropped,
+                            jitter_buffer_ms,
+                            last_rtt_ms,
+                        });
+                        self.emit_call_state();
+                    }
+                }
+            }
             InternalEvent::KeyPackagePublished { ok, ref error } => {
                 tracing::info!(ok, ?error, "key_package_published");
                 if !ok {
@@ -410,6 +504,13 @@ impl AppCore {
                 ok,
                 error,
             } => {
+                tracing::info!(
+                    ok,
+                    ?error,
+                    %chat_id,
+                    %rumor_id,
+                    "message_publish_result"
+                );
                 let per_chat = self.delivery_overrides.entry(chat_id.clone()).or_default();
                 if ok {
                     per_chat.insert(rumor_id.clone(), MessageDeliveryState::Sent);
@@ -429,16 +530,15 @@ impl AppCore {
             }
             InternalEvent::PeerKeyPackageFetched {
                 peer_pubkey,
-                candidate_kp_relays,
                 key_package_event,
                 error,
+                ..
             } => {
                 let network_enabled = self.network_enabled();
                 tracing::info!(
                     peer = %peer_pubkey.to_hex(),
                     kp_found = key_package_event.is_some(),
                     ?error,
-                    kp_relays = ?candidate_kp_relays.iter().map(|r| r.to_string()).collect::<Vec<_>>(),
                     "peer_key_package_fetched"
                 );
                 if let Some(err) = error {
@@ -453,20 +553,10 @@ impl AppCore {
                 };
                 let kp_event = normalize_peer_key_package_event_for_mdk(&kp_event);
 
-                // Prefer using relays the peer advertised in their key package, but keep our
-                // defaults too so we remain reachable from our existing pool.
-                //
-                // Interop note: some peers only advertise relays via kind 10051 (MLS Key Package
-                // Relays) and do not duplicate relay tags onto the kind 443 itself. Preserve the
-                // relays we used to fetch the key package so we can include them in the group.
+                // Merge our default relays with any relays the peer advertised in their key package.
                 let peer_relays =
                     extract_relays_from_key_package_event(&kp_event).unwrap_or_default();
                 let mut group_relays = self.default_relays();
-                for r in candidate_kp_relays.iter().cloned() {
-                    if !group_relays.contains(&r) {
-                        group_relays.push(r);
-                    }
-                }
                 for r in peer_relays.iter().cloned() {
                     if !group_relays.contains(&r) {
                         group_relays.push(r);
@@ -517,21 +607,10 @@ impl AppCore {
 
                 // Deliver welcomes (gift-wrapped kind 444) to the peer.
                 if network_enabled {
-                    let mut welcome_relays = peer_relays;
-                    for r in candidate_kp_relays {
-                        if !welcome_relays.contains(&r) {
-                            welcome_relays.push(r);
-                        }
-                    }
-                    for r in group_relays.clone() {
-                        if !welcome_relays.contains(&r) {
-                            welcome_relays.push(r);
-                        }
-                    }
                     self.publish_welcomes_to_peer(
                         peer_pubkey,
                         group_result.welcome_rumors,
-                        welcome_relays,
+                        group_relays.clone(),
                     );
                 }
 
@@ -949,23 +1028,29 @@ impl AppCore {
             }
             InternalEvent::GroupMessageReceived { event } => {
                 tracing::debug!(event_id = %event.id.to_hex(), "group_message_received");
-                let Some(sess) = self.session.as_mut() else {
-                    tracing::warn!("group_message but no session");
-                    return;
-                };
-                let result = match sess.mdk.process_message(&event) {
-                    Ok(r) => r,
-                    Err(e) => {
-                        tracing::error!(event_id = %event.id.to_hex(), %e, "process_message failed");
-                        self.toast(format!("Message decrypt failed: {e}"));
+                let result = {
+                    let Some(sess) = self.session.as_mut() else {
+                        tracing::warn!("group_message but no session");
                         return;
+                    };
+                    match sess.mdk.process_message(&event) {
+                        Ok(r) => r,
+                        Err(e) => {
+                            tracing::error!(event_id = %event.id.to_hex(), %e, "process_message failed");
+                            self.toast(format!("Message decrypt failed: {e}"));
+                            return;
+                        }
                     }
                 };
                 let is_app_message =
                     matches!(result, MessageProcessingResult::ApplicationMessage(_));
+                let mut app_sender: Option<PublicKey> = None;
+                let mut app_content: Option<String> = None;
 
                 let mls_group_id: Option<GroupId> = match &result {
                     MessageProcessingResult::ApplicationMessage(msg) => {
+                        app_sender = Some(msg.pubkey);
+                        app_content = Some(msg.content.clone());
                         Some(msg.mls_group_id.clone())
                     }
                     MessageProcessingResult::Proposal(update) => Some(update.mls_group_id.clone()),
@@ -986,12 +1071,30 @@ impl AppCore {
                 };
 
                 if let Some(group_id) = mls_group_id {
-                    if let Ok(Some(group)) = sess.mdk.get_group(&group_id) {
-                        let chat_id = hex::encode(group.nostr_group_id);
+                    let chat_id = {
+                        let Some(sess) = self.session.as_mut() else {
+                            self.refresh_all_from_storage();
+                            return;
+                        };
+                        match sess.mdk.get_group(&group_id) {
+                            Ok(Some(group)) => Some(hex::encode(group.nostr_group_id)),
+                            _ => None,
+                        }
+                    };
+                    if let Some(chat_id) = chat_id {
+                        let mut is_call_signal = false;
+                        if let (Some(sender), Some(content)) = (app_sender, app_content.as_deref())
+                        {
+                            if let Some(signal) = self.maybe_parse_call_signal(&sender, content) {
+                                self.handle_incoming_call_signal(&chat_id, &sender, signal);
+                                is_call_signal = true;
+                            }
+                        }
+
                         let current = self.state.current_chat.as_ref().map(|c| c.chat_id.as_str());
-                        if current != Some(chat_id.as_str()) {
+                        if current != Some(chat_id.as_str()) && !is_call_signal {
                             *self.unread_counts.entry(chat_id.clone()).or_insert(0) += 1;
-                        } else if is_app_message {
+                        } else if is_app_message && !is_call_signal {
                             self.loaded_count
                                 .entry(chat_id.clone())
                                 .and_modify(|n| *n += 1)
@@ -1315,96 +1418,18 @@ impl AppCore {
                     };
                     (sess.client.clone(), self.core_sender.clone())
                 };
-                // Fallback relays for discovering peer key packages:
-                // - key-package relays (protected kind 443 publishes for modern clients)
-                // - plus our "popular" relays to support peers that only publish key packages there.
-                let fallback_kp_relays = self.key_package_relays();
-                let fallback_popular_relays = self.default_relays();
+                let candidate_kp_relays = self.key_package_relays();
                 tracing::info!(peer = %peer_pubkey.to_hex(), "create_chat: fetching peer key package");
                 self.runtime.spawn(async move {
-                    // 1) Discover the peer's key-package relays (kind 10051), per NIP-104.
-                    // These events are not protected, so they can live on "popular" relays.
-                    tracing::info!(peer = %peer_pubkey.to_hex(), "fetching kind 10051 (MlsKeyPackageRelays)");
-                    let kp_relay_list_filter = Filter::new()
-                        .author(peer_pubkey)
-                        .kind(Kind::MlsKeyPackageRelays)
-                        .limit(5);
-
-                    let mut candidate_kp_relays: Vec<RelayUrl> = Vec::new();
-                    if let Ok(events) = client
-                        .fetch_events(kp_relay_list_filter, Duration::from_secs(6))
-                        .await
-                    {
-                        // Choose newest.
-                        let mut newest: Option<Event> = None;
-                        for e in events.into_iter() {
-                            if newest
-                                .as_ref()
-                                .map(|b| e.created_at > b.created_at)
-                                .unwrap_or(true)
-                            {
-                                newest = Some(e);
-                            }
-                        }
-                        if let Some(ev) = newest.as_ref() {
-                            candidate_kp_relays = extract_relays_from_key_package_relays_event(ev);
-                        }
-                    }
-
-                    if candidate_kp_relays.is_empty() {
-                        tracing::info!("no kind 10051 found, using fallback relays");
-                        let mut s: BTreeSet<RelayUrl> = BTreeSet::new();
-                        for r in fallback_kp_relays.iter().cloned() {
-                            s.insert(r);
-                        }
-                        for r in fallback_popular_relays.iter().cloned() {
-                            s.insert(r);
-                        }
-                        candidate_kp_relays = s.into_iter().collect();
-                    }
-
-                    tracing::info!(
-                        kp_relays = ?candidate_kp_relays.iter().map(|r| r.to_string()).collect::<Vec<_>>(),
-                        "fetching kind 443 from relays"
-                    );
-
-                    // Ensure these relays exist in the pool and are connected before requesting from them.
-                    for r in candidate_kp_relays.iter().cloned() {
-                        let _ = client.add_relay(r).await;
-                    }
-                    client.connect().await;
-                    client.wait_for_connection(Duration::from_secs(4)).await;
-
-                    // 2) Fetch peer key package (kind 443) from the discovered relays.
+                    // Fetch peer key package (kind 443) from connected relays.
                     let kp_filter = Filter::new()
                         .author(peer_pubkey)
                         .kind(Kind::MlsKeyPackage)
                         .limit(10);
 
-                    let res = match client
-                        .fetch_events_from(
-                            candidate_kp_relays.clone(),
-                            kp_filter.clone(),
-                            Duration::from_secs(8),
-                        )
-                        .await
-                    {
-                        Ok(v) => Ok(v),
-                        Err(_) => client.fetch_events(kp_filter, Duration::from_secs(8)).await,
-                    };
-
-                    match res {
+                    match client.fetch_events(kp_filter, Duration::from_secs(8)).await {
                         Ok(events) => {
-                            let mut best: Option<Event> = None;
-                            for e in events.into_iter() {
-                                if best
-                                    .as_ref()
-                                    .map(|b| e.created_at > b.created_at)
-                                    .unwrap_or(true)
-                                {
-                                    best = Some(e);
-                                }
-                            }
+                            let best = events.into_iter().max_by_key(|e| e.created_at);
                             let _ = tx.send(CoreMsg::Internal(Box::new(
                                 InternalEvent::PeerKeyPackageFetched {
                                     peer_pubkey,
@@ -1418,7 +1443,7 @@ impl AppCore {
                             let _ = tx.send(CoreMsg::Internal(Box::new(
                                 InternalEvent::PeerKeyPackageFetched {
                                     peer_pubkey,
-                                    candidate_kp_relays: candidate_kp_relays.clone(),
+                                    candidate_kp_relays,
                                     key_package_event: None,
                                     error: Some(format!("Fetch peer key package failed: {e}")),
                                 },
@@ -1572,19 +1597,53 @@ impl AppCore {
                     return;
                 }
 
-                // Optimistic: report success immediately so the UI doesn't
-                // block on relay round-trips. The broadcast runs in the background.
+                // Fire-and-forget (optimistic): report Sent immediately regardless of relay
+                // acceptance. Errors are best-effort logged only.
                 let _ = self.core_sender.send(CoreMsg::Internal(Box::new(
                     InternalEvent::PublishMessageResult {
-                        chat_id,
-                        rumor_id: rumor_id_hex,
+                        chat_id: chat_id.clone(),
+                        rumor_id: rumor_id_hex.clone(),
                         ok: true,
                         error: None,
                     },
                 )));
+
+                let diag = diag_nostr_publish_enabled();
+                let wrapper_id = wrapper.id.to_hex();
+                let wrapper_kind = wrapper.kind.as_u16();
+                let relay_list: Vec<String> = relays.iter().map(|r| r.to_string()).collect();
                 self.runtime.spawn(async move {
-                    if let Err(e) = client.send_event_to(relays, &wrapper).await {
-                        tracing::warn!(%e, "message broadcast failed");
+                    let out = client.send_event_to(relays, &wrapper).await;
+                    match out {
+                        Ok(output) => {
+                            if diag {
+                                tracing::info!(
+                                    target: "pika_core::nostr_publish",
+                                    context = "group_message",
+                                    rumor_id = %rumor_id_hex,
+                                    event_id = %wrapper_id,
+                                    kind = wrapper_kind,
+                                    relays = ?relay_list,
+                                    success = ?output.success,
+                                    failed = ?output.failed,
+                                );
+                            }
+                        }
+                        Err(e) => {
+                            if diag {
+                                tracing::info!(
+                                    target: "pika_core::nostr_publish",
+                                    context = "group_message",
+                                    rumor_id = %rumor_id_hex,
+                                    event_id = %wrapper_id,
+                                    kind = wrapper_kind,
+                                    relays = ?relay_list,
+                                    error = %e,
+                                );
+                            } else {
+                                tracing::warn!(%e, "message broadcast failed");
+                            }
+                        }
                     }
                 });
             }
@@ -1662,6 +1721,21 @@ impl AppCore {
                         tracing::warn!(%e, "message retry broadcast failed");
                     }
                 });
+            }
+            AppAction::StartCall { chat_id } => {
+                self.handle_start_call_action(&chat_id);
+            }
+            AppAction::AcceptCall { chat_id } => {
+                self.handle_accept_call_action(&chat_id);
+            }
+            AppAction::RejectCall { chat_id } => {
+                self.handle_reject_call_action(&chat_id);
+            }
+            AppAction::EndCall => {
+                self.handle_end_call_action();
+            }
+            AppAction::ToggleMute => {
+                self.handle_toggle_mute_action();
             }
             AppAction::LoadOlderMessages {
                 chat_id,
