@@ -23,16 +23,7 @@
       let
         pkgs = import nixpkgs {
           inherit system;
-          overlays = [
-            (import rust-overlay)
-            (final: prev: {
-              dinghy = prev.dinghy.overrideAttrs (old: {
-                cargoPatches = (old.cargoPatches or []) ++ [
-                  ./nix/patches/dinghy-lib-ios-plist-arch.patch
-                ];
-              });
-            })
-          ];
+          overlays = [ (import rust-overlay) ];
           config.allowUnfree = true;
           config.android_sdk.accept_license = true;
         };
@@ -82,6 +73,36 @@
           cargo build -q -p rmp-cli
           exec "$root/target/debug/rmp" "$@"
         '';
+
+        dinghyLibSrc = pkgs.fetchCrate {
+          pname = "dinghy-lib";
+          version = "0.8.4";
+          hash = "sha256-umHlY0YEQI2ZWfZuHalhuPlZ5YT4evYjv/gQ+P7+SGM=";
+        };
+
+        cargoDinghy = pkgs.rustPlatform.buildRustPackage {
+          pname = "cargo-dinghy";
+          version = "0.8.4";
+
+          src = pkgs.fetchCrate {
+            pname = "cargo-dinghy";
+            version = "0.8.4";
+            hash = "sha256-eYtURPNxeeEWXjEOO1YyilsHHMP+35oWeOB0ojxA9Ww=";
+          };
+
+          patches = [ ./nix/patches/dinghy-lib-ios-plist-arch.patch ];
+
+          postUnpack = ''
+            cp -R ${dinghyLibSrc} "$sourceRoot/dinghy-lib"
+            chmod -R u+w "$sourceRoot/dinghy-lib"
+          '';
+
+          cargoHash = "sha256-3tKV1syCZFXVVOSZbh0mvcwGiC+JNnmEBr4EMlzLgCM=";
+
+          meta = {
+            mainProgram = "cargo-dinghy";
+          };
+        };
       in {
         devShells.default = pkgs.mkShell {
           buildInputs = pkgs.lib.optionals pkgs.stdenv.isDarwin [
@@ -97,7 +118,7 @@
             pkgs.python3
             pkgs.curl
             pkgs.git
-            pkgs.dinghy
+            cargoDinghy
             pkgs.nostr-rs-relay
             moq.packages.${system}.moq-relay
             pkgs.cargo-ndk

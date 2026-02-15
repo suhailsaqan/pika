@@ -1,5 +1,13 @@
 set shell := ["bash", "-c"]
 
+# Device ids for `cargo dinghy ... -d`.
+#
+# These default from environment variables, but can also be set via:
+#   just UDID=<udid> ios-quic-connect-device
+#   just SERIAL=<serial> android-quic-connect-device
+UDID := env_var_or_default("UDID", "")
+SERIAL := env_var_or_default("SERIAL", "")
+
 # List available recipes.
 default:
   @just --list
@@ -334,16 +342,29 @@ run-ios *ARGS:
 # iOS device smoke: run minimal QUIC/TLS connect test via cargo-dinghy.
 #
 # Usage:
-#   just ios-quic-connect-device UDID=<DEVICE_UDID>
+#   UDID=<DEVICE_UDID> just ios-quic-connect-device
 ios-quic-connect-device:
   set -euo pipefail; \
   : "${UDID:?missing UDID=<DEVICE_UDID>}"; \
-  cargo dinghy -p auto-ios-aarch64 -d "$UDID" run -p pika-media --example quic_connect_test --features network
+  DEV_DIR="$(./tools/xcode-dev-dir)"; \
+  TOOLCHAIN_BIN="$DEV_DIR/Toolchains/XcodeDefault.xctoolchain/usr/bin"; \
+  CC_BIN="$TOOLCHAIN_BIN/clang"; \
+  CXX_BIN="$TOOLCHAIN_BIN/clang++"; \
+  AR_BIN="$TOOLCHAIN_BIN/ar"; \
+  RANLIB_BIN="$TOOLCHAIN_BIN/ranlib"; \
+  IOS_MIN="17.0"; \
+  SDKROOT_IOS="$(DEVELOPER_DIR="$DEV_DIR" /usr/bin/xcrun --sdk iphoneos --show-sdk-path)"; \
+  env -u LIBRARY_PATH -u SDKROOT -u MACOSX_DEPLOYMENT_TARGET -u CC -u CXX -u AR -u RANLIB \
+    DEVELOPER_DIR="$DEV_DIR" CC="$CC_BIN" CXX="$CXX_BIN" AR="$AR_BIN" RANLIB="$RANLIB_BIN" \
+    IPHONEOS_DEPLOYMENT_TARGET="$IOS_MIN" SDKROOT="$SDKROOT_IOS" \
+    CARGO_TARGET_AARCH64_APPLE_IOS_LINKER="$CC_BIN" \
+    RUSTFLAGS="-C linker=$CC_BIN -C link-arg=-miphoneos-version-min=$IOS_MIN" \
+    cargo dinghy -p auto-ios-aarch64 -d "$UDID" run -p pika-media --example quic_connect_test --features network
 
 # Android device smoke: run minimal QUIC/TLS connect test via cargo-dinghy.
 #
 # Usage:
-#   just android-quic-connect-device SERIAL=<serial>
+#   SERIAL=<serial> just android-quic-connect-device
 android-quic-connect-device PLATFORM="auto-android-aarch64-api35":
   set -euo pipefail; \
   : "${SERIAL:?missing SERIAL=<serial>}"; \
