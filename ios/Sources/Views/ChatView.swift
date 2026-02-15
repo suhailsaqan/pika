@@ -11,6 +11,7 @@ struct ChatView: View {
     let onReact: (@MainActor (String, String) -> Void)?
     @State private var messageText = ""
     @State private var isAtBottom = true
+    @State private var activeReactionMessageId: String?
     @State private var showMentionPicker = false
     @State private var mentionQuery = ""
     @State private var insertedMentions: [(display: String, npub: String)] = []
@@ -34,7 +35,7 @@ struct ChatView: View {
                     VStack(spacing: 0) {
                         LazyVStack(spacing: 8) {
                             ForEach(groupedMessages(chat)) { group in
-                                MessageGroupRow(group: group, showSender: chat.isGroup, onSendMessage: onSendMessage, onTapSender: onTapSender, onReact: onReact)
+                                MessageGroupRow(group: group, showSender: chat.isGroup, onSendMessage: onSendMessage, onTapSender: onTapSender, onReact: onReact, activeReactionMessageId: $activeReactionMessageId)
                             }
                         }
                         .padding(.horizontal, 12)
@@ -48,6 +49,17 @@ struct ChatView: View {
                         }
                         .frame(height: 1)
                         .id("bottom-anchor")
+                    }
+                }
+                .overlay {
+                    if activeReactionMessageId != nil {
+                        Color.clear
+                            .contentShape(Rectangle())
+                            .onTapGesture {
+                                withAnimation(.easeOut(duration: 0.15)) {
+                                    activeReactionMessageId = nil
+                                }
+                            }
                     }
                 }
                 .coordinateSpace(name: "chatScroll")
@@ -561,7 +573,7 @@ private struct MessageGroupRow: View {
     let onSendMessage: @MainActor (String) -> Void
     var onTapSender: (@MainActor (String) -> Void)?
     var onReact: ((String, String) -> Void)?
-    @State private var activeReactionMessageId: String?
+    @Binding var activeReactionMessageId: String?
 
     private let avatarSize: CGFloat = 24
     private let avatarGutterWidth: CGFloat = 28
@@ -681,21 +693,23 @@ private struct MessageBubble: View {
         let segments = parseMessageSegments(message.displayContent, htmlState: message.htmlState)
 
         VStack(alignment: message.isMine ? .trailing : .leading, spacing: 0) {
-            ForEach(segments) { segment in
-                switch segment {
-                case .markdown(let text):
-                    markdownBubble(text: text)
-                case .pikaPrompt(let prompt):
-                    PikaPromptView(prompt: prompt, message: message, onSelect: onSendMessage)
-                case .pikaHtml(_, let html, let state):
-                    PikaHtmlView(html: html, htmlState: state, onSendMessage: onSendMessage)
-                }
-            }
-            .onLongPressGesture {
-                let impactFeedback = UIImpactFeedbackGenerator(style: .medium)
-                impactFeedback.impactOccurred()
-                withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
-                    activeReactionMessageId = message.id
+            VStack(alignment: message.isMine ? .trailing : .leading, spacing: 0) {
+                ForEach(segments) { segment in
+                    switch segment {
+                    case .markdown(let text):
+                        markdownBubble(text: text)
+                            .onLongPressGesture {
+                                let impactFeedback = UIImpactFeedbackGenerator(style: .medium)
+                                impactFeedback.impactOccurred()
+                                withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                                    activeReactionMessageId = message.id
+                                }
+                            }
+                    case .pikaPrompt(let prompt):
+                        PikaPromptView(prompt: prompt, message: message, onSelect: onSendMessage)
+                    case .pikaHtml(_, let html, let state):
+                        PikaHtmlView(html: html, htmlState: state, onSendMessage: onSendMessage)
+                    }
                 }
             }
             .overlay(alignment: message.isMine ? .topTrailing : .topLeading) {
@@ -1270,12 +1284,12 @@ private enum ChatViewPreviewData {
 }
 
 #Preview("Message Group - Incoming") {
-    MessageGroupRow(group: ChatViewPreviewData.incomingGroup, showSender: true, onSendMessage: { _ in })
+    MessageGroupRow(group: ChatViewPreviewData.incomingGroup, showSender: true, onSendMessage: { _ in }, activeReactionMessageId: .constant(nil))
         .padding(16)
 }
 
 #Preview("Message Group - Outgoing") {
-    MessageGroupRow(group: ChatViewPreviewData.outgoingGroup, showSender: true, onSendMessage: { _ in })
+    MessageGroupRow(group: ChatViewPreviewData.outgoingGroup, showSender: true, onSendMessage: { _ in }, activeReactionMessageId: .constant(nil))
         .padding(16)
 }
 #endif
