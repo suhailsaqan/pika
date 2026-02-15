@@ -467,7 +467,6 @@ impl AppCore {
             }
             InternalEvent::PeerKeyPackageFetched {
                 peer_pubkey,
-                candidate_kp_relays,
                 key_package_event,
                 error,
             } => {
@@ -476,7 +475,6 @@ impl AppCore {
                     peer = %peer_pubkey.to_hex(),
                     kp_found = key_package_event.is_some(),
                     ?error,
-                    kp_relays = ?candidate_kp_relays.iter().map(|r| r.to_string()).collect::<Vec<_>>(),
                     "peer_key_package_fetched"
                 );
                 if let Some(err) = error {
@@ -491,20 +489,10 @@ impl AppCore {
                 };
                 let kp_event = normalize_peer_key_package_event_for_mdk(&kp_event);
 
-                // Prefer using relays the peer advertised in their key package, but keep our
-                // defaults too so we remain reachable from our existing pool.
-                //
-                // Interop note: some peers only advertise relays via kind 10051 (MLS Key Package
-                // Relays) and do not duplicate relay tags onto the kind 443 itself. Preserve the
-                // relays we used to fetch the key package so we can include them in the group.
+                // Merge relays from the peer's key package event with our defaults.
                 let peer_relays =
                     extract_relays_from_key_package_event(&kp_event).unwrap_or_default();
                 let mut group_relays = self.default_relays();
-                for r in candidate_kp_relays.iter().cloned() {
-                    if !group_relays.contains(&r) {
-                        group_relays.push(r);
-                    }
-                }
                 for r in peer_relays.iter().cloned() {
                     if !group_relays.contains(&r) {
                         group_relays.push(r);
@@ -555,21 +543,10 @@ impl AppCore {
 
                 // Deliver welcomes (gift-wrapped kind 444) to the peer.
                 if network_enabled {
-                    let mut welcome_relays = peer_relays;
-                    for r in candidate_kp_relays {
-                        if !welcome_relays.contains(&r) {
-                            welcome_relays.push(r);
-                        }
-                    }
-                    for r in group_relays.clone() {
-                        if !welcome_relays.contains(&r) {
-                            welcome_relays.push(r);
-                        }
-                    }
                     self.publish_welcomes_to_peer(
                         peer_pubkey,
                         group_result.welcome_rumors,
-                        welcome_relays,
+                        group_relays.clone(),
                     );
                 }
 
