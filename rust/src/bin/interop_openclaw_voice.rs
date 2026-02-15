@@ -9,7 +9,7 @@
 //! Env:
 //!   PIKA_TEST_NSEC: required (nsec1...)
 //!   PIKA_E2E_RELAYS / PIKA_E2E_KP_RELAYS: optional comma-separated relay URL lists
-//!   PIKA_CALL_MOQ_URL: optional (default: https://moq.justinmoon.com/anon)
+//!   PIKA_CALL_MOQ_URL: optional (default: https://us-east.moq.logos.surf/anon)
 //!   PIKA_CALL_BROADCAST_PREFIX: optional (default: pika/calls)
 //!   PIKA_INTEROP_MEDIA_WINDOW_SECS: optional (default: 10)
 //!   PIKA_INTEROP_REQUIRE_RX_FRAMES: optional (if set to N>0, fail unless rx_frames increases by >=N)
@@ -41,7 +41,7 @@ const DEFAULT_KEY_PACKAGE_RELAYS: &[&str] = &[
     "wss://relay.satlantis.io",
 ];
 
-const DEFAULT_MOQ_URL: &str = "https://moq.justinmoon.com/anon";
+const DEFAULT_MOQ_URL: &str = "https://us-east.moq.logos.surf/anon";
 const DEFAULT_BROADCAST_PREFIX: &str = "pika/calls";
 
 fn usage() -> ! {

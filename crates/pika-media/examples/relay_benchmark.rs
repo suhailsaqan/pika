@@ -12,7 +12,6 @@ fn main() {
     use pika_media::tracks::TrackAddress;
 
     let relays = [
-        ("old (justinmoon)", "https://moq.justinmoon.com/anon"),
         ("us-east (ash)", "https://us-east.moq.logos.surf/anon"),
         ("us-west (hil)", "https://us-west.moq.logos.surf/anon"),
         ("germany (fsn)", "https://germany.moq.logos.surf/anon"),
@@ -166,7 +165,10 @@ fn main() {
 
     // Summary table
     println!("=== Summary ===");
-    println!("{:<22} {:>8} {:>8} {:>8} {:>8}", "Relay", "Run1", "Run2", "Run3", "Avg%");
+    println!(
+        "{:<22} {:>8} {:>8} {:>8} {:>8}",
+        "Relay", "Run1", "Run2", "Run3", "Avg%"
+    );
     println!("{}", "-".repeat(60));
     for (name, runs_data) in &results {
         let counts: Vec<String> = runs_data
@@ -182,6 +184,9 @@ fn main() {
         let c1 = counts.first().map(|s| s.as_str()).unwrap_or("--");
         let c2 = counts.get(1).map(|s| s.as_str()).unwrap_or("--");
         let c3 = counts.get(2).map(|s| s.as_str()).unwrap_or("--");
-        println!("{:<22} {:>8} {:>8} {:>8} {:>7.0}%", name, c1, c2, c3, avg_pct);
+        println!(
+            "{:<22} {:>8} {:>8} {:>8} {:>7.0}%",
+            name, c1, c2, c3, avg_pct
+        );
     }
 }

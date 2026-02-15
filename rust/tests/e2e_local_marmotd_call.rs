@@ -3,13 +3,13 @@
 //! Validates the full call signaling path using:
 //! - A local Nostr relay for MLS signaling
 //! - A locally spawned `marmotd daemon` as the bot/callee
-//! - The real MOQ relay (moq.justinmoon.com) for media transport
+//! - The real MOQ relay (us-east.moq.logos.surf) for media transport
 //!
 //! This exercises the exact same code path as the deployed OpenClaw bot,
 //! but without depending on the remote deployment.
 //!
 //! Requires:
-//! - Network access to moq.justinmoon.com:443 (UDP/QUIC)
+//! - Network access to us-east.moq.logos.surf:443 (UDP/QUIC)
 //! - `marmotd` binary built at ~/code/openclaw-marmot/target/debug/marmotd
 
 use std::collections::{HashMap, HashSet};
@@ -30,7 +30,7 @@ use tokio::net::TcpListener;
 use tokio::sync::{mpsc, oneshot};
 use tokio_tungstenite::tungstenite::Message;
 
-const REAL_MOQ_URL: &str = "https://moq.justinmoon.com/anon";
+const REAL_MOQ_URL: &str = "https://us-east.moq.logos.surf/anon";
 
 fn marmotd_binary() -> String {
     std::env::var("MARMOTD_BIN").unwrap_or_else(|_| {

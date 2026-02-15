@@ -1,10 +1,10 @@
-//! End-to-end call test using the real MOQ relay (moq.justinmoon.com).
+//! End-to-end call test using the real MOQ relay (us-east.moq.logos.surf).
 //!
 //! Uses a local Nostr relay for MLS signaling but routes all media frames
 //! through the real MOQ relay over QUIC. This validates the full call stack:
-//! call_runtime.rs → NetworkRelay → moq-native → QUIC → moq.justinmoon.com
+//! call_runtime.rs → NetworkRelay → moq-native → QUIC → us-east.moq.logos.surf
 //!
-//! Requires network access to moq.justinmoon.com:443 (UDP/QUIC).
+//! Requires network access to us-east.moq.logos.surf:443 (UDP/QUIC).
 
 use std::collections::{HashMap, HashSet};
 use std::net::SocketAddr;
@@ -22,7 +22,7 @@ use tokio::net::TcpListener;
 use tokio::sync::{mpsc, oneshot};
 use tokio_tungstenite::tungstenite::Message;
 
-const REAL_MOQ_URL: &str = "https://moq.justinmoon.com/anon";
+const REAL_MOQ_URL: &str = "https://us-east.moq.logos.surf/anon";
 
 fn write_config(data_dir: &str, relay_url: &str, kp_relay_url: Option<&str>) {
     let path = std::path::Path::new(data_dir).join("pika_config.json");
@@ -278,7 +278,7 @@ fn call_over_real_moq_relay() {
     let _ = rustls::crypto::ring::default_provider().install_default();
 
     // Signaling goes through a local Nostr relay.
-    // Media goes through the real MOQ relay at moq.justinmoon.com.
+    // Media goes through the real MOQ relay at us-east.moq.logos.surf.
     let (relay, relay_thread) = start_local_relay();
 
     let dir_a = tempdir().unwrap();
@@ -350,7 +350,7 @@ fn call_over_real_moq_relay() {
             .unwrap_or(false)
     });
 
-    // Bob accepts the call -- this triggers NetworkRelay.connect() to moq.justinmoon.com
+    // Bob accepts the call -- this triggers NetworkRelay.connect() to us-east.moq.logos.surf
     bob.dispatch(AppAction::AcceptCall {
         chat_id: chat_id.clone(),
     });

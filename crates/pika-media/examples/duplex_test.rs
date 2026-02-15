@@ -1,7 +1,7 @@
 //! Full-duplex encrypted audio test over the real MOQ relay.
 //!
 //! Simulates two call parties (Alice and Bob), each running a publish+subscribe
-//! loop with Opus encode/decrypt through the real moq.justinmoon.com relay.
+//! loop with Opus encode/decrypt through the real us-east.moq.logos.surf relay.
 //! This validates Layer 3 of the debugging ladder without needing the iOS app,
 //! MLS signaling, or Nostr.
 
@@ -52,7 +52,7 @@ struct Party {
 
 #[cfg(feature = "network")]
 fn main() {
-    let relay_url = "https://moq.justinmoon.com/anon";
+    let relay_url = "https://us-east.moq.logos.surf/anon";
     let unique = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()

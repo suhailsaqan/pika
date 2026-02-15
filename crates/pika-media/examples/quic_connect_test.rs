@@ -17,7 +17,7 @@ fn main() {
     eprintln!("[quic-test] tokio runtime OK");
 
     rt.block_on(async {
-        let url = url::Url::parse("https://moq.justinmoon.com/anon").unwrap();
+        let url = url::Url::parse("https://us-east.moq.logos.surf/anon").unwrap();
 
         // Test 1: default config (uses rustls_native_certs)
         eprintln!("[quic-test] === Test 1: default TLS (native certs) ===");

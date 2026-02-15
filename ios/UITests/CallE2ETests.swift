@@ -22,7 +22,7 @@ import XCTest
 ///   PIKA_BOT_NPUB           required
 ///   PIKA_RELAY_URLS         optional (comma-separated)
 ///   PIKA_KEY_PACKAGE_RELAY_URLS  optional
-///   PIKA_CALL_MOQ_URL       optional (defaults to https://moq.justinmoon.com/anon)
+///   PIKA_CALL_MOQ_URL       optional (defaults to https://us-east.moq.logos.surf/anon)
 final class CallE2ETests: XCTestCase {
 
     // Longer timeouts for real-network operations.
@@ -101,7 +101,7 @@ final class CallE2ETests: XCTestCase {
         let kpRelays = buildEnv["PIKA_KEY_PACKAGE_RELAY_URLS"] ?? dotenv["PIKA_KEY_PACKAGE_RELAY_URLS"]
             ?? "wss://nostr-pub.wellorder.net,wss://nostr-01.yakihonne.com,wss://nostr-02.yakihonne.com,wss://relay.satlantis.io"
         let moqUrl = buildEnv["PIKA_CALL_MOQ_URL"] ?? dotenv["PIKA_CALL_MOQ_URL"]
-            ?? "https://moq.justinmoon.com/anon"
+            ?? "https://us-east.moq.logos.surf/anon"
 
         // --- Launch app ---
         let app = XCUIApplication()

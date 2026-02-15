@@ -11,7 +11,7 @@ fn main() {
     use pika_media::session::MediaFrame;
     use pika_media::tracks::TrackAddress;
 
-    let relay_url = "https://moq.justinmoon.com/anon";
+    let relay_url = "https://us-east.moq.logos.surf/anon";
     let unique = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()

@@ -32,7 +32,7 @@ const DEFAULT_KP_RELAYS: &[&str] = &[
     "wss://relay.satlantis.io",
 ];
 
-const DEFAULT_MOQ_URL: &str = "https://moq.justinmoon.com/anon";
+const DEFAULT_MOQ_URL: &str = "https://us-east.moq.logos.surf/anon";
 
 fn env_or(key: &str, default: &str) -> String {
     std::env::var(key)

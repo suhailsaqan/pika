@@ -55,7 +55,7 @@ class PikaTestRunner : AndroidJUnitRunner() {
                 .orEmpty()
         val callMoqUrl =
             args.getString("pika_call_moq_url")?.trim().orEmpty().ifBlank {
-                "https://moq.justinmoon.com/anon"
+                "https://us-east.moq.logos.surf/anon"
             }
         val callBroadcastPrefix =
             args.getString("pika_call_broadcast_prefix")?.trim().orEmpty().ifBlank { "pika/calls" }

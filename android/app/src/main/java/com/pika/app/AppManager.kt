@@ -66,7 +66,7 @@ class AppManager private constructor(context: Context) : AppReconciler {
     private fun ensureDefaultConfig(context: Context) {
         val filesDir = context.filesDir
         val path = File(filesDir, "pika_config.json")
-        val defaultMoqUrl = "https://moq.justinmoon.com/anon"
+        val defaultMoqUrl = "https://us-east.moq.logos.surf/anon"
         val defaultBroadcastPrefix = "pika/calls"
 
         val obj =
