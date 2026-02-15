@@ -1,17 +1,18 @@
-# Audio Calls Follow-Ups (Track + Execute)
+# Codex Review 1
 
 Date: 2026-02-15
 
-Scope: align implementation, tests, and docs after the real MOQ transport + bot E2E work.
+Scope: clean up project detritus and track next review actions for audio calls.
 
-## 1. Docs Hygiene
+## 0. Cleanup
+
+- [ ] Delete project plan/debug markdown (keep this doc and `todos/codex-review-2.md` only).
+
+## 1. Spec Update
 
 - [ ] Update `todos/pika-audio-calls-spec.md`:
-  - [ ] Fix stale “Execution Status” and “Pinned Follow-Ups” (network transport + scripted real speech E2E now exist).
+  - [ ] Fix stale “Execution Status” and “Pinned Follow-Ups” (network transport + scripted real speech E2E exist).
   - [ ] Add explicit “nondeterministic / networked test lane” section and where it lives.
-- [ ] Decide what to keep in `todos/` vs delete:
-  - [ ] Delete or archive (superseded/outdated): `todos/audio-calls-status.md`, `todos/call-debug-strategy.md`, `todos/audio-calls-step3-debug.md`.
-  - [ ] Keep or fold into a single runbook: `todos/audio-calls-e2e-plan.md`.
 
 ## 2. Default Config Consistency
 
@@ -49,6 +50,5 @@ Scope: align implementation, tests, and docs after the real MOQ transport + bot 
 ## 6. Follow-Up Coverage (Targeted)
 
 - [ ] Add deterministic regression coverage for:
-  - [ ] Network subscription keepalive / runtime-lifetime bug class (the issue described in `todos/dns-failure-investigation.md`).
+  - [ ] Network subscription keepalive / runtime-lifetime bug class (transport dropped while subscriber task still connecting).
   - [ ] Call teardown cleanup (worker stops; call state ends; no lingering publish loop).
-
