@@ -23,7 +23,16 @@
       let
         pkgs = import nixpkgs {
           inherit system;
-          overlays = [ (import rust-overlay) ];
+          overlays = [
+            (import rust-overlay)
+            (final: prev: {
+              dinghy = prev.dinghy.overrideAttrs (old: {
+                cargoPatches = (old.cargoPatches or []) ++ [
+                  ./nix/patches/dinghy-lib-ios-plist-arch.patch
+                ];
+              });
+            })
+          ];
           config.allowUnfree = true;
           config.android_sdk.accept_license = true;
         };
