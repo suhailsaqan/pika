@@ -5,7 +5,9 @@ import android.content.pm.PackageManager
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -39,8 +41,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
@@ -282,12 +286,15 @@ private fun isLiveCallStatus(status: CallStatus): Boolean =
         is CallStatus.Ended -> false
     }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun MessageBubble(message: ChatMessage) {
     val isMine = message.isMine
     val bubbleColor = if (isMine) PikaBlue else MaterialTheme.colorScheme.surfaceVariant
     val textColor = if (isMine) Color.White else MaterialTheme.colorScheme.onSurfaceVariant
     val align = if (isMine) Alignment.End else Alignment.Start
+    val clipboard = LocalClipboardManager.current
+    val ctx = LocalContext.current
 
     Column(modifier = Modifier.fillMaxWidth(), horizontalAlignment = align) {
         Row(verticalAlignment = Alignment.Bottom) {
@@ -296,6 +303,13 @@ private fun MessageBubble(message: ChatMessage) {
                     Modifier
                         .clip(RoundedCornerShape(18.dp))
                         .background(bubbleColor)
+                        .combinedClickable(
+                            onClick = {},
+                            onLongClick = {
+                                clipboard.setText(AnnotatedString(message.content))
+                                Toast.makeText(ctx, "Copied", Toast.LENGTH_SHORT).show()
+                            },
+                        )
                         .padding(horizontal = 12.dp, vertical = 9.dp)
                         .widthIn(max = 280.dp),
             ) {
