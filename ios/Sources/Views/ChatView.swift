@@ -347,8 +347,10 @@ private func parseMessageSegments(_ content: String) -> [MessageSegment] {
                let prompt = try? JSONDecoder().decode(PikaPrompt.self, from: data) {
                 segments.append(.pikaPrompt(prompt))
             }
-        case "html", "html-update":
+        case "html":
             segments.append(.pikaHtml(blockBody))
+        case "html-update", "prompt-response":
+            break // Consumed by Rust core; silently drop if one slips through.
         default:
             segments.append(.markdown("```\(blockType)\n\(blockBody)\n```"))
         }

@@ -168,8 +168,11 @@ private fun parseMessageSegments(content: String): List<MessageSegment> {
                     segments.add(MessageSegment.Markdown("```$blockType\n$blockBody\n```"))
                 }
             }
-            "html", "html-update" -> {
+            "html" -> {
                 segments.add(MessageSegment.PikaHtml(blockBody))
+            }
+            "html-update", "prompt-response" -> {
+                // Consumed by Rust core; silently drop if one slips through.
             }
             else -> {
                 segments.add(MessageSegment.Markdown("```$blockType\n$blockBody\n```"))

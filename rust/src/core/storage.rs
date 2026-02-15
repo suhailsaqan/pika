@@ -619,6 +619,7 @@ fn process_html_updates(msgs: &mut Vec<ChatMessage>) {
 
     for (i, msg) in msgs.iter().enumerate() {
         if let Some((target_id, new_content)) = parse_html_update(&msg.content) {
+            tracing::debug!(target_id, msg_id = msg.id, "html-update found");
             let dominated = latest_updates
                 .get(&target_id)
                 .map(|(_, ts)| msg.timestamp > *ts)
@@ -634,14 +635,25 @@ fn process_html_updates(msgs: &mut Vec<ChatMessage>) {
         return;
     }
 
-    // Apply updates to matching originals.
+    // Scan originals and apply updates.
+    let mut matched = 0usize;
     for msg in msgs.iter_mut() {
         if let Some(html_id) = parse_html_id(&msg.content) {
             if let Some((new_content, _)) = latest_updates.get(&html_id) {
+                tracing::debug!(html_id, msg_id = msg.id, "html-update applied to original");
                 msg.content = new_content.clone();
                 msg.display_content = new_content.clone();
+                matched += 1;
             }
         }
+    }
+
+    if matched == 0 {
+        tracing::warn!(
+            update_count = update_indices.len(),
+            ids = ?latest_updates.keys().collect::<Vec<_>>(),
+            "html-update(s) found but no matching pika-html originals"
+        );
     }
 
     // Remove update messages (reverse order to preserve indices).
