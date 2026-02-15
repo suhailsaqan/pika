@@ -1,3 +1,4 @@
 - pika-cli and openclaw-marmot are doing some kind of nip-70 tag stripping
 - should we put all rust code in ./crates?
 - audio calls: `todos/audio-calls-e2e-plan.md`
+- audio calls follow-ups: `todos/audio-calls-followups.md`

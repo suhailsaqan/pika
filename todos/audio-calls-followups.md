@@ -1,0 +1,54 @@
+# Audio Calls Follow-Ups (Track + Execute)
+
+Date: 2026-02-15
+
+Scope: align implementation, tests, and docs after the real MOQ transport + bot E2E work.
+
+## 1. Docs Hygiene
+
+- [ ] Update `todos/pika-audio-calls-spec.md`:
+  - [ ] Fix stale “Execution Status” and “Pinned Follow-Ups” (network transport + scripted real speech E2E now exist).
+  - [ ] Add explicit “nondeterministic / networked test lane” section and where it lives.
+- [ ] Decide what to keep in `todos/` vs delete:
+  - [ ] Delete or archive (superseded/outdated): `todos/audio-calls-status.md`, `todos/call-debug-strategy.md`, `todos/audio-calls-step3-debug.md`.
+  - [ ] Keep or fold into a single runbook: `todos/audio-calls-e2e-plan.md`.
+
+## 2. Default Config Consistency
+
+- [ ] Make iOS/Android/Rust agree on defaults:
+  - [ ] `call_moq_url` default should match everywhere (recommend: `https://moq.justinmoon.com/anon`).
+  - [ ] `call_broadcast_prefix` default should match everywhere (`pika/calls`).
+- [ ] Add a small guard/test so a mismatch is caught early (unit-ish, not networked).
+
+## 3. Test Suite Shape (Keep Deterministic by Default)
+
+- [ ] Ensure `just test` stays deterministic/offline:
+  - [ ] Mark `rust/tests/e2e_real_moq_relay.rs` as `#[ignore]` (or env-gate with “SKIP” when unset).
+  - [ ] Mark `rust/tests/e2e_local_marmotd_call.rs` as `#[ignore]` (external binary + real network).
+  - [ ] Keep `rust/tests/e2e_deployed_bot_call.rs` as `#[ignore]` (already).
+- [ ] Add explicit runners/recipes for nondeterministic lanes:
+  - [ ] `just e2e-real-moq` (runs `e2e_real_moq_relay` with `--ignored --nocapture`).
+  - [ ] `just e2e-local-marmotd` (runs `e2e_local_marmotd_call` with `--ignored --nocapture`).
+  - [ ] Keep `tools/ui-e2e-public` as the UI lane entrypoint.
+- [ ] Identify “debug-only” tests that can be deleted once stable (if any exist; review after marking ignores).
+
+## 4. TLS Verification Plan (MOQ)
+
+- [ ] Replace `tls_disable_verify` (mobile) with a safer approach:
+  - [ ] Decide between: embedded root store (e.g. webpki roots) vs platform trust integration.
+  - [ ] Implement and add a minimal connectivity probe to catch regressions on device (keep it opt-in).
+  - [ ] Document the security posture in the spec/runbook.
+
+## 5. Fixture Cleanup
+
+- [ ] Consolidate speech fixtures:
+  - [ ] Pick one canonical fixture for “send speech into bot” (either `speech_prompt.wav` or `speech_test.wav`).
+  - [ ] Update tests to reference the canonical fixture.
+  - [ ] Delete the unused fixture.
+
+## 6. Follow-Up Coverage (Targeted)
+
+- [ ] Add deterministic regression coverage for:
+  - [ ] Network subscription keepalive / runtime-lifetime bug class (the issue described in `todos/dns-failure-investigation.md`).
+  - [ ] Call teardown cleanup (worker stops; call state ends; no lingering publish loop).
+
