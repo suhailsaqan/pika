@@ -88,6 +88,7 @@
             pkgs.python3
             pkgs.curl
             pkgs.git
+            pkgs.dinghy
             pkgs.nostr-rs-relay
             moq.packages.${system}.moq-relay
             pkgs.cargo-ndk
