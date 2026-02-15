@@ -1025,8 +1025,6 @@ private struct PikaWebView: UIViewRepresentable {
                 binding.wrappedValue = height
             }
         }
-        context.coordinator.observeContentSize(webView)
-
         let wrapped = """
         <!DOCTYPE html>
         <html>
@@ -1064,18 +1062,9 @@ private struct PikaWebView: UIViewRepresentable {
         var lastInjectedState: String?
         var pendingState: String?
         var pageLoaded = false
-        private var observation: NSKeyValueObservation?
 
         init(onSendMessage: @escaping @MainActor (String) -> Void) {
             self.onSendMessage = onSendMessage
-        }
-
-        func observeContentSize(_ webView: WKWebView) {
-            observation = webView.scrollView.observe(\.contentSize, options: .new) { [weak self] _, change in
-                if let size = change.newValue, size.height > 0 {
-                    self?.onHeightChange?(size.height)
-                }
-            }
         }
 
         func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
@@ -1093,6 +1082,13 @@ private struct PikaWebView: UIViewRepresentable {
 
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
             pageLoaded = true
+            // Measure content height once after load to size the frame without
+            // a continuous observer that causes layout feedback loops.
+            webView.evaluateJavaScript("document.documentElement.scrollHeight") { [weak self] result, _ in
+                if let height = result as? CGFloat, height > 0 {
+                    self?.onHeightChange?(height)
+                }
+            }
             // Inject pending state after initial page load (handles case where
             // updateUIView fires before the page is ready).
             if let state = pendingState {
