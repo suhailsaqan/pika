@@ -626,7 +626,14 @@ impl AppCore {
                 return;
             }
         };
-        tracing::info!(call_id = %call_id, payload = %payload, "call_invite_payload");
+        // Never log the full invite payload: it includes `relay_auth` (cap token).
+        tracing::info!(
+            call_id = %call_id,
+            moq_url = %session.moq_url,
+            broadcast_base = %session.broadcast_base,
+            tracks = session.tracks.len(),
+            "call_invite"
+        );
         if let Err(e) = self.publish_call_signal(chat_id, payload, "Call invite publish failed") {
             self.toast(e);
             self.end_call_local("publish_failed".to_string());
