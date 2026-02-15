@@ -141,18 +141,7 @@ impl CallRuntime {
 
         let mut transport = if is_real_moq_url(&session.moq_url) {
             MediaTransport::Network({
-                // On iOS, rustls_native_certs cannot read the system trust store
-                // (certs live in the Keychain, not on the filesystem), so we disable
-                // TLS verification for the MOQ relay connection.
-                //
-                // Android has the same issue: the system trust store is in Java-land (KeyStore),
-                // and rustls_native_certs may load 0 roots.
-                //
-                // Long-term: prefer embedding a root store (e.g. webpki-roots) instead of
-                // disabling verification.
-                let tls_disable_verify = cfg!(any(target_os = "ios", target_os = "android"));
-                NetworkRelay::with_options(&session.moq_url, tls_disable_verify)
-                    .map_err(to_string_error)?
+                NetworkRelay::with_options(&session.moq_url).map_err(to_string_error)?
             })
         } else {
             let relay = shared_relay_for(session);

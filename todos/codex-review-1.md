@@ -6,7 +6,7 @@ Scope: clean up project detritus and track next review actions for audio calls.
 
 ## 0. Cleanup
 
-- [ ] Delete project plan/debug markdown (keep this doc and `todos/codex-review-2.md` only).
+- [x] Delete project plan/debug markdown (kept: `todos/codex-review-1.md`, `todos/codex-review-2.md`, plus a couple useful build notes).
 
 ## 1. Default Config Consistency
 
@@ -29,10 +29,10 @@ Scope: clean up project detritus and track next review actions for audio calls.
 
 ## 3. TLS Verification Plan (MOQ)
 
-- [ ] Replace `tls_disable_verify` (mobile) with a safer approach:
-  - [ ] Decide between: embedded root store (e.g. webpki roots) vs platform trust integration.
-  - [ ] Implement and add a minimal connectivity probe to catch regressions on device (keep it opt-in).
-  - [ ] Document the security posture in the spec/runbook.
+- [x] Replace `tls_disable_verify` (mobile) with a safer approach:
+  - [x] Use a shared rustls policy (`crates/pika-tls`) that tries native roots and falls back to `webpki-roots`.
+  - [x] Switch MOQ/QUIC transport to `quinn` + `web-transport-quinn` + `moq-lite` (no `moq-native` root-loading).
+  - [x] Keep an opt-in device probe: `crates/pika-media/examples/quic_connect_test.rs`.
 
 ## 4. Fixture Cleanup
 

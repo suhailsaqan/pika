@@ -24,6 +24,7 @@ mdk-storage-traits = { git = "https://github.com/marmot-protocol/mdk", rev = "d6
 keyring-core = "0.7"
 nostr-sdk = { version = "0.44.1", features = ["nip59"] }
 pika-media = { path = "../crates/pika-media", features = ["network"] }
+pika-tls = { path = "../crates/pika-tls" }
 rand = "0.8"
 rustls = { version = "0.23", default-features = false, features = ["ring"] }
 serde = { version = "1", features = ["derive"] }

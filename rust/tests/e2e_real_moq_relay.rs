@@ -2,7 +2,7 @@
 //!
 //! Uses a local Nostr relay for MLS signaling but routes all media frames
 //! through the real MOQ relay over QUIC. This validates the full call stack:
-//! call_runtime.rs → NetworkRelay → moq-native → QUIC → us-east.moq.logos.surf
+//! call_runtime.rs → NetworkRelay → quinn/webtransport + moq-lite → QUIC → us-east.moq.logos.surf
 //!
 //! Requires network access to us-east.moq.logos.surf:443 (UDP/QUIC).
 

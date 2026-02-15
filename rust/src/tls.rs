@@ -7,8 +7,8 @@ static INIT: Once = Once::new();
 
 pub fn init_rustls_crypto_provider() {
     INIT.call_once(|| {
-        // Prefer ring for compatibility with nostr-sdk.
-        // If another provider was already installed, ignore the error.
-        let _ = rustls::crypto::ring::default_provider().install_default();
+        // Keep the historical behavior but delegate to the shared helper so
+        // other crates (e.g. pika-media) can do the same thing.
+        pika_tls::init_rustls_crypto_provider();
     });
 }

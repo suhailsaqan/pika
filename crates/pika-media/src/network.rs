@@ -1,6 +1,6 @@
-//! Network transport for pika-media using moq-native over QUIC.
+//! Network transport for pika-media using moq-lite over QUIC/webtransport (quinn).
 //!
-//! Bridges the async moq-native pub/sub into the sync `mpsc` interface
+//! Bridges the async QUIC/webtransport + moq-lite pub/sub into the sync `mpsc` interface
 //! that `call_runtime.rs` expects via `MediaFrame` + `try_recv()` polling.
 //!
 //! Design: a single QUIC connection handles both publish and subscribe via
@@ -13,11 +13,13 @@ use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::Arc;
 use std::thread;
 use std::thread::JoinHandle;
+use std::time::Duration;
 
 use moq_lite::{BroadcastProducer, Origin, Track, TrackProducer};
-use moq_native::rustls;
+use quinn::crypto::rustls::HandshakeData;
 use tokio::runtime::Runtime;
 use url::Url;
+use web_transport_quinn::proto::{ConnectRequest, ConnectResponse};
 
 use crate::session::{MediaFrame, MediaSessionError};
 use crate::subscription::MediaFrameSubscription;
@@ -35,13 +37,10 @@ pub struct NetworkRelay {
 
 impl NetworkRelay {
     pub fn new(moq_url: &str) -> Result<Self, MediaSessionError> {
-        Self::with_options(moq_url, false)
+        Self::with_options(moq_url)
     }
 
-    pub fn with_options(
-        moq_url: &str,
-        tls_disable_verify: bool,
-    ) -> Result<Self, MediaSessionError> {
+    pub fn with_options(moq_url: &str) -> Result<Self, MediaSessionError> {
         let url = Url::parse(moq_url)
             .map_err(|e| MediaSessionError::InvalidTrack(format!("invalid moq url: {e}")))?;
 
@@ -51,7 +50,7 @@ impl NetworkRelay {
         let join = thread::Builder::new()
             .name("pika-network-relay".to_string())
             .spawn(move || {
-                let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+                pika_tls::init_rustls_crypto_provider();
 
                 let rt = match Runtime::new() {
                     Ok(rt) => rt,
@@ -64,10 +63,17 @@ impl NetworkRelay {
                 let mut state = NetworkRelayState {
                     rt,
                     url,
-                    tls_disable_verify,
                     origin: Origin::produce(),
                     sub_origin: Origin::produce(),
                     session: None,
+                    endpoint: None,
+                    transport: Arc::new({
+                        let mut t = quinn::TransportConfig::default();
+                        t.max_idle_timeout(Some(Duration::from_secs(10).try_into().unwrap()));
+                        t.keep_alive_interval(Some(Duration::from_secs(4)));
+                        t.mtu_discovery_config(None); // Disable MTU discovery.
+                        t
+                    }),
                     broadcasts: HashMap::new(),
                 };
 
@@ -200,12 +206,14 @@ impl Drop for NetworkRelayWorker {
 struct NetworkRelayState {
     rt: Runtime,
     url: Url,
-    tls_disable_verify: bool,
     /// Local publish origin (for announcing our broadcast/tracks).
     origin: moq_lite::OriginProducer,
     /// Remote consume origin (for consuming broadcasts/tracks announced by the relay/server).
     sub_origin: moq_lite::OriginProducer,
     session: Option<moq_lite::Session>,
+    // Must stay alive for the duration of the QUIC/webtransport session.
+    endpoint: Option<quinn::Endpoint>,
+    transport: Arc<quinn::TransportConfig>,
     broadcasts: HashMap<String, BroadcastAndTrack>,
 }
 
@@ -247,32 +255,122 @@ impl NetworkRelayState {
         let url = self.url.clone();
         let origin_cons = self.origin.consume();
         let sub_origin = self.sub_origin.clone();
+        let transport = self.transport.clone();
 
-        let tls_disable_verify = self.tls_disable_verify;
-        let session = self.rt.block_on(async {
-            tracing::info!(
-                "connect: initiating QUIC to {url} (tls_disable_verify={tls_disable_verify})"
-            );
-            let mut client_config = moq_native::ClientConfig::default();
-            if tls_disable_verify {
-                client_config.tls.disable_verify = Some(true);
-            }
-            let client = client_config.init().map_err(|e| {
-                tracing::error!("moq client init failed: {e:#}");
-                MediaSessionError::Unauthorized(format!("moq client init failed: {e}"))
+        let (endpoint, session) = self.rt.block_on(async move {
+            tracing::info!("connect: initiating QUIC to {url}");
+
+            let host = url
+                .host_str()
+                .ok_or_else(|| MediaSessionError::InvalidTrack("invalid host".to_string()))?
+                .to_string();
+            let port = url.port_or_known_default().unwrap_or(443);
+
+            let ip = tokio::net::lookup_host((host.as_str(), port))
+                .await
+                .map_err(|e| {
+                    tracing::error!("DNS lookup failed for {host}:{port}: {e:#}");
+                    MediaSessionError::NotConnected
+                })?
+                .next()
+                .ok_or(MediaSessionError::NotConnected)?;
+
+            let socket = std::net::UdpSocket::bind("[::]:0").map_err(|e| {
+                tracing::error!("failed to bind UDP socket: {e:#}");
+                MediaSessionError::NotConnected
             })?;
 
-            client
-                .with_publish(origin_cons)
-                .with_consume(sub_origin)
-                .connect(url.clone())
+            let runtime = quinn::default_runtime().ok_or_else(|| {
+                tracing::error!("quinn has no runtime (must be inside a tokio runtime)");
+                MediaSessionError::NotConnected
+            })?;
+            let endpoint_config = quinn::EndpointConfig::default();
+            let endpoint =
+                quinn::Endpoint::new(endpoint_config, None, socket, runtime).map_err(|e| {
+                    tracing::error!("failed to create QUIC endpoint: {e:#}");
+                    MediaSessionError::NotConnected
+                })?;
+
+            let mut tls = pika_tls::client_config();
+            let alpns: Vec<Vec<u8>> = match url.scheme() {
+                "https" => vec![web_transport_quinn::ALPN.as_bytes().to_vec()],
+                "moqt" | "moql" => moq_lite::ALPNS
+                    .iter()
+                    .map(|alpn| alpn.as_bytes().to_vec())
+                    .collect(),
+                other => {
+                    tracing::error!("unsupported MoQ URL scheme: {other}");
+                    return Err(MediaSessionError::InvalidTrack(format!(
+                        "unsupported url scheme: {other}"
+                    )));
+                }
+            };
+            tls.alpn_protocols = alpns;
+
+            let quic_tls: quinn::crypto::rustls::QuicClientConfig =
+                tls.try_into().map_err(|e| {
+                    tracing::error!("failed to convert rustls config for QUIC: {e:#}");
+                    MediaSessionError::NotConnected
+                })?;
+
+            let mut quinn_cfg = quinn::ClientConfig::new(Arc::new(quic_tls));
+            quinn_cfg.transport_config(transport);
+
+            let connection = endpoint
+                .connect_with(quinn_cfg, ip, &host)
+                .map_err(|e| {
+                    tracing::error!("connect_with failed: {e:#}");
+                    MediaSessionError::NotConnected
+                })?
                 .await
                 .map_err(|e| {
                     tracing::error!("QUIC connect to {url} failed: {e:#}");
                     MediaSessionError::NotConnected
-                })
+                })?;
+
+            let mut request = ConnectRequest::new(url.clone());
+            for alpn in moq_lite::ALPNS {
+                request = request.with_protocol(alpn.to_string());
+            }
+
+            let wt_session = match url.scheme() {
+                "https" => web_transport_quinn::Session::connect(connection, request)
+                    .await
+                    .map_err(|e| {
+                        tracing::error!("webtransport connect failed: {e:#}");
+                        MediaSessionError::NotConnected
+                    })?,
+                "moqt" | "moql" => {
+                    let handshake = connection
+                        .handshake_data()
+                        .ok_or(MediaSessionError::NotConnected)?
+                        .downcast::<HandshakeData>()
+                        .map_err(|_| MediaSessionError::NotConnected)?;
+
+                    let alpn = handshake.protocol.ok_or(MediaSessionError::NotConnected)?;
+                    let alpn =
+                        String::from_utf8(alpn).map_err(|_| MediaSessionError::NotConnected)?;
+
+                    let response = ConnectResponse::OK.with_protocol(alpn);
+                    web_transport_quinn::Session::raw(connection, request, response)
+                }
+                _ => unreachable!("validated above"),
+            };
+
+            let moq_session = moq_lite::Client::new()
+                .with_publish(origin_cons)
+                .with_consume(sub_origin)
+                .connect(wt_session)
+                .await
+                .map_err(|e| {
+                    tracing::error!("moq-lite connect failed: {e:#}");
+                    MediaSessionError::NotConnected
+                })?;
+
+            Ok((endpoint, moq_session))
         })?;
 
+        self.endpoint = Some(endpoint);
         self.session = Some(session);
         Ok(())
     }
@@ -474,6 +572,7 @@ impl NetworkRelayState {
         if let Some(session) = self.session.take() {
             session.close(moq_lite::Error::Cancel);
         }
+        self.endpoint = None;
         self.broadcasts.clear();
     }
 }
