@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.2
+
+- Fix: use sledtools/pika as default sidecar repo for binary downloads.
+
 ## 0.3.1
 
 - Release pipeline: tag `marmotd-v*` is now the single source of truth for versioning across Rust binary and npm package.
