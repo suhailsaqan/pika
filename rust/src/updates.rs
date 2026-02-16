@@ -71,7 +71,10 @@ pub enum InternalEvent {
         candidate_kp_relays: Vec<nostr_sdk::prelude::RelayUrl>,
     },
 
-    // Result of publishing a group evolution event (add/remove/leave/rename commit)
+    // Result of publishing a group evolution event (add/remove/leave/rename commit).
+    // Fires asynchronously after relay confirmation. The handler merges the pending
+    // commit and sends welcomes — the UI busy state is already cleared by the caller
+    // of publish_evolution_event(), so this runs entirely in the background.
     GroupEvolutionPublished {
         chat_id: String,
         mls_group_id: mdk_core::prelude::GroupId,

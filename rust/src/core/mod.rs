@@ -799,6 +799,10 @@ impl AppCore {
                         result.welcome_rumors,
                         added,
                     );
+                    // Clear busy immediately — relay confirmation, merge, and
+                    // welcome delivery continue in the background via
+                    // GroupEvolutionPublished handler.
+                    self.set_busy(|b| b.creating_chat = false);
                 } else {
                     // Create new group chat.
                     let kp_events: Vec<Event> = key_package_events
@@ -903,7 +907,6 @@ impl AppCore {
                         "Group update failed: {}",
                         error.unwrap_or_else(|| "unknown".into())
                     ));
-                    self.set_busy(|b| b.creating_chat = false);
                     return;
                 }
 
@@ -931,7 +934,6 @@ impl AppCore {
                     }
                 }
 
-                self.set_busy(|b| b.creating_chat = false);
                 self.refresh_all_from_storage();
             }
             InternalEvent::FollowListFetched { entries } => {
@@ -2161,6 +2163,22 @@ impl AppCore {
         }
     }
 
+    /// Publish a group evolution event (commit) to relays in the background.
+    ///
+    /// Returns immediately after spawning — callers should clear any busy/loading
+    /// state right after calling this. Relay confirmation, `merge_pending_commit`,
+    /// and welcome delivery happen asynchronously via the `GroupEvolutionPublished`
+    /// internal event handler.
+    ///
+    /// Ordering (MIP-02 / MIP-03):
+    ///   1. Relay confirmation (retries with exponential backoff)
+    ///   2. `merge_pending_commit` (only after relay ack)
+    ///   3. Welcome delivery (only after merge)
+    ///
+    /// TODO: A second group mutation (add/remove member) before the background
+    /// merge completes will fail because OpenMLS rejects new commits while one
+    /// is pending. This surfaces as an error toast but doesn't corrupt state.
+    /// Consider adding a per-group operation lock if this becomes a UX problem.
     fn publish_evolution_event(
         &mut self,
         chat_id: &str,
