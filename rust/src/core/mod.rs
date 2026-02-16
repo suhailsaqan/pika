@@ -799,6 +799,9 @@ impl AppCore {
                         result.welcome_rumors,
                         added,
                     );
+                    // Clear busy immediately — relay confirmation, merge, and
+                    // welcome delivery continue in the background via
+                    // GroupEvolutionPublished handler.
                     self.set_busy(|b| b.creating_chat = false);
                 } else {
                     // Create new group chat.
@@ -904,7 +907,6 @@ impl AppCore {
                         "Group update failed: {}",
                         error.unwrap_or_else(|| "unknown".into())
                     ));
-                    self.set_busy(|b| b.creating_chat = false);
                     return;
                 }
 
@@ -932,7 +934,6 @@ impl AppCore {
                     }
                 }
 
-                self.set_busy(|b| b.creating_chat = false);
                 self.refresh_all_from_storage();
             }
             InternalEvent::FollowListFetched { entries } => {
@@ -2162,6 +2163,22 @@ impl AppCore {
         }
     }
 
+    /// Publish a group evolution event (commit) to relays in the background.
+    ///
+    /// Returns immediately after spawning — callers should clear any busy/loading
+    /// state right after calling this. Relay confirmation, `merge_pending_commit`,
+    /// and welcome delivery happen asynchronously via the `GroupEvolutionPublished`
+    /// internal event handler.
+    ///
+    /// Ordering (MIP-02 / MIP-03):
+    ///   1. Relay confirmation (retries with exponential backoff)
+    ///   2. `merge_pending_commit` (only after relay ack)
+    ///   3. Welcome delivery (only after merge)
+    ///
+    /// TODO: A second group mutation (add/remove member) before the background
+    /// merge completes will fail because OpenMLS rejects new commits while one
+    /// is pending. This surfaces as an error toast but doesn't corrupt state.
+    /// Consider adding a per-group operation lock if this becomes a UX problem.
     fn publish_evolution_event(
         &mut self,
         chat_id: &str,
@@ -2187,22 +2204,61 @@ impl AppCore {
         let chat_id = chat_id.to_string();
         let mls_group_id_clone = mls_group_id.clone();
 
-        // Optimistic: report success immediately so group operations don't
-        // block on slow/dead relays. The broadcast continues in the background.
-        let _ = tx.send(CoreMsg::Internal(Box::new(
-            InternalEvent::GroupEvolutionPublished {
-                chat_id: chat_id.clone(),
-                mls_group_id: mls_group_id_clone,
-                welcome_rumors,
-                added_pubkeys,
-                ok: true,
-                error: None,
-            },
-        )));
         self.runtime.spawn(async move {
-            if let Err(e) = client.send_event_to(&relays, &event).await {
-                tracing::warn!(%e, chat_id, "evolution event broadcast failed");
+            // Retry with exponential backoff, matching key-package publish pattern.
+            // Some relays require NIP-42 auth before accepting protected events.
+            let mut last_err: Option<String> = None;
+            for attempt in 0..5u8 {
+                match client.send_event_to(&relays, &event).await {
+                    Ok(output) if !output.success.is_empty() => {
+                        let _ = tx.send(CoreMsg::Internal(Box::new(
+                            InternalEvent::GroupEvolutionPublished {
+                                chat_id,
+                                mls_group_id: mls_group_id_clone,
+                                welcome_rumors,
+                                added_pubkeys,
+                                ok: true,
+                                error: None,
+                            },
+                        )));
+                        return;
+                    }
+                    Ok(output) => {
+                        let errors: Vec<&str> =
+                            output.failed.values().map(|s| s.as_str()).collect();
+                        let summary = if errors.is_empty() {
+                            "no relay accepted event".to_string()
+                        } else {
+                            errors.join("; ")
+                        };
+                        let any_retryable = errors.iter().any(|e| {
+                            e.contains("protected")
+                                || e.contains("auth")
+                                || e.contains("AUTH")
+                        });
+                        last_err = Some(summary);
+                        if !any_retryable {
+                            break;
+                        }
+                    }
+                    Err(e) => {
+                        last_err = Some(e.to_string());
+                    }
+                }
+                let delay_ms = 250u64.saturating_mul(1u64 << attempt);
+                tokio::time::sleep(Duration::from_millis(delay_ms)).await;
             }
+            tracing::warn!(error = ?last_err, chat_id, "evolution event broadcast failed after retries");
+            let _ = tx.send(CoreMsg::Internal(Box::new(
+                InternalEvent::GroupEvolutionPublished {
+                    chat_id,
+                    mls_group_id: mls_group_id_clone,
+                    welcome_rumors,
+                    added_pubkeys,
+                    ok: false,
+                    error: last_err,
+                },
+            )));
         });
     }
 }

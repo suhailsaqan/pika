@@ -201,20 +201,20 @@ impl AppCore {
                         return;
                     }
                     Ok(output) => {
-                        let err = output
-                            .failed
-                            .values()
-                            .next()
-                            .cloned()
-                            .unwrap_or_else(|| "no relay accepted event".into());
-                        let should_retry = err.contains("protected")
-                            || err.contains("auth")
-                            || err.contains("AUTH");
-                        if !should_retry {
-                            last_err = Some(err);
+                        let errors: Vec<&str> =
+                            output.failed.values().map(|s| s.as_str()).collect();
+                        let summary = if errors.is_empty() {
+                            "no relay accepted event".to_string()
+                        } else {
+                            errors.join("; ")
+                        };
+                        let any_retryable = errors.iter().any(|e| {
+                            e.contains("protected") || e.contains("auth") || e.contains("AUTH")
+                        });
+                        last_err = Some(summary);
+                        if !any_retryable {
                             break;
                         }
-                        last_err = Some(err);
                     }
                     Err(e) => {
                         last_err = Some(e.to_string());
