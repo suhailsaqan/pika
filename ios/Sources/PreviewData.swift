@@ -213,6 +213,7 @@ enum PreviewAppState {
         chatList: [ChatSummary] = [],
         currentChat: ChatViewState? = nil,
         followList: [FollowListEntry] = [],
+        activeCall: CallState? = nil,
         toast: String? = nil
     ) -> AppState {
         AppState(
@@ -225,6 +226,7 @@ enum PreviewAppState {
             currentChat: currentChat,
             followList: followList,
             peerProfile: nil,
+            activeCall: activeCall,
             toast: toast
         )
     }

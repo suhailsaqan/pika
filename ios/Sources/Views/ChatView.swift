@@ -62,120 +62,133 @@ struct ChatView: View {
 
     var body: some View {
         if let chat = state.chat, chat.chatId == chatId {
-            VStack(spacing: 8) {
-                if !chat.isGroup {
-                    callControls(chat: chat)
-                }
-
-                ScrollViewReader { proxy in
-                    ScrollView {
-                        VStack(spacing: 0) {
-                            LazyVStack(spacing: 8) {
-                                ForEach(groupedMessages(chat)) { group in
-                                    MessageGroupRow(
-                                        group: group,
-                                        showSender: chat.isGroup,
-                                        onSendMessage: onSendMessage,
-                                        onTapSender: onTapSender,
-                                        onReact: onReact,
-                                        activeReactionMessageId: $activeReactionMessageId
-                                    )
-                                }
-                            }
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 10)
-
-                            GeometryReader { geo in
-                                Color.clear.preference(
-                                    key: BottomVisibleKey.self,
-                                    value: geo.frame(in: .named("chatScroll")).minY
-                                )
-                            }
-                            .frame(height: 1)
-                            .id("bottom-anchor")
-                        }
-                    }
-                }
-                .overlay {
-                    if activeReactionMessageId != nil {
-                        Color.clear
-                            .contentShape(Rectangle())
-                            .onTapGesture {
-                                withAnimation(.easeOut(duration: 0.15)) {
-                                    activeReactionMessageId = nil
-                                }
-                            }
-                    }
-                }
-                .coordinateSpace(name: "chatScroll")
-                .defaultScrollAnchor(.bottom)
-                .onPreferenceChange(BottomVisibleKey.self) { minY in
-                    // The anchor is visible when its top edge is within the scroll view bounds.
-                    // Give some tolerance (100pt) to account for the input bar overlay.
-                    if let minY {
-                        isAtBottom = minY < UIScreen.main.bounds.height + 100
-                    }
-                }
-                .overlay(alignment: .bottomTrailing) {
-                    if !isAtBottom {
-                        Button {
-                            withAnimation(.easeOut(duration: 0.2)) {
-                                proxy.scrollTo("bottom-anchor", anchor: .bottom)
-                            }
-                        } label: {
-                            Image(systemName: "arrow.down")
-                                .font(.footnote.weight(.semibold))
-                                .padding(10)
-                        }
-                        .foregroundStyle(.primary)
-                        .background(.ultraThinMaterial, in: Circle())
-                        .overlay(Circle().strokeBorder(.quaternary, lineWidth: 0.5))
-                        .padding(.trailing, 16)
-                        .padding(.bottom, scrollButtonBottomPadding)
-                        .accessibilityLabel("Scroll to bottom")
-                    }
-                }
-            }
-            .modifier(FloatingInputBarModifier(content: { messageInputBar(chat: chat) }))
-            .navigationTitle(chat.isGroup ? chatTitle(chat) : "")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                if chat.isGroup {
-                    ToolbarItem(placement: .topBarTrailing) {
-                        Button {
-                            onGroupInfo?()
-                        } label: {
-                            Image(systemName: "info.circle")
-                        }
-                        .accessibilityIdentifier(TestIds.chatGroupInfo)
-                    }
-                } else if let peer = chat.members.first {
-                    ToolbarItem(placement: .principal) {
-                        Button {
-                            onTapSender?(peer.pubkey)
-                        } label: {
-                            HStack(spacing: 8) {
-                                AvatarView(
-                                    name: peer.name,
-                                    npub: peer.npub,
-                                    pictureUrl: peer.pictureUrl,
-                                    size: 24
-                                )
-                                Text(chatTitle(chat))
-                                    .font(.headline)
-                                    .foregroundStyle(.primary)
-                            }
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
-            }
+            loadedChat(chat)
         } else {
-            VStack(spacing: 10) {
-                ProgressView()
-                Text("Loading chat...")
-                    .foregroundStyle(.secondary)
+            loadingView
+        }
+    }
+
+    @ViewBuilder
+    private func loadedChat(_ chat: ChatViewState) -> some View {
+        VStack(spacing: 8) {
+            if !chat.isGroup {
+                callControls(chat: chat)
             }
+            messageList(chat)
+        }
+        .modifier(FloatingInputBarModifier(content: { messageInputBar(chat: chat) }))
+        .navigationTitle(chat.isGroup ? chatTitle(chat) : "")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            if chat.isGroup {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        onGroupInfo?()
+                    } label: {
+                        Image(systemName: "info.circle")
+                    }
+                    .accessibilityIdentifier(TestIds.chatGroupInfo)
+                }
+            } else if let peer = chat.members.first {
+                ToolbarItem(placement: .principal) {
+                    Button {
+                        onTapSender?(peer.pubkey)
+                    } label: {
+                        HStack(spacing: 8) {
+                            AvatarView(
+                                name: peer.name,
+                                npub: peer.npub,
+                                pictureUrl: peer.pictureUrl,
+                                size: 24
+                            )
+                            Text(chatTitle(chat))
+                                .font(.headline)
+                                .foregroundStyle(.primary)
+                        }
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func messageList(_ chat: ChatViewState) -> some View {
+        ScrollViewReader { proxy in
+            ScrollView {
+                VStack(spacing: 0) {
+                    LazyVStack(spacing: 8) {
+                        ForEach(groupedMessages(chat)) { group in
+                            MessageGroupRow(
+                                group: group,
+                                showSender: chat.isGroup,
+                                onSendMessage: onSendMessage,
+                                onTapSender: onTapSender,
+                                onReact: onReact,
+                                activeReactionMessageId: $activeReactionMessageId
+                            )
+                        }
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 10)
+
+                    GeometryReader { geo in
+                        Color.clear.preference(
+                            key: BottomVisibleKey.self,
+                            value: geo.frame(in: .named("chatScroll")).minY
+                        )
+                    }
+                    .frame(height: 1)
+                    .id("bottom-anchor")
+                }
+            }
+            .overlay {
+                if activeReactionMessageId != nil {
+                    Color.clear
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            withAnimation(.easeOut(duration: 0.15)) {
+                                activeReactionMessageId = nil
+                            }
+                        }
+                }
+            }
+            .coordinateSpace(name: "chatScroll")
+            .defaultScrollAnchor(.bottom)
+            .onPreferenceChange(BottomVisibleKey.self) { minY in
+                // The anchor is visible when its top edge is within the scroll view bounds.
+                // Give some tolerance (100pt) to account for the input bar overlay.
+                if let minY {
+                    isAtBottom = minY < UIScreen.main.bounds.height + 100
+                }
+            }
+            .overlay(alignment: .bottomTrailing) {
+                if !isAtBottom {
+                    Button {
+                        withAnimation(.easeOut(duration: 0.2)) {
+                            proxy.scrollTo("bottom-anchor", anchor: .bottom)
+                        }
+                    } label: {
+                        Image(systemName: "arrow.down")
+                            .font(.footnote.weight(.semibold))
+                            .padding(10)
+                    }
+                    .foregroundStyle(.primary)
+                    .background(.ultraThinMaterial, in: Circle())
+                    .overlay(Circle().strokeBorder(.quaternary, lineWidth: 0.5))
+                    .padding(.trailing, 16)
+                    .padding(.bottom, scrollButtonBottomPadding)
+                    .accessibilityLabel("Scroll to bottom")
+                }
+            }
+        }
+    }
+
+    private var loadingView: some View {
+        VStack(spacing: 10) {
+            ProgressView()
+            Text("Loading chat...")
+                .foregroundStyle(.secondary)
         }
     }
 
