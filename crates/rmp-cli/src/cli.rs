@@ -114,6 +114,10 @@ pub struct RunArgs {
     #[arg(value_enum)]
     pub platform: RunPlatform,
 
+    /// Build Rust artifacts in release mode (default is debug for faster iteration).
+    #[arg(long)]
+    pub release: bool,
+
     #[command(flatten)]
     pub ios: RunIosArgs,
 

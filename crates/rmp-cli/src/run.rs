@@ -4,6 +4,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use crate::bindings;
+use crate::bindings::BuildProfile;
 use crate::cli::{human_log, json_print, CliError, JsonOk};
 use crate::config::load_rmp_toml;
 use crate::util::{discover_xcode_dev_dir, run_capture};
@@ -15,8 +16,10 @@ pub fn run(
     args: crate::cli::RunArgs,
 ) -> Result<(), CliError> {
     match args.platform {
-        crate::cli::RunPlatform::Ios => run_ios(root, json, verbose, args.ios),
-        crate::cli::RunPlatform::Android => run_android(root, json, verbose, args.android),
+        crate::cli::RunPlatform::Ios => run_ios(root, json, verbose, args.ios, args.release),
+        crate::cli::RunPlatform::Android => {
+            run_android(root, json, verbose, args.android, args.release)
+        }
     }
 }
 
@@ -25,26 +28,20 @@ fn run_ios(
     json: bool,
     verbose: bool,
     args: crate::cli::RunIosArgs,
+    release: bool,
 ) -> Result<(), CliError> {
     let cfg = load_rmp_toml(root)?;
     let ios = cfg
         .ios
         .ok_or_else(|| CliError::user("rmp.toml missing [ios] section"))?;
     let dev_dir = discover_xcode_dev_dir()?;
+    let profile = build_profile(release);
+    let (rust_target, xcode_arch) = ios_sim_target_for_host()?;
 
     let udid = ensure_ios_simulator(&dev_dir, args.udid.as_deref(), verbose)?;
 
-    // Build bindings + xcframework.
-    bindings::bindings(
-        root,
-        false,
-        verbose,
-        crate::cli::BindingsArgs {
-            target: crate::cli::BindingsTarget::Swift,
-            clean: false,
-            check: false,
-        },
-    )?;
+    // Build bindings + xcframework for a single simulator arch.
+    bindings::build_swift_for_run(root, rust_target, profile, verbose)?;
 
     // Generate Xcode project.
     human_log(verbose, "xcodegen generate");
@@ -61,9 +58,16 @@ fn run_ios(
 
     let bundle_id = format!("{}.dev", ios.bundle_id);
     let xcode_name = read_xcode_project_name(root).unwrap_or_else(|| "App".to_string());
+    let xcode_scheme = ios.scheme.clone().unwrap_or_else(|| xcode_name.clone());
+    let xcode_config = if release { "Release" } else { "Debug" };
+
+    let xcode_project_path = root.join(format!("ios/{xcode_name}.xcodeproj"));
 
     // Build simulator .app.
-    human_log(verbose, "xcodebuild (Debug, iphonesimulator)");
+    human_log(
+        verbose,
+        format!("xcodebuild ({xcode_config}, iphonesimulator, arch={xcode_arch})"),
+    );
     let mut cmd = Command::new("/usr/bin/xcrun");
     cmd.env("DEVELOPER_DIR", &dev_dir)
         .env_remove("LD")
@@ -71,16 +75,18 @@ fn run_ios(
         .env_remove("CXX")
         .arg("xcodebuild")
         .arg("-project")
-        .arg(root.join(format!("ios/{xcode_name}.xcodeproj")))
-        .arg("-target")
-        .arg(&xcode_name)
+        .arg(&xcode_project_path)
+        .arg("-scheme")
+        .arg(&xcode_scheme)
         .arg("-destination")
         .arg(format!("id={udid}"))
         .arg("-configuration")
-        .arg("Debug")
+        .arg(xcode_config)
         .arg("-sdk")
         .arg("iphonesimulator")
         .arg("build")
+        .arg(format!("ARCHS={xcode_arch}"))
+        .arg("ONLY_ACTIVE_ARCH=YES")
         .arg("CODE_SIGNING_ALLOWED=NO")
         .arg(format!("PRODUCT_BUNDLE_IDENTIFIER={bundle_id}"));
 
@@ -93,7 +99,14 @@ fn run_ios(
         return Err(CliError::operational("xcodebuild failed"));
     }
 
-    let app_path = root.join(format!("ios/build/Debug-iphonesimulator/{xcode_name}.app"));
+    let app_path = resolve_ios_app_path(
+        &dev_dir,
+        &xcode_project_path,
+        &xcode_scheme,
+        &udid,
+        xcode_config,
+        xcode_arch,
+    )?;
     if !app_path.is_dir() {
         return Err(CliError::operational(format!(
             "missing built app at {}",
@@ -230,7 +243,7 @@ fn ensure_ios_simulator(
     let device_type_id = pick_device_type_id(dev_dir, "iPhone 15")?;
 
     let device_name = "RMP iPhone 15";
-    let udid = match find_simulator_udid_by_name(dev_dir, device_name)? {
+    let udid = match find_simulator_udid_by_name_and_runtime(dev_dir, device_name, &runtime_id)? {
         Some(u) => u,
         None => create_simulator(dev_dir, device_name, &device_type_id, &runtime_id)?,
     };
@@ -275,29 +288,35 @@ fn pick_device_type_id(dev_dir: &Path, prefer: &str) -> Result<String, CliError>
     first_iphone.ok_or_else(|| CliError::operational("no iPhone simulator device types found"))
 }
 
-fn find_simulator_udid_by_name(dev_dir: &Path, name: &str) -> Result<Option<String>, CliError> {
+fn find_simulator_udid_by_name_and_runtime(
+    dev_dir: &Path,
+    name: &str,
+    runtime_id: &str,
+) -> Result<Option<String>, CliError> {
     let mut cmd = Command::new("/usr/bin/xcrun");
     cmd.env("DEVELOPER_DIR", dev_dir)
         .arg("simctl")
         .arg("list")
+        .arg("-j")
         .arg("devices");
     let out = run_capture(cmd)?;
     if !out.status.success() {
         return Err(CliError::operational("failed to list simulators"));
     }
-    let s = String::from_utf8_lossy(&out.stdout);
-    for ln in s.lines() {
-        if !ln.contains(name) {
-            continue;
-        }
-        // "... (<udid>) ..."
-        if let Some(b) = ln.find('(') {
-            if let Some(e) = ln[b + 1..].find(')') {
-                let udid = &ln[b + 1..b + 1 + e];
-                if udid.len() >= 25 {
-                    return Ok(Some(udid.to_string()));
-                }
-            }
+    let j: serde_json::Value = serde_json::from_slice(&out.stdout)
+        .map_err(|e| CliError::operational(format!("failed to parse simulator JSON: {e}")))?;
+    let Some(runtime_devices) = j.get("devices").and_then(|v| v.get(runtime_id)) else {
+        return Ok(None);
+    };
+    for dev in runtime_devices.as_array().into_iter().flatten() {
+        let dev_name = dev.get("name").and_then(|v| v.as_str()).unwrap_or("");
+        let udid = dev.get("udid").and_then(|v| v.as_str()).unwrap_or("");
+        let available = dev
+            .get("isAvailable")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(true);
+        if available && dev_name == name && udid.len() >= 25 {
+            return Ok(Some(udid.to_string()));
         }
     }
     Ok(None)
@@ -448,6 +467,7 @@ fn run_android(
     json: bool,
     verbose: bool,
     args: crate::cli::RunAndroidArgs,
+    release: bool,
 ) -> Result<(), CliError> {
     let cfg = load_rmp_toml(root)?;
     let android = cfg
@@ -460,18 +480,11 @@ fn run_android(
         .unwrap_or_else(|| "pika_api35".into());
 
     let serial = ensure_android_emulator(root, &avd, args.serial.as_deref(), verbose)?;
+    let abi = detect_android_abi(&serial, verbose)?;
+    let profile = build_profile(release);
 
-    // Build bindings (kotlin + .so).
-    bindings::bindings(
-        root,
-        false,
-        verbose,
-        crate::cli::BindingsArgs {
-            target: crate::cli::BindingsTarget::Kotlin,
-            clean: false,
-            check: false,
-        },
-    )?;
+    // Build bindings (kotlin + .so) for the connected ABI only.
+    bindings::build_kotlin_for_run(root, &abi, profile, verbose)?;
 
     // Assemble debug APK.
     human_log(verbose, "gradle assembleDebug");
@@ -763,6 +776,24 @@ fn is_ci() -> bool {
         .unwrap_or(false)
 }
 
+fn build_profile(release: bool) -> BuildProfile {
+    if release {
+        BuildProfile::Release
+    } else {
+        BuildProfile::Debug
+    }
+}
+
+fn ios_sim_target_for_host() -> Result<(&'static str, &'static str), CliError> {
+    match std::env::consts::ARCH {
+        "aarch64" => Ok(("aarch64-apple-ios-sim", "arm64")),
+        "x86_64" => Ok(("x86_64-apple-ios", "x86_64")),
+        arch => Err(CliError::operational(format!(
+            "unsupported host arch for iOS simulator builds: {arch}"
+        ))),
+    }
+}
+
 fn avd_exists(avd: &str) -> Result<bool, CliError> {
     let mut cmd = Command::new("emulator");
     cmd.arg("-list-avds");
@@ -820,6 +851,32 @@ fn adb_shell(serial: &str, args: &[&str]) -> Result<String, CliError> {
         return Err(CliError::operational("adb shell failed"));
     }
     Ok(String::from_utf8_lossy(&out.stdout).replace('\r', ""))
+}
+
+fn detect_android_abi(serial: &str, verbose: bool) -> Result<String, CliError> {
+    let raw = adb_shell(serial, &["getprop", "ro.product.cpu.abi"])?;
+    let raw = raw.lines().next().unwrap_or("").trim();
+    if raw.is_empty() {
+        return Err(CliError::operational(
+            "failed to detect Android ABI (getprop ro.product.cpu.abi returned empty)",
+        ));
+    }
+    let abi = normalize_android_abi(raw).unwrap_or(raw).to_string();
+    human_log(
+        verbose,
+        format!("android ABI detected: {raw} (using {abi})"),
+    );
+    Ok(abi)
+}
+
+fn normalize_android_abi(raw: &str) -> Option<&'static str> {
+    match raw {
+        "arm64-v8a" | "aarch64" => Some("arm64-v8a"),
+        "armeabi-v7a" | "armeabi" => Some("armeabi-v7a"),
+        "x86_64" => Some("x86_64"),
+        "x86" => Some("x86"),
+        _ => None,
+    }
 }
 
 fn setup_adb_reverse(serial: &str, spec: &str, verbose: bool) -> Result<(), CliError> {
@@ -1011,6 +1068,64 @@ fn launch_android(serial: &str, pkg: &str, verbose: bool) -> Result<(), CliError
     Err(CliError::operational(format!(
         "app did not appear to start (pidof {pkg} empty)"
     )))
+}
+
+fn resolve_ios_app_path(
+    dev_dir: &Path,
+    xcode_project_path: &Path,
+    xcode_scheme: &str,
+    udid: &str,
+    xcode_config: &str,
+    xcode_arch: &str,
+) -> Result<PathBuf, CliError> {
+    let mut cmd = Command::new("/usr/bin/xcrun");
+    cmd.env("DEVELOPER_DIR", dev_dir)
+        .env_remove("LD")
+        .env_remove("CC")
+        .env_remove("CXX")
+        .arg("xcodebuild")
+        .arg("-project")
+        .arg(xcode_project_path)
+        .arg("-scheme")
+        .arg(xcode_scheme)
+        .arg("-destination")
+        .arg(format!("id={udid}"))
+        .arg("-configuration")
+        .arg(xcode_config)
+        .arg("-sdk")
+        .arg("iphonesimulator")
+        .arg(format!("ARCHS={xcode_arch}"))
+        .arg("ONLY_ACTIVE_ARCH=YES")
+        .arg("-showBuildSettings");
+    let out = run_capture(cmd)?;
+    if !out.status.success() {
+        return Err(CliError::operational(
+            "xcodebuild -showBuildSettings failed",
+        ));
+    }
+
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let mut target_build_dir: Option<String> = None;
+    let mut full_product_name: Option<String> = None;
+    for line in stdout.lines() {
+        let line = line.trim();
+        if let Some(v) = line.strip_prefix("TARGET_BUILD_DIR = ") {
+            target_build_dir = Some(v.trim().to_string());
+            continue;
+        }
+        if let Some(v) = line.strip_prefix("FULL_PRODUCT_NAME = ") {
+            full_product_name = Some(v.trim().to_string());
+        }
+    }
+
+    let target_build_dir = target_build_dir.ok_or_else(|| {
+        CliError::operational("xcodebuild -showBuildSettings missing TARGET_BUILD_DIR")
+    })?;
+    let full_product_name = full_product_name.ok_or_else(|| {
+        CliError::operational("xcodebuild -showBuildSettings missing FULL_PRODUCT_NAME")
+    })?;
+
+    Ok(PathBuf::from(target_build_dir).join(full_product_name))
 }
 
 /// Read the `name:` field from `ios/project.yml` to derive the Xcode project/target/app name.

@@ -218,14 +218,25 @@ e2e-local-marmotd:
 
 # Build Rust core for the host platform.
 rust-build-host:
-  cargo build -p pika_core --release
+  set -euo pipefail; \
+  PROFILE="${PIKA_RUST_PROFILE:-release}"; \
+  case "$PROFILE" in \
+    release) cargo build -p pika_core --release ;; \
+    debug) cargo build -p pika_core ;; \
+    *) echo "error: unsupported PIKA_RUST_PROFILE: $PROFILE (expected debug or release)"; exit 2 ;; \
+  esac
 
 # Generate Kotlin bindings via UniFFI.
 gen-kotlin: rust-build-host
   mkdir -p android/app/src/main/java/com/pika/app/rust
-  # Resolve the host cdylib extension (dylib on macOS, so on Linux).
-  LIB=$(ls -1 target/release/libpika_core.dylib target/release/libpika_core.so target/release/libpika_core.dll 2>/dev/null | head -n 1); \
-  if [ -z "$LIB" ]; then echo "Missing built library: target/release/libpika_core.*"; exit 1; fi; \
+  set -euo pipefail; \
+  PROFILE="${PIKA_RUST_PROFILE:-release}"; \
+  TARGET_DIR="target/$PROFILE"; \
+  LIB=""; \
+  for cand in "$TARGET_DIR/libpika_core.dylib" "$TARGET_DIR/libpika_core.so" "$TARGET_DIR/libpika_core.dll"; do \
+    if [ -f "$cand" ]; then LIB="$cand"; break; fi; \
+  done; \
+  if [ -z "$LIB" ]; then echo "Missing built library: $TARGET_DIR/libpika_core.*"; exit 1; fi; \
   cargo run -q -p uniffi-bindgen -- generate \
     --library "$LIB" \
     --language kotlin \
@@ -234,12 +245,24 @@ gen-kotlin: rust-build-host
     --config rust/uniffi.toml
 
 # Cross-compile Rust core for Android (arm64, armv7, x86_64).
+# Note: this clears `android/app/src/main/jniLibs` so output matches the requested ABI set.
 android-rust:
-  mkdir -p android/app/src/main/jniLibs
-  cargo ndk -o android/app/src/main/jniLibs \
-    -P 26 \
-    -t arm64-v8a -t armeabi-v7a -t x86_64 \
-    build -p pika_core --release
+  set -euo pipefail; \
+  PROFILE="${PIKA_RUST_PROFILE:-release}"; \
+  ABIS="${PIKA_ANDROID_ABIS:-arm64-v8a armeabi-v7a x86_64}"; \
+  PROFILE_FLAG=(); \
+  case "$PROFILE" in \
+    release) PROFILE_FLAG=(--release) ;; \
+    debug) PROFILE_FLAG=() ;; \
+    *) echo "error: unsupported PIKA_RUST_PROFILE: $PROFILE (expected debug or release)"; exit 2 ;; \
+  esac; \
+  rm -rf android/app/src/main/jniLibs; \
+  mkdir -p android/app/src/main/jniLibs; \
+  cmd=(cargo ndk -o android/app/src/main/jniLibs -P 26); \
+  for abi in $ABIS; do cmd+=(-t "$abi"); done; \
+  cmd+=(build -p pika_core); \
+  cmd+=("${PROFILE_FLAG[@]}"); \
+  "${cmd[@]}"
 
 # Write android/local.properties with SDK path.
 android-local-properties:
@@ -272,18 +295,35 @@ android-ui-e2e:
 # Generate Swift bindings via UniFFI.
 ios-gen-swift: rust-build-host
   mkdir -p ios/Bindings
+  set -euo pipefail; \
+  PROFILE="${PIKA_RUST_PROFILE:-release}"; \
+  TARGET_DIR="target/$PROFILE"; \
+  LIB=""; \
+  for cand in "$TARGET_DIR/libpika_core.dylib" "$TARGET_DIR/libpika_core.so" "$TARGET_DIR/libpika_core.dll"; do \
+    if [ -f "$cand" ]; then LIB="$cand"; break; fi; \
+  done; \
+  if [ -z "$LIB" ]; then echo "Missing built library: $TARGET_DIR/libpika_core.*"; exit 1; fi; \
   cargo run -q -p uniffi-bindgen -- generate \
-    --library target/release/libpika_core.dylib \
+    --library "$LIB" \
     --language swift \
     --out-dir ios/Bindings \
     --config rust/uniffi.toml
   python3 -c 'from pathlib import Path; import re; p=Path("ios/Bindings/pika_core.swift"); data=p.read_text(encoding="utf-8").replace("\r\n","\n").replace("\r","\n"); data=re.sub(r"[ \t]+$", "", data, flags=re.M); data=data.rstrip("\n")+"\n"; p.write_text(data, encoding="utf-8")'
 
 # Cross-compile Rust core for iOS (device + simulator).
+# Keep `PIKA_IOS_RUST_TARGETS` aligned with destination (device vs simulator) to avoid link errors.
 ios-rust:
   # Nix shells often set CC/CXX/SDKROOT/MACOSX_DEPLOYMENT_TARGET for macOS builds.
   # For iOS targets, force Xcode toolchain compilers + iOS SDK roots.
   set -euo pipefail; \
+  PROFILE="${PIKA_RUST_PROFILE:-release}"; \
+  TARGETS="${PIKA_IOS_RUST_TARGETS:-aarch64-apple-ios aarch64-apple-ios-sim}"; \
+  PROFILE_FLAG=(); \
+  case "$PROFILE" in \
+    release) PROFILE_FLAG=(--release) ;; \
+    debug) PROFILE_FLAG=() ;; \
+    *) echo "error: unsupported PIKA_RUST_PROFILE: $PROFILE (expected debug or release)"; exit 2 ;; \
+  esac; \
   DEV_DIR="$(./tools/xcode-dev-dir)"; \
   TOOLCHAIN_BIN="$DEV_DIR/Toolchains/XcodeDefault.xctoolchain/usr/bin"; \
   CC_BIN="$TOOLCHAIN_BIN/clang"; \
@@ -293,23 +333,40 @@ ios-rust:
   IOS_MIN="17.0"; \
   SDKROOT_IOS="$(DEVELOPER_DIR="$DEV_DIR" /usr/bin/xcrun --sdk iphoneos --show-sdk-path)"; \
   SDKROOT_SIM="$(DEVELOPER_DIR="$DEV_DIR" /usr/bin/xcrun --sdk iphonesimulator --show-sdk-path)"; \
-  base_env=(env -u LIBRARY_PATH -u SDKROOT -u MACOSX_DEPLOYMENT_TARGET -u CC -u CXX -u AR -u RANLIB \
+  base_env=(env -u LIBRARY_PATH -u SDKROOT -u MACOSX_DEPLOYMENT_TARGET -u CC -u CXX -u AR -u RANLIB -u LD \
     DEVELOPER_DIR="$DEV_DIR" CC="$CC_BIN" CXX="$CXX_BIN" AR="$AR_BIN" RANLIB="$RANLIB_BIN" IPHONEOS_DEPLOYMENT_TARGET="$IOS_MIN" \
     CARGO_TARGET_AARCH64_APPLE_IOS_LINKER="$CC_BIN" \
-    CARGO_TARGET_AARCH64_APPLE_IOS_SIM_LINKER="$CC_BIN"); \
-  "${base_env[@]}" SDKROOT="$SDKROOT_IOS" RUSTFLAGS="-C linker=$CC_BIN -C link-arg=-miphoneos-version-min=$IOS_MIN" cargo build -p pika_core --release --lib --target aarch64-apple-ios; \
-  "${base_env[@]}" SDKROOT="$SDKROOT_SIM" RUSTFLAGS="-C linker=$CC_BIN -C link-arg=-mios-simulator-version-min=$IOS_MIN" cargo build -p pika_core --release --lib --target aarch64-apple-ios-sim
+    CARGO_TARGET_AARCH64_APPLE_IOS_SIM_LINKER="$CC_BIN" \
+    CARGO_TARGET_X86_64_APPLE_IOS_LINKER="$CC_BIN"); \
+  for target in $TARGETS; do \
+    case "$target" in \
+      aarch64-apple-ios) SDKROOT="$SDKROOT_IOS"; MIN_FLAG="-miphoneos-version-min=" ;; \
+      aarch64-apple-ios-sim|x86_64-apple-ios) SDKROOT="$SDKROOT_SIM"; MIN_FLAG="-mios-simulator-version-min=" ;; \
+      *) echo "error: unsupported iOS Rust target: $target"; exit 2 ;; \
+    esac; \
+    "${base_env[@]}" \
+      SDKROOT="$SDKROOT" \
+      RUSTFLAGS="-C linker=$CC_BIN -C link-arg=${MIN_FLAG}${IOS_MIN}" \
+      cargo build -p pika_core --lib --target "$target" "${PROFILE_FLAG[@]}"; \
+  done
 
 # Build PikaCore.xcframework (device + simulator slices).
 ios-xcframework: ios-gen-swift ios-rust
-  rm -rf ios/Frameworks/PikaCore.xcframework ios/.build
-  mkdir -p ios/.build/headers ios/Frameworks
-  cp ios/Bindings/pika_coreFFI.h ios/.build/headers/pika_coreFFI.h
-  cp ios/Bindings/pika_coreFFI.modulemap ios/.build/headers/module.modulemap
-  ./tools/xcode-run xcodebuild -create-xcframework \
-    -library target/aarch64-apple-ios/release/libpika_core.a -headers ios/.build/headers \
-    -library target/aarch64-apple-ios-sim/release/libpika_core.a -headers ios/.build/headers \
-    -output ios/Frameworks/PikaCore.xcframework
+  set -euo pipefail; \
+  PROFILE="${PIKA_RUST_PROFILE:-release}"; \
+  TARGETS="${PIKA_IOS_RUST_TARGETS:-aarch64-apple-ios aarch64-apple-ios-sim}"; \
+  rm -rf ios/Frameworks/PikaCore.xcframework ios/.build; \
+  mkdir -p ios/.build/headers ios/Frameworks; \
+  cp ios/Bindings/pika_coreFFI.h ios/.build/headers/pika_coreFFI.h; \
+  cp ios/Bindings/pika_coreFFI.modulemap ios/.build/headers/module.modulemap; \
+  cmd=(./tools/xcode-run xcodebuild -create-xcframework); \
+  for target in $TARGETS; do \
+    lib="target/$target/$PROFILE/libpika_core.a"; \
+    if [ ! -f "$lib" ]; then echo "error: missing iOS static lib: $lib"; exit 1; fi; \
+    cmd+=(-library "$lib" -headers ios/.build/headers); \
+  done; \
+  cmd+=(-output ios/Frameworks/PikaCore.xcframework); \
+  "${cmd[@]}"
 
 # Generate Xcode project via xcodegen.
 ios-xcodeproj:
@@ -317,7 +374,8 @@ ios-xcodeproj:
 
 # Build iOS app for simulator.
 ios-build-sim: ios-xcframework ios-xcodeproj
-  ./tools/xcode-run xcodebuild -project ios/Pika.xcodeproj -scheme Pika -configuration Debug -sdk iphonesimulator -derivedDataPath ios/build build ARCHS=arm64 ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO PRODUCT_BUNDLE_IDENTIFIER="${PIKA_IOS_BUNDLE_ID:-com.justinmoon.pika.dev}"
+  SIM_ARCH="${PIKA_IOS_SIM_ARCH:-$( [ "$(uname -m)" = "x86_64" ] && echo x86_64 || echo arm64 )}"; \
+  ./tools/xcode-run xcodebuild -project ios/Pika.xcodeproj -scheme Pika -configuration Debug -sdk iphonesimulator -derivedDataPath ios/build build ARCHS="$SIM_ARCH" ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO PRODUCT_BUNDLE_IDENTIFIER="${PIKA_IOS_BUNDLE_ID:-com.justinmoon.pika.dev}"
 
 # Run iOS UI tests on simulator (skips E2E deployed-bot test).
 ios-ui-test: ios-xcframework ios-xcodeproj

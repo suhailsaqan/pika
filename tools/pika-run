@@ -312,6 +312,8 @@ def cmd_ios_run(args: argparse.Namespace) -> int:
         # tools/run-ios gains support for this env var; don't pass --udid (it means device there).
         env["PIKA_IOS_SIM_UDID"] = udid
         argv = ["./tools/run-ios", "--sim"]
+    if args.release:
+        argv.append("--release")
 
     # Required user-facing output surface (even in non-json mode).
     if not args.json:
@@ -369,6 +371,8 @@ def cmd_android_run(args: argparse.Namespace) -> int:
         argv.append("--device")
     if args.serial:
         argv += ["--serial", args.serial]
+    if args.release:
+        argv.append("--release")
 
     if not args.json:
         return subprocess.call(argv, cwd=str(ROOT), env=env)
@@ -417,6 +421,7 @@ def build_parser() -> argparse.ArgumentParser:
     m.add_argument("--device", action="store_true", help="Run on a physical iOS device")
     ios_run.add_argument("--udid", help="Target UDID (device or simulator depending on mode)")
     ios_run.add_argument("--console", action="store_true", help="Attach device console (device mode)")
+    ios_run.add_argument("--release", action="store_true", help="Build Rust artifacts in release mode")
     ios_run.add_argument("--no-relay-override", action="store_true", help="Disable writing dev relay config")
     ios_run.add_argument("--bundle-id", help="Override iOS bundle id (default debug id)")
     ios_run.set_defaults(func=cmd_ios_run)
@@ -431,6 +436,7 @@ def build_parser() -> argparse.ArgumentParser:
     m2.add_argument("--emulator", action="store_true", help="Prefer emulator (default)")
     m2.add_argument("--device", action="store_true", help="Prefer physical device")
     android_run.add_argument("--serial", help="adb serial to target")
+    android_run.add_argument("--release", action="store_true", help="Build Rust artifacts in release mode")
     android_run.add_argument("--app-id", help="Override application id (defaults to debug id)")
     android_run.add_argument("--adb-reverse", help="Comma-separated adb reverse ports (e.g. 18080:32820,9090)")
     android_run.add_argument("--no-relay-override", action="store_true", help="Disable writing dev relay config")

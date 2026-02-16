@@ -24,10 +24,11 @@ ADB="${ADB:-adb}"
 APP_ID="${PIKA_ANDROID_APP_ID:-com.justinmoon.pika.dev}"
 SERIAL="${PIKA_ANDROID_SERIAL:-}"
 MODE="auto" # auto|emulator|device
+RELEASE=0
 
 usage() {
   cat <<EOF
-usage: ./tools/run-android [--emulator|--device] [--serial <adb-serial>] [--list-targets]
+usage: ./tools/run-android [--emulator|--device] [--release] [--serial <adb-serial>] [--list-targets]
 
 Defaults:
   - If an emulator exists or can be started, we run on the emulator.
@@ -43,6 +44,7 @@ Examples:
 Env:
   PIKA_ANDROID_SERIAL   (same as --serial)
   PIKA_ANDROID_APP_ID   (default: $APP_ID)
+  PIKA_RUST_PROFILE     debug|release (default for run-android: debug)
 EOF
 }
 
@@ -67,6 +69,7 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --emulator) MODE="emulator" ;;
     --device) MODE="device" ;;
+    --release) RELEASE=1 ;;
     --serial)
       shift
       if [ $# -lt 1 ]; then echo "error: --serial requires a value" >&2; exit 2; fi
@@ -82,6 +85,13 @@ while [ $# -gt 0 ]; do
   esac
   shift
 done
+
+if [ "$RELEASE" = "1" ]; then
+  export PIKA_RUST_PROFILE="release"
+else
+  export PIKA_RUST_PROFILE="${PIKA_RUST_PROFILE:-debug}"
+fi
+echo "rust profile: $PIKA_RUST_PROFILE"
 
 ensure_emulator() {
   # Default UX: use an emulator (like iOS uses a simulator) unless the user explicitly
@@ -151,6 +161,27 @@ if echo "$SERIAL" | grep -q '^emulator-'; then
   echo "using android emulator: $SERIAL"
 else
   echo "using android device: $SERIAL"
+fi
+
+detect_android_abi() {
+  local raw abi
+  raw="$("$ADB" -s "$SERIAL" shell getprop ro.product.cpu.abi 2>/dev/null | tr -d '\r' | head -n 1 | xargs || true)"
+  if [ -z "${raw:-}" ]; then
+    echo "error: failed to detect Android ABI for $SERIAL (ro.product.cpu.abi empty)" >&2
+    exit 1
+  fi
+  case "$raw" in
+    arm64-v8a|aarch64) abi="arm64-v8a" ;;
+    armeabi-v7a|armeabi) abi="armeabi-v7a" ;;
+    x86_64) abi="x86_64" ;;
+    x86) abi="x86" ;;
+    *) abi="$raw" ;;
+  esac
+  echo "$abi"
+}
+
+if [ -z "${PIKA_ANDROID_ABIS:-}" ]; then
+  export PIKA_ANDROID_ABIS="$(detect_android_abi)"
 fi
 
 # Build (via Gradle) then install deterministically onto the selected device.

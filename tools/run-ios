@@ -38,6 +38,7 @@ IOS_BUNDLE_ID="${PIKA_IOS_BUNDLE_ID:-com.justinmoon.pika.dev}"
 IOS_TEAM_ID="${PIKA_IOS_DEVELOPMENT_TEAM:-}"
 MODE="sim"
 CONSOLE="${PIKA_IOS_CONSOLE:-0}"
+RELEASE=0
 if [ "${PIKA_IOS_DEVICE:-0}" = "1" ]; then
   MODE="device"
 fi
@@ -45,7 +46,7 @@ SIM_UDID="${PIKA_IOS_SIM_UDID:-}"
 
 usage() {
   cat <<EOF
-usage: ./tools/run-ios [--sim|--device] [--console] [--udid <udid>] [--list-devices]
+usage: ./tools/run-ios [--sim|--device] [--release] [--console] [--udid <udid>] [--list-devices]
 
 Env:
   PIKA_IOS_BUNDLE_ID        (default: $IOS_BUNDLE_ID)
@@ -54,6 +55,7 @@ Env:
   PIKA_IOS_SIM_UDID         (optional, for --sim)
   PIKA_IOS_DEVICE=1         default to --device (if set, requires team id)
   PIKA_IOS_CONSOLE=1        default to --console
+  PIKA_RUST_PROFILE         debug|release (default for run-ios: debug)
   PIKA_NO_RELAY_OVERRIDE=1  disable dev-friendly relay defaults
 EOF
 }
@@ -88,6 +90,7 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --sim) MODE="sim" ;;
     --device) MODE="device" ;;
+    --release) RELEASE=1 ;;
     --udid)
       shift
       if [ $# -lt 1 ]; then echo "error: --udid requires a value" >&2; exit 2; fi
@@ -109,6 +112,13 @@ while [ $# -gt 0 ]; do
   esac
   shift
 done
+
+if [ "$RELEASE" = "1" ]; then
+  export PIKA_RUST_PROFILE="release"
+else
+  export PIKA_RUST_PROFILE="${PIKA_RUST_PROFILE:-debug}"
+fi
+echo "rust profile: $PIKA_RUST_PROFILE"
 
 default_relays() {
   echo "wss://relay.primal.net,wss://nos.lol,wss://relay.damus.io"
@@ -178,6 +188,9 @@ if [ "$MODE" = "device" ]; then
     echo "error: could not determine a connected iPhone UDID (set PIKA_IOS_DEVICE_UDID)" >&2
     exit 1
   fi
+
+  # Faster dev loop defaults: debug Rust and only the required iOS Rust target.
+  export PIKA_IOS_RUST_TARGETS="${PIKA_IOS_RUST_TARGETS:-aarch64-apple-ios}"
 
   # Build core xcframework + (re)generate the project.
   just ios-xcframework ios-xcodeproj
@@ -305,6 +318,22 @@ fi
 if [ -z "${udid:-}" ]; then
   echo "error: could not determine simulator udid" >&2
   exit 1
+fi
+
+# Faster dev loop defaults: debug Rust and only the required simulator target.
+if [ -z "${PIKA_IOS_SIM_ARCH:-}" ]; then
+  if [ "$(uname -m)" = "x86_64" ]; then
+    export PIKA_IOS_SIM_ARCH="x86_64"
+  else
+    export PIKA_IOS_SIM_ARCH="arm64"
+  fi
+fi
+if [ -z "${PIKA_IOS_RUST_TARGETS:-}" ]; then
+  if [ "$PIKA_IOS_SIM_ARCH" = "x86_64" ]; then
+    export PIKA_IOS_RUST_TARGETS="x86_64-apple-ios"
+  else
+    export PIKA_IOS_RUST_TARGETS="aarch64-apple-ios-sim"
+  fi
 fi
 
 just ios-build-sim
