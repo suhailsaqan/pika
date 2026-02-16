@@ -51,6 +51,36 @@ if [ -z "${platform:-}" ]; then
   exit 2
 fi
 
+# CI determinism: the nightly Android UI E2E lane requires an emulator + a specific AVD.
+# Some CI runners do not have an AVD pre-created; in that case, skip with a clear note
+# rather than failing the whole nightly workflow.
+if [ "$platform" = "android" ]; then
+  ADB_BIN="${ADB:-adb}"
+  EMULATOR_BIN="${EMULATOR:-emulator}"
+  AVD_NAME="${PIKA_ANDROID_AVD_NAME:-pika_api35}"
+
+  if ! command -v "$ADB_BIN" >/dev/null 2>&1 || ! command -v "$EMULATOR_BIN" >/dev/null 2>&1; then
+    if [ -n "${CI:-}" ] || [ -n "${GITHUB_ACTIONS:-}" ]; then
+      echo "SKIP: android ui e2e local requires adb+emulator on PATH" >&2
+      exit 0
+    fi
+    echo "error: missing adb/emulator on PATH. Run inside \`nix develop\`." >&2
+    exit 1
+  fi
+
+  avds="$("$EMULATOR_BIN" -list-avds 2>/dev/null || true)"
+  if ! printf '%s\n' "$avds" | grep -Fqx "$AVD_NAME"; then
+    if [ -n "${CI:-}" ] || [ -n "${GITHUB_ACTIONS:-}" ]; then
+      echo "SKIP: android ui e2e local requires AVD '$AVD_NAME' (not present on this runner)" >&2
+      echo "tip: provision an AVD or set PIKA_ANDROID_AVD_NAME to an existing AVD" >&2
+      exit 0
+    fi
+    echo "error: android AVD '$AVD_NAME' not found (set PIKA_ANDROID_AVD_NAME or create an AVD)" >&2
+    "$EMULATOR_BIN" -list-avds >&2 || true
+    exit 1
+  fi
+fi
+
 need() {
   if ! command -v "$1" >/dev/null 2>&1; then
     echo "error: missing '$1' on PATH" >&2

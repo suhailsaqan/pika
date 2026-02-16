@@ -106,25 +106,6 @@ impl AppCore {
 
             loop {
                 match rx.recv().await {
-                    Ok(RelayPoolNotification::Message { relay_url, message }) => {
-                        // NIP-42 auth is required by many relays to publish NIP-70 "protected" events.
-                        // MDK marks key packages (kind 443) as protected, so we must respond to AUTH
-                        // challenges or publishing will be rejected ("blocked: event marked as protected").
-                        if let RelayMessage::Auth { challenge } = message {
-                            // nostr-sdk 0.44 doesn't expose a `Client::auth` helper; build/sign/send.
-                            if let Ok(event) = client
-                                .sign_event_builder(EventBuilder::auth(
-                                    challenge,
-                                    relay_url.clone(),
-                                ))
-                                .await
-                            {
-                                let _ = client
-                                    .send_msg_to([relay_url], ClientMessage::auth(event))
-                                    .await;
-                            }
-                        }
-                    }
                     Ok(RelayPoolNotification::Event { event, .. }) => {
                         let ev: Event = (*event).clone();
                         let id_hex = ev.id.to_hex();
