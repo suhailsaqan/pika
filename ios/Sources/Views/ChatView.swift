@@ -1,6 +1,7 @@
 import SwiftUI
 import MarkdownUI
 import WebKit
+import AVFAudio
 
 // WKWebView requires a resolvable HTTPS baseURL for loadHTMLString to allow
 // fetching external subresources (images, scripts, etc.). The domain must
@@ -29,6 +30,8 @@ struct ChatView: View {
     @State private var mentionQuery = ""
     @State private var insertedMentions: [(display: String, npub: String)] = []
     @FocusState private var isInputFocused: Bool
+    @State private var pendingMicAction: PendingMicAction?
+    @State private var showMicDeniedAlert = false
 
     private let scrollButtonBottomPadding: CGFloat = 12
 
@@ -252,6 +255,30 @@ struct ChatView: View {
     private func callControls(chat: ChatViewState) -> some View {
         let callForChat = activeCall?.chatId == chat.chatId ? activeCall : nil
         let hasLiveCallElsewhere = activeCall.map { $0.chatId != chat.chatId && isLiveStatus($0.status) } ?? false
+        let dispatchWithMicPermission: (PendingMicAction) -> Void = { action in
+            let session = AVAudioSession.sharedInstance()
+            switch session.recordPermission {
+            case .granted:
+                dispatchMicAction(action)
+            case .denied:
+                showMicDeniedAlert = true
+            case .undetermined:
+                pendingMicAction = action
+                session.requestRecordPermission { granted in
+                    Task { @MainActor in
+                        let pending = pendingMicAction
+                        pendingMicAction = nil
+                        if granted, let pending {
+                            dispatchMicAction(pending)
+                        } else {
+                            showMicDeniedAlert = true
+                        }
+                    }
+                }
+            @unknown default:
+                showMicDeniedAlert = true
+            }
+        }
 
         if let call = callForChat {
             VStack(alignment: .leading, spacing: 8) {
@@ -268,7 +295,7 @@ struct ChatView: View {
                     switch call.status {
                     case .ringing:
                         Button("Accept") {
-                            onAcceptCall()
+                            dispatchWithMicPermission(.accept)
                         }
                         .accessibilityIdentifier(TestIds.chatCallAccept)
                         Button("Reject", role: .destructive) {
@@ -286,7 +313,7 @@ struct ChatView: View {
                         .accessibilityIdentifier(TestIds.chatCallEnd)
                     case .ended:
                         Button("Start Again") {
-                            onStartCall()
+                            dispatchWithMicPermission(.start)
                         }
                         .accessibilityIdentifier(TestIds.chatCallStart)
                     }
@@ -294,10 +321,15 @@ struct ChatView: View {
             }
             .padding(.horizontal, 12)
             .padding(.top, 8)
+            .alert("Microphone Permission Needed", isPresented: $showMicDeniedAlert) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text("Microphone permission is required for calls.")
+            }
         } else {
             HStack {
                 Button("Start Call") {
-                    onStartCall()
+                    dispatchWithMicPermission(.start)
                 }
                 .disabled(hasLiveCallElsewhere)
                 .accessibilityIdentifier(TestIds.chatCallStart)
@@ -310,6 +342,25 @@ struct ChatView: View {
             }
             .padding(.horizontal, 12)
             .padding(.top, 8)
+            .alert("Microphone Permission Needed", isPresented: $showMicDeniedAlert) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text("Microphone permission is required for calls.")
+            }
+        }
+    }
+
+    private enum PendingMicAction {
+        case start
+        case accept
+    }
+
+    private func dispatchMicAction(_ action: PendingMicAction) {
+        switch action {
+        case .start:
+            onStartCall()
+        case .accept:
+            onAcceptCall()
         }
     }
 

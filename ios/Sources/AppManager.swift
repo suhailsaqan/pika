@@ -67,48 +67,15 @@ final class AppManager: AppReconciler {
         let callMoqUrl = (env["PIKA_CALL_MOQ_URL"] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         let callBroadcastPrefix = (env["PIKA_CALL_BROADCAST_PREFIX"] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         let moqProbeOnStart = (env["PIKA_MOQ_PROBE_ON_START"] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        let wantsOverride = uiTestReset
-            || !relays.isEmpty
-            || !kpRelays.isEmpty
-            || !callMoqUrl.isEmpty
-            || !callBroadcastPrefix.isEmpty
-            || moqProbeOnStart == "1"
-        if wantsOverride {
-            let resolvedCallMoqUrl = callMoqUrl.isEmpty ? "https://us-east.moq.logos.surf/anon" : callMoqUrl
-            let resolvedCallBroadcastPrefix = callBroadcastPrefix.isEmpty ? "pika/calls" : callBroadcastPrefix
-            do {
-                let relayItems = relays
-                    .split(separator: ",")
-                    .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
-                    .filter { !$0.isEmpty }
-                var kpItems = kpRelays
-                    .split(separator: ",")
-                    .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
-                    .filter { !$0.isEmpty }
-
-                if kpItems.isEmpty {
-                    kpItems = relayItems
-                }
-
-                var obj: [String: Any] = [
-                    "disable_network": false,
-                    "call_moq_url": resolvedCallMoqUrl,
-                    "call_broadcast_prefix": resolvedCallBroadcastPrefix,
-                ]
-                if moqProbeOnStart == "1" {
-                    obj["moq_probe_on_start"] = true
-                }
-                if !relayItems.isEmpty {
-                    obj["relay_urls"] = relayItems
-                    obj["key_package_relay_urls"] = kpItems
-                }
-
-                if let data = try? JSONSerialization.data(withJSONObject: obj, options: []) {
-                    let path = dataDirUrl.appendingPathComponent("pika_config.json")
-                    try? data.write(to: path, options: .atomic)
-                }
-            }
-        }
+        ensureDefaultConfig(
+            dataDirUrl: dataDirUrl,
+            uiTestReset: uiTestReset,
+            relays: relays,
+            kpRelays: kpRelays,
+            callMoqUrl: callMoqUrl,
+            callBroadcastPrefix: callBroadcastPrefix,
+            moqProbeOnStart: moqProbeOnStart
+        )
 
         let core = FfiApp(dataDir: dataDir)
         self.init(core: core, nsecStore: nsecStore)
@@ -208,4 +175,87 @@ private extension AppUpdate {
         case .accountCreated(let rev, _, _, _): return rev
         }
     }
+}
+
+private func ensureDefaultConfig(
+    dataDirUrl: URL,
+    uiTestReset: Bool,
+    relays: String,
+    kpRelays: String,
+    callMoqUrl: String,
+    callBroadcastPrefix: String,
+    moqProbeOnStart: String
+) {
+    // Ensure call config exists even when no env overrides are set (call runtime requires `call_moq_url`).
+    // If the file already exists, only fill missing keys to avoid clobbering user/tooling overrides.
+    //
+    // Important: do NOT write `disable_network` here. Tests rely on `PIKA_DISABLE_NETWORK=1`
+    // taking effect when the config file omits `disable_network`.
+    let defaultMoqUrl = "https://us-east.moq.logos.surf/anon"
+    let defaultBroadcastPrefix = "pika/calls"
+
+    let wantsOverride = uiTestReset
+        || !relays.isEmpty
+        || !kpRelays.isEmpty
+        || !callMoqUrl.isEmpty
+        || !callBroadcastPrefix.isEmpty
+        || moqProbeOnStart == "1"
+
+    let path = dataDirUrl.appendingPathComponent("pika_config.json")
+    var obj: [String: Any] = [:]
+    if let data = try? Data(contentsOf: path),
+       let decoded = try? JSONSerialization.jsonObject(with: data, options: []),
+       let dict = decoded as? [String: Any] {
+        obj = dict
+    }
+
+    func isMissingOrBlank(_ key: String) -> Bool {
+        guard let raw = obj[key] else { return true }
+        let v = String(describing: raw).trimmingCharacters(in: .whitespacesAndNewlines)
+        return v.isEmpty || v == "(null)"
+    }
+
+    var changed = false
+
+    let resolvedCallMoqUrl = callMoqUrl.isEmpty ? defaultMoqUrl : callMoqUrl
+    if isMissingOrBlank("call_moq_url") {
+        obj["call_moq_url"] = resolvedCallMoqUrl
+        changed = true
+    }
+
+    let resolvedCallBroadcastPrefix = callBroadcastPrefix.isEmpty ? defaultBroadcastPrefix : callBroadcastPrefix
+    if isMissingOrBlank("call_broadcast_prefix") {
+        obj["call_broadcast_prefix"] = resolvedCallBroadcastPrefix
+        changed = true
+    }
+
+    if wantsOverride {
+        let relayItems = relays
+            .split(separator: ",")
+            .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        var kpItems = kpRelays
+            .split(separator: ",")
+            .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+
+        if kpItems.isEmpty {
+            kpItems = relayItems
+        }
+
+        if moqProbeOnStart == "1" && (obj["moq_probe_on_start"] as? Bool) != true {
+            obj["moq_probe_on_start"] = true
+            changed = true
+        }
+
+        if !relayItems.isEmpty {
+            obj["relay_urls"] = relayItems
+            obj["key_package_relay_urls"] = kpItems
+            changed = true
+        }
+    }
+
+    guard changed else { return }
+    guard let out = try? JSONSerialization.data(withJSONObject: obj, options: []) else { return }
+    try? out.write(to: path, options: .atomic)
 }

@@ -842,12 +842,25 @@ impl AppCore {
         sender_pubkey: &PublicKey,
         signal: ParsedCallSignal,
     ) {
+        // Calls are MVP-only for 1:1 DMs. If a call invite arrives on a group chat,
+        // reject it to avoid wedging state with no UI controls.
+        let is_group_chat = self
+            .session
+            .as_ref()
+            .and_then(|s| s.groups.get(chat_id))
+            .map(|g| g.is_group)
+            .unwrap_or(false);
+
         let peer_npub = sender_pubkey
             .to_bech32()
             .unwrap_or_else(|_| sender_pubkey.to_hex());
 
         match signal {
             ParsedCallSignal::Invite { call_id, session } => {
+                if is_group_chat {
+                    self.send_call_reject(chat_id, &call_id, "unsupported_group");
+                    return;
+                }
                 if self.has_live_call() {
                     self.send_busy_reject(chat_id, &call_id);
                     return;
