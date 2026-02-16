@@ -1,3 +1,9 @@
+// TODO: Replace with real Opus encoding/decoding (e.g. via the `opus` or `audiopus` crate).
+// Currently this is a pass-through that ships raw PCM as little-endian i16 bytes.
+// At 48 kHz mono, each 20 ms frame is 960 samples × 2 bytes = 1920 bytes (~768 kbps),
+// which works for local/synthetic testing but wastes bandwidth over real MOQ relays
+// where Opus would compress to ~16–32 kbps.
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OpusPacket(pub Vec<u8>);
 
@@ -6,7 +12,7 @@ pub struct OpusCodec;
 
 impl OpusCodec {
     pub fn encode_pcm_i16(&self, pcm: &[i16]) -> OpusPacket {
-        // Phase-1 wire format placeholder.
+        // Raw PCM pass-through — not actual Opus. See module-level TODO.
         OpusPacket(
             pcm.iter()
                 .flat_map(|sample| sample.to_le_bytes())

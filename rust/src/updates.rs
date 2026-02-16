@@ -58,7 +58,6 @@ pub enum InternalEvent {
     // Async CreateChat fetch result (1:1)
     PeerKeyPackageFetched {
         peer_pubkey: nostr_sdk::prelude::PublicKey,
-        candidate_kp_relays: Vec<nostr_sdk::prelude::RelayUrl>,
         key_package_event: Option<nostr_sdk::prelude::Event>,
         error: Option<String>,
     },

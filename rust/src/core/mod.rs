@@ -360,10 +360,6 @@ impl AppCore {
             self.my_metadata = None;
             self.state.my_profile = MyProfileState::empty();
             self.state.follow_list = vec![];
-            self.call_session_params = None;
-            self.my_metadata = None;
-            self.state.my_profile = MyProfileState::empty();
-            self.state.follow_list = vec![];
             self.state.peer_profile = None;
             self.call_session_params = None;
             self.last_outgoing_ts = 0;
@@ -532,7 +528,6 @@ impl AppCore {
                 peer_pubkey,
                 key_package_event,
                 error,
-                ..
             } => {
                 let network_enabled = self.network_enabled();
                 tracing::info!(
@@ -1418,7 +1413,6 @@ impl AppCore {
                     };
                     (sess.client.clone(), self.core_sender.clone())
                 };
-                let candidate_kp_relays = self.key_package_relays();
                 tracing::info!(peer = %peer_pubkey.to_hex(), "create_chat: fetching peer key package");
                 self.runtime.spawn(async move {
                     // Fetch peer key package (kind 443) from connected relays.
@@ -1433,7 +1427,6 @@ impl AppCore {
                             let _ = tx.send(CoreMsg::Internal(Box::new(
                                 InternalEvent::PeerKeyPackageFetched {
                                     peer_pubkey,
-                                    candidate_kp_relays: candidate_kp_relays.clone(),
                                     key_package_event: best,
                                     error: None,
                                 },
@@ -1443,7 +1436,6 @@ impl AppCore {
                             let _ = tx.send(CoreMsg::Internal(Box::new(
                                 InternalEvent::PeerKeyPackageFetched {
                                     peer_pubkey,
-                                    candidate_kp_relays,
                                     key_package_event: None,
                                     error: Some(format!("Fetch peer key package failed: {e}")),
                                 },
