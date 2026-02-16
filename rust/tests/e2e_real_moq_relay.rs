@@ -61,6 +61,7 @@ fn wait_until(what: &str, timeout: Duration, mut f: impl FnMut() -> bool) {
 struct LocalRelayHandle {
     url: String,
     shutdown: Arc<Mutex<Option<oneshot::Sender<()>>>>,
+    state: Arc<Mutex<RelayState>>,
 }
 
 impl Drop for LocalRelayHandle {
@@ -270,6 +271,7 @@ fn start_local_relay() -> (LocalRelayHandle, JoinHandle<()>) {
         LocalRelayHandle {
             url,
             shutdown: Arc::new(Mutex::new(Some(shutdown_tx))),
+            state,
         },
         thread,
     )
@@ -324,6 +326,24 @@ fn call_over_real_moq_relay() {
         AuthState::LoggedIn { npub, .. } => npub,
         _ => unreachable!(),
     };
+
+    // This test is run via `just nightly` in CI (runs ignored tests). The app publishes key
+    // packages asynchronously after login; without waiting here, `CreateChat` can race and fail
+    // with `kp_found=false` (flaky).
+    wait_until(
+        "both key packages visible in relay",
+        Duration::from_secs(10),
+        || {
+            let st = relay.state.lock().unwrap();
+            let pubs: HashSet<String> = st
+                .events
+                .iter()
+                .filter(|e| e.kind == nostr_sdk::Kind::MlsKeyPackage)
+                .map(|e| e.pubkey.to_hex())
+                .collect();
+            pubs.len() >= 2
+        },
+    );
 
     // Establish MLS group (required for call crypto key derivation)
     alice.dispatch(AppAction::CreateChat {
