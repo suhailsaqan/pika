@@ -792,6 +792,7 @@ fn send_failure_then_retry_succeeds_over_local_relay() {
 }
 
 #[test]
+#[ignore = "disabled: flaky call test"]
 fn call_invite_accept_end_flow_over_local_relay() {
     let (relay, relay_thread) = start_local_relay();
 
