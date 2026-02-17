@@ -217,26 +217,27 @@ struct ChatView: View {
             ScrollView {
                 VStack(spacing: 0) {
                     LazyVStack(spacing: 8) {
-                        ForEach(groupedMessages(chat)) { group in
-                            MessageGroupRow(
-                                group: group,
-                                showSender: chat.isGroup,
-                                onSendMessage: onSendMessage,
-                                onTapSender: onTapSender,
-                                onReact: onReact,
-                                activeReactionMessageId: $activeReactionMessageId,
-                                onLongPressMessage: { message in
-                                    withAnimation(.spring(response: 0.3, dampingFraction: 0.78)) {
-                                        activeReactionMessageId = message.id
-                                        contextMenuMessage = message
-                                        showContextActionCard = true
+                        ForEach(timelineRows(chat)) { row in
+                            switch row {
+                            case .messageGroup(let group):
+                                MessageGroupRow(
+                                    group: group,
+                                    showSender: chat.isGroup,
+                                    onSendMessage: onSendMessage,
+                                    onTapSender: onTapSender,
+                                    onReact: onReact,
+                                    activeReactionMessageId: $activeReactionMessageId,
+                                    onLongPressMessage: { message in
+                                        withAnimation(.spring(response: 0.3, dampingFraction: 0.78)) {
+                                            activeReactionMessageId = message.id
+                                            contextMenuMessage = message
+                                            showContextActionCard = true
+                                        }
                                     }
-                                }
-                            )
-                        }
-
-                        ForEach(callEvents) { event in
-                            CallTimelineEventRow(event: event)
+                                )
+                            case .callEvent(let event):
+                                CallTimelineEventRow(event: event)
+                            }
                         }
                     }
                     .padding(.horizontal, 12)
@@ -298,32 +299,108 @@ struct ChatView: View {
         return chat.members.first?.name ?? chat.members.first?.npub ?? ""
     }
 
-    private func groupedMessages(_ chat: ChatViewState) -> [GroupedChatMessage] {
-        let membersByPubkey = Dictionary(uniqueKeysWithValues: chat.members.map { ($0.pubkey, $0) })
-        var groups: [GroupedChatMessage] = []
-
-        for message in chat.messages {
-            if let lastIndex = groups.indices.last,
-               groups[lastIndex].senderPubkey == message.senderPubkey,
-               groups[lastIndex].isMine == message.isMine {
-                groups[lastIndex].messages.append(message)
-                continue
+    private func timelineRows(_ chat: ChatViewState) -> [ChatTimelineRow] {
+        var entries: [ChatTimelineEntry] = []
+        entries.reserveCapacity(chat.messages.count + callEvents.count)
+        entries.append(contentsOf: chat.messages.enumerated().map { index, message in
+            .message(index: index, message: message)
+        })
+        entries.append(contentsOf: callEvents.enumerated().map { index, event in
+            .callEvent(index: index, event: event)
+        })
+        entries.sort {
+            let lhsTimestamp = $0.timestamp.timeIntervalSince1970
+            let rhsTimestamp = $1.timestamp.timeIntervalSince1970
+            if lhsTimestamp == rhsTimestamp {
+                if $0.tieBreak == $1.tieBreak {
+                    return $0.order < $1.order
+                }
+                return $0.tieBreak < $1.tieBreak
             }
-
-            let member = membersByPubkey[message.senderPubkey]
-            groups.append(
-                GroupedChatMessage(
-                    senderPubkey: message.senderPubkey,
-                    senderName: message.senderName ?? member?.name,
-                    senderNpub: member?.npub ?? message.senderPubkey,
-                    senderPictureUrl: member?.pictureUrl,
-                    isMine: message.isMine,
-                    messages: [message]
-                )
-            )
+            return lhsTimestamp < rhsTimestamp
         }
 
-        return groups
+        let membersByPubkey = Dictionary(uniqueKeysWithValues: chat.members.map { ($0.pubkey, $0) })
+        var rows: [ChatTimelineRow] = []
+        rows.reserveCapacity(entries.count)
+
+        for entry in entries {
+            switch entry {
+            case .callEvent(_, let event):
+                rows.append(.callEvent(event))
+            case .message(_, let message):
+                if let lastIndex = rows.indices.last,
+                   case .messageGroup(var group) = rows[lastIndex],
+                   group.senderPubkey == message.senderPubkey,
+                   group.isMine == message.isMine {
+                    group.messages.append(message)
+                    rows[lastIndex] = .messageGroup(group)
+                    continue
+                }
+
+                let member = membersByPubkey[message.senderPubkey]
+                rows.append(
+                    .messageGroup(
+                        GroupedChatMessage(
+                            senderPubkey: message.senderPubkey,
+                            senderName: message.senderName ?? member?.name,
+                            senderNpub: member?.npub ?? message.senderPubkey,
+                            senderPictureUrl: member?.pictureUrl,
+                            isMine: message.isMine,
+                            messages: [message]
+                        )
+                    )
+                )
+            }
+        }
+
+        return rows
+    }
+
+    private enum ChatTimelineEntry {
+        case message(index: Int, message: ChatMessage)
+        case callEvent(index: Int, event: CallTimelineEvent)
+
+        var timestamp: Date {
+            switch self {
+            case .message(_, let message):
+                return Date(timeIntervalSince1970: TimeInterval(message.timestamp))
+            case .callEvent(_, let event):
+                return event.timestamp
+            }
+        }
+
+        var tieBreak: Int {
+            switch self {
+            case .callEvent:
+                return 0
+            case .message:
+                return 1
+            }
+        }
+
+        var order: Int {
+            switch self {
+            case .message(let index, _):
+                return index
+            case .callEvent(let index, _):
+                return index
+            }
+        }
+    }
+
+    private enum ChatTimelineRow: Identifiable {
+        case messageGroup(GroupedChatMessage)
+        case callEvent(CallTimelineEvent)
+
+        var id: String {
+            switch self {
+            case .messageGroup(let group):
+                return "msg:\(group.id)"
+            case .callEvent(let event):
+                return "call:\(event.id)"
+            }
+        }
     }
 
     private func sendMessage() {
