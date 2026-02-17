@@ -84,6 +84,9 @@ gh release view v0.3.0
 - Helper command:
   - `just zapstore-encrypt-signing`
   - or include in full bootstrap: `PIKA_ZAPSTORE_SIGN_WITH='nsec1...' ./scripts/init-release-secrets`
+- Publish helper:
+  - `./scripts/zapstore-publish <apk-path> [repo-url]`
+  - used by both `just zapstore-publish` and CI to centralize secret handling
 - Optional for local hardware-key decrypt:
   - `PIKA_AGE_IDENTITY_FILE` (defaults to `~/configs/yubikeys/keys.txt`)
 
@@ -99,8 +102,9 @@ Jobs:
 4. `publish-zapstore` - publishes the built APK artifact to Zapstore relays
 
 `publish-zapstore` is gated on `secrets/zapstore-signing.env.age` existing in
-git. It decrypts `ZAPSTORE_SIGN_WITH` via `AGE_SECRET_KEY`, masks it in logs,
-and passes it to `zsp` only for the publish command.
+git. It decrypts `ZAPSTORE_SIGN_WITH` via `AGE_SECRET_KEY`, uses centralized
+`scripts/zapstore-publish` handling (xtrace disabled, masking enabled, temp-file
+cleanup), and passes it to `zsp` only for the publish command.
 
 ---
 

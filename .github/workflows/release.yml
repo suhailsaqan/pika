@@ -184,6 +184,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
+          set +x
           apk_count="$(find dist -maxdepth 1 -type f -name '*.apk' | wc -l | xargs)"
           if [ "$apk_count" -ne 1 ]; then
             echo "error: expected exactly one APK artifact in dist/, found $apk_count"
@@ -191,7 +192,4 @@ jobs:
             exit 1
           fi
           apk_path="$(find dist -maxdepth 1 -type f -name '*.apk' | head -n 1)"
-          sign_with="$(nix develop .#default -c ./scripts/read-zapstore-sign-with)"
-          echo "::add-mask::$sign_with"
-          nix develop .#default -c env SIGN_WITH="$sign_with" zsp publish -y --skip-preview --quiet "$apk_path" -r "https://github.com/${GITHUB_REPOSITORY}"
-          unset sign_with
+          nix develop .#default -c ./scripts/zapstore-publish "$apk_path" "https://github.com/${GITHUB_REPOSITORY}"

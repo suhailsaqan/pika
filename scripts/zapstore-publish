@@ -1,0 +1,80 @@
+#!/usr/bin/env bash
+set -euo pipefail
+set +x
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+DEFAULT_REPO_URL="https://github.com/sledtools/pika"
+SECRET_TMP=""
+
+usage() {
+  cat <<'USAGE'
+usage: ./scripts/zapstore-publish <apk-path> [repo-url]
+
+Publishes an APK to Zapstore using the encrypted signing secret.
+
+Arguments:
+  apk-path   Path to the APK file to publish
+  repo-url   Optional source repository URL (default: https://github.com/sledtools/pika)
+
+Security notes:
+  - Disables shell xtrace while handling secrets.
+  - Reads the signing secret from encrypted storage.
+  - Keeps secret in a 0600 temp file under repo secrets/ and removes it on exit.
+  - Applies GitHub Actions log masking when running in Actions.
+USAGE
+}
+
+need_cmd() {
+  if ! command -v "$1" >/dev/null 2>&1; then
+    echo "error: missing command: $1" >&2
+    exit 1
+  fi
+}
+
+cleanup() {
+  if [ -n "$SECRET_TMP" ]; then
+    rm -f "$SECRET_TMP"
+  fi
+}
+trap cleanup EXIT INT TERM
+
+if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
+  usage
+  exit 0
+fi
+
+if [ "$#" -lt 1 ] || [ "$#" -gt 2 ]; then
+  usage >&2
+  exit 2
+fi
+
+apk_path="$1"
+repo_url="${2:-$DEFAULT_REPO_URL}"
+
+if [ ! -f "$apk_path" ]; then
+  echo "error: APK not found: $apk_path" >&2
+  exit 1
+fi
+
+need_cmd zsp
+need_cmd tr
+need_cmd mktemp
+
+umask 077
+mkdir -p "$ROOT/secrets"
+SECRET_TMP="$(mktemp "$ROOT/secrets/.zapstore-sign-with.XXXXXX")"
+./scripts/read-zapstore-sign-with >"$SECRET_TMP"
+chmod 600 "$SECRET_TMP"
+
+secret="$(tr -d '\r\n' <"$SECRET_TMP")"
+if [ -z "$secret" ]; then
+  echo "error: decrypted Zapstore signing value is empty" >&2
+  exit 1
+fi
+
+if [ "${GITHUB_ACTIONS:-}" = "true" ]; then
+  printf '::add-mask::%s\n' "$secret"
+fi
+
+SIGN_WITH="$secret" zsp publish -y --skip-preview --quiet "$apk_path" -r "$repo_url"
+unset secret

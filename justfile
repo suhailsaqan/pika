@@ -307,10 +307,7 @@ zapstore-check APK:
 
 # Publish a local APK artifact to Zapstore.
 zapstore-publish APK:
-  set -euo pipefail; \
-  sign_with="$(./scripts/read-zapstore-sign-with)"; \
-  SIGN_WITH="$sign_with" zsp publish -y --skip-preview --quiet "{{APK}}" -r https://github.com/sledtools/pika; \
-  unset sign_with
+  ./scripts/zapstore-publish "{{APK}}" https://github.com/sledtools/pika
 
 # Build Android debug APK.
 android-assemble: gen-kotlin android-rust android-local-properties
