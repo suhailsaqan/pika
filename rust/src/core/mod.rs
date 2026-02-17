@@ -14,11 +14,15 @@ use std::time::Duration;
 use flume::Sender;
 
 use crate::actions::AppAction;
+use crate::external_signer::{
+    user_visible_signer_error, ExternalSignerBridge, ExternalSignerBridgeSigner,
+    SharedExternalSignerBridge,
+};
 use crate::mdk_support::{open_mdk, PikaMdk};
 use crate::state::now_seconds;
 use crate::state::{
-    AuthState, BusyState, CallDebugStats, CallStatus, ChatMessage, ChatSummary, ChatViewState,
-    MessageDeliveryState, MyProfileState, Screen,
+    AuthMode, AuthState, BusyState, CallDebugStats, CallStatus, ChatMessage, ChatSummary,
+    ChatViewState, MessageDeliveryState, MyProfileState, Screen,
 };
 use crate::updates::{AppUpdate, CoreMsg, InternalEvent};
 
@@ -79,8 +83,27 @@ struct LocalOutgoing {
     seq: u64,
 }
 
+#[derive(Debug, Clone)]
+enum SessionAuthMode {
+    LocalNsec,
+    ExternalSigner { signer_package: String },
+}
+
+impl SessionAuthMode {
+    fn to_state_mode(&self, pubkey_hex: &str) -> AuthMode {
+        match self {
+            SessionAuthMode::LocalNsec => AuthMode::LocalNsec,
+            SessionAuthMode::ExternalSigner { signer_package } => AuthMode::ExternalSigner {
+                pubkey: pubkey_hex.to_string(),
+                signer_package: signer_package.clone(),
+            },
+        }
+    }
+}
+
 struct Session {
-    keys: Keys,
+    pubkey: PublicKey,
+    local_keys: Option<Keys>,
     mdk: PikaMdk,
     client: Client,
     alive: Arc<AtomicBool>,
@@ -101,6 +124,7 @@ pub struct AppCore {
     update_sender: Sender<AppUpdate>,
     core_sender: Sender<CoreMsg>,
     shared_state: Arc<RwLock<crate::state::AppState>>,
+    external_signer_bridge: SharedExternalSignerBridge,
 
     data_dir: String,
     config: config::AppConfig,
@@ -137,6 +161,7 @@ impl AppCore {
         core_sender: Sender<CoreMsg>,
         data_dir: String,
         shared_state: Arc<RwLock<crate::state::AppState>>,
+        external_signer_bridge: SharedExternalSignerBridge,
     ) -> Self {
         let config = config::load_app_config(&data_dir);
         let state = crate::state::AppState::empty();
@@ -164,6 +189,7 @@ impl AppCore {
             update_sender,
             core_sender,
             shared_state,
+            external_signer_bridge,
             data_dir,
             config,
             runtime,
@@ -311,6 +337,13 @@ impl AppCore {
 
     fn is_logged_in(&self) -> bool {
         self.session.is_some()
+    }
+
+    fn external_signer_bridge(&self) -> Option<Arc<dyn ExternalSignerBridge>> {
+        match self.external_signer_bridge.read() {
+            Ok(slot) => slot.clone(),
+            Err(poison) => poison.into_inner().clone(),
+        }
     }
 
     fn push_screen(&mut self, screen: Screen) {
@@ -573,7 +606,7 @@ impl AppCore {
                     }
 
                     // Create group (1:1 DM).
-                    let admins = vec![sess.keys.public_key(), peer_pubkey];
+                    let admins = vec![sess.pubkey, peer_pubkey];
                     let config = NostrGroupConfigData {
                         name: DEFAULT_GROUP_NAME.to_string(),
                         description: DEFAULT_GROUP_DESCRIPTION.to_string(),
@@ -584,18 +617,18 @@ impl AppCore {
                         admins,
                     };
 
-                    let group_result = match sess.mdk.create_group(
-                        &sess.keys.public_key(),
-                        vec![kp_event.clone()],
-                        config,
-                    ) {
-                        Ok(r) => r,
-                        Err(e) => {
-                            self.set_busy(|b| b.creating_chat = false);
-                            self.toast(format!("Create group failed: {e}"));
-                            return;
-                        }
-                    };
+                    let group_result =
+                        match sess
+                            .mdk
+                            .create_group(&sess.pubkey, vec![kp_event.clone()], config)
+                        {
+                            Ok(r) => r,
+                            Err(e) => {
+                                self.set_busy(|b| b.creating_chat = false);
+                                self.toast(format!("Create group failed: {e}"));
+                                return;
+                            }
+                        };
 
                     group_result
                 };
@@ -839,7 +872,7 @@ impl AppCore {
                         }
                     }
 
-                    let admins = vec![sess.keys.public_key()];
+                    let admins = vec![sess.pubkey];
 
                     let config = NostrGroupConfigData {
                         name: group_name.clone(),
@@ -851,18 +884,18 @@ impl AppCore {
                         admins,
                     };
 
-                    let group_result = match sess.mdk.create_group(
-                        &sess.keys.public_key(),
-                        kp_events.clone(),
-                        config,
-                    ) {
-                        Ok(r) => r,
-                        Err(e) => {
-                            self.set_busy(|b| b.creating_chat = false);
-                            self.toast(format!("Create group failed: {e}"));
-                            return;
-                        }
-                    };
+                    let group_result =
+                        match sess
+                            .mdk
+                            .create_group(&sess.pubkey, kp_events.clone(), config)
+                        {
+                            Ok(r) => r,
+                            Err(e) => {
+                                self.set_busy(|b| b.creating_chat = false);
+                                self.toast(format!("Create group failed: {e}"));
+                                return;
+                            }
+                        };
 
                     // Deliver welcomes to all peers.
                     if network_enabled {
@@ -1159,14 +1192,69 @@ impl AppCore {
                     self.clear_busy();
                 }
             }
+            AppAction::LoginWithExternalSigner {
+                pubkey,
+                signer_package,
+            }
+            | AppAction::RestoreSessionExternalSigner {
+                pubkey,
+                signer_package,
+            } => {
+                self.set_busy(|b| {
+                    b.logging_in = true;
+                    b.creating_account = false;
+                });
+
+                if !self.external_signer_enabled() {
+                    self.clear_busy();
+                    self.toast("External signer is disabled");
+                    return;
+                }
+
+                let signer_package = signer_package.trim().to_string();
+                if signer_package.is_empty() {
+                    self.clear_busy();
+                    self.toast("Missing signer package");
+                    return;
+                }
+
+                let pubkey = match PublicKey::parse(pubkey.trim()) {
+                    Ok(pk) => pk,
+                    Err(e) => {
+                        self.clear_busy();
+                        self.toast(format!("Invalid signer pubkey: {e}"));
+                        return;
+                    }
+                };
+
+                let Some(bridge) = self.external_signer_bridge() else {
+                    self.clear_busy();
+                    self.toast("External signer bridge unavailable");
+                    return;
+                };
+
+                let signer = ExternalSignerBridgeSigner::new(pubkey, bridge);
+                let mode = SessionAuthMode::ExternalSigner { signer_package };
+
+                if let Err(e) = self.start_session_with_signer(pubkey, Arc::new(signer), None, mode)
+                {
+                    self.clear_busy();
+                    let detail = format!("{e:#}");
+                    if let Some(msg) = user_visible_signer_error(&detail) {
+                        self.toast(msg);
+                    } else {
+                        self.toast(format!("Login failed: {detail}"));
+                    }
+                } else {
+                    self.clear_busy();
+                }
+            }
             AppAction::Logout => {
                 // Delete the MLS database before tearing down the session so stale
                 // ratchet state doesn't persist across logins.
                 if let Some(sess) = self.session.as_ref() {
-                    let db_path = crate::mdk_support::mdk_db_path(
-                        &self.data_dir,
-                        &sess.keys.public_key().to_hex(),
-                    );
+                    let db_path =
+                        crate::mdk_support::mdk_db_path(&self.data_dir, &sess.pubkey.to_hex());
                     if let Err(e) = std::fs::remove_file(&db_path) {
                         tracing::warn!(%e, path = %db_path.display(), "failed to delete mdk db on logout");
                     } else {
@@ -1211,7 +1299,7 @@ impl AppCore {
                 };
 
                 let rumor = UnsignedEvent::new(
-                    sess.keys.public_key(),
+                    sess.pubkey,
                     Timestamp::now(),
                     Kind::Reaction,
                     [Tag::event(msg_event_id)],
@@ -1356,7 +1444,7 @@ impl AppCore {
 
                 // Allow "note to self" flow for local/offline testing.
                 let my_pubkey = match self.session.as_ref() {
-                    Some(s) => s.keys.public_key(),
+                    Some(s) => s.pubkey,
                     None => {
                         self.set_busy(|b| b.creating_chat = false);
                         return;
@@ -1377,18 +1465,14 @@ impl AppCore {
                         admins: vec![my_pubkey],
                     };
 
-                    let group_result =
-                        match sess
-                            .mdk
-                            .create_group(&sess.keys.public_key(), vec![], config)
-                        {
-                            Ok(r) => r,
-                            Err(e) => {
-                                self.set_busy(|b| b.creating_chat = false);
-                                self.toast(format!("Create chat failed: {e}"));
-                                return;
-                            }
-                        };
+                    let group_result = match sess.mdk.create_group(&sess.pubkey, vec![], config) {
+                        Ok(r) => r,
+                        Err(e) => {
+                            self.set_busy(|b| b.creating_chat = false);
+                            self.toast(format!("Create chat failed: {e}"));
+                            return;
+                        }
+                    };
 
                     self.refresh_all_from_storage();
                     let chat_id = hex::encode(group_result.group.nostr_group_id);
@@ -1494,7 +1578,7 @@ impl AppCore {
 
                     // Build rumor and ensure stable id for optimistic UI.
                     let mut rumor = UnsignedEvent::new(
-                        sess.keys.public_key(),
+                        sess.pubkey,
                         Timestamp::from(ts as u64),
                         Kind::Custom(9),
                         [],
@@ -1521,7 +1605,7 @@ impl AppCore {
                             LocalOutgoing {
                                 content: content.clone(),
                                 timestamp: ts,
-                                sender_pubkey: sess.keys.public_key().to_hex(),
+                                sender_pubkey: sess.pubkey.to_hex(),
                                 seq,
                             },
                         );

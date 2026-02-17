@@ -376,7 +376,7 @@ fn main() {
     });
 
     let (self_npub, self_pubkey_hex) = match app.state().auth {
-        AuthState::LoggedIn { npub, pubkey } => (npub, pubkey),
+        AuthState::LoggedIn { npub, pubkey, .. } => (npub, pubkey),
         _ => unreachable!("waited for login"),
     };
     eprintln!("self_npub={self_npub}");

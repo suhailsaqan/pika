@@ -1,5 +1,6 @@
 mod actions;
 mod core;
+mod external_signer;
 mod logging;
 mod mdk_support;
 mod state;
@@ -16,6 +17,7 @@ use std::thread;
 use flume::{Receiver, Sender};
 
 pub use actions::AppAction;
+pub use external_signer::*;
 pub use state::*;
 pub use updates::*;
 
@@ -38,6 +40,7 @@ pub struct FfiApp {
     update_rx: Receiver<AppUpdate>,
     listening: AtomicBool,
     shared_state: Arc<RwLock<AppState>>,
+    external_signer_bridge: SharedExternalSignerBridge,
 }
 
 #[uniffi::export]
@@ -52,13 +55,20 @@ impl FfiApp {
         let (update_tx, update_rx) = flume::unbounded();
         let (core_tx, core_rx) = flume::unbounded::<CoreMsg>();
         let shared_state = Arc::new(RwLock::new(AppState::empty()));
+        let external_signer_bridge: SharedExternalSignerBridge = Arc::new(RwLock::new(None));
 
         // Actor loop thread (single threaded "app actor").
         let core_tx_for_core = core_tx.clone();
         let shared_for_core = shared_state.clone();
+        let signer_bridge_for_core = external_signer_bridge.clone();
         thread::spawn(move || {
-            let mut core =
-                crate::core::AppCore::new(update_tx, core_tx_for_core, data_dir, shared_for_core);
+            let mut core = crate::core::AppCore::new(
+                update_tx,
+                core_tx_for_core,
+                data_dir,
+                shared_for_core,
+                signer_bridge_for_core,
+            );
             while let Ok(msg) = core_rx.recv() {
                 core.handle_message(msg);
             }
@@ -69,6 +79,7 @@ impl FfiApp {
             update_rx,
             listening: AtomicBool::new(false),
             shared_state,
+            external_signer_bridge,
         })
     }
 
@@ -100,5 +111,17 @@ impl FfiApp {
                 reconciler.reconcile(update);
             }
         });
+    }
+
+    pub fn set_external_signer_bridge(&self, bridge: Box<dyn ExternalSignerBridge>) {
+        let bridge: Arc<dyn ExternalSignerBridge> = Arc::from(bridge);
+        match self.external_signer_bridge.write() {
+            Ok(mut slot) => {
+                *slot = Some(bridge);
+            }
+            Err(poison) => {
+                *poison.into_inner() = Some(bridge);
+            }
+        }
     }
 }

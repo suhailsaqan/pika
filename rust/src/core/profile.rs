@@ -27,11 +27,7 @@ impl AppCore {
             let Some(sess) = self.session.as_ref() else {
                 return;
             };
-            (
-                sess.client.clone(),
-                sess.keys.public_key(),
-                self.core_sender.clone(),
-            )
+            (sess.client.clone(), sess.pubkey, self.core_sender.clone())
         };
 
         self.runtime.spawn(async move {
@@ -134,15 +130,15 @@ impl AppCore {
         );
         let mime_type = Self::normalized_profile_field(mime_type);
 
-        let (client, keys, tx) = {
+        let (client, local_keys, tx) = {
             let Some(sess) = self.session.as_ref() else {
                 return;
             };
-            (
-                sess.client.clone(),
-                sess.keys.clone(),
-                self.core_sender.clone(),
-            )
+            let Some(local_keys) = sess.local_keys.clone() else {
+                self.toast("Profile image upload requires local key signer");
+                return;
+            };
+            (sess.client.clone(), local_keys, self.core_sender.clone())
         };
 
         self.runtime.spawn(async move {
@@ -159,7 +155,12 @@ impl AppCore {
 
                 let blossom = BlossomClient::new(base_url);
                 let upload = blossom
-                    .upload_blob(image_bytes.clone(), mime_type.clone(), None, Some(&keys))
+                    .upload_blob(
+                        image_bytes.clone(),
+                        mime_type.clone(),
+                        None,
+                        Some(&local_keys),
+                    )
                     .await;
 
                 let descriptor = match upload {

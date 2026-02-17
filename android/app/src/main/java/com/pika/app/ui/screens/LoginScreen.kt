@@ -22,6 +22,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import com.pika.app.AppManager
+import com.pika.app.BuildConfig
 import com.pika.app.rust.AppAction
 import com.pika.app.ui.TestTags
 
@@ -31,7 +32,8 @@ fun LoginScreen(manager: AppManager, padding: PaddingValues) {
     val busy = manager.state.busy
     val createBusy = busy.creatingAccount
     val loginBusy = busy.loggingIn
-    val anyBusy = createBusy || loginBusy
+    val amberBusy = manager.amberLoginInProgress
+    val anyBusy = createBusy || loginBusy || amberBusy
 
     Column(
         modifier =
@@ -86,6 +88,26 @@ fun LoginScreen(manager: AppManager, padding: PaddingValues) {
                 )
             } else {
                 Text("Login")
+            }
+        }
+
+        if (BuildConfig.ENABLE_AMBER_SIGNER) {
+            HorizontalDivider(modifier = Modifier.padding(vertical = 10.dp))
+            Button(
+                onClick = {
+                    manager.loginWithAmber()
+                },
+                enabled = !anyBusy,
+                modifier = Modifier.testTag(TestTags.LOGIN_WITH_AMBER),
+            ) {
+                if (amberBusy) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(20.dp),
+                        strokeWidth = 2.dp,
+                    )
+                } else {
+                    Text("Login with Amber")
+                }
             }
         }
     }

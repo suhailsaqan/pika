@@ -44,6 +44,10 @@ info:
   @echo "    just rmp run android"
   @echo "  List devices:"
   @echo "    just rmp devices list"
+  @echo "  Start Android emulator only:"
+  @echo "    just rmp devices start android"
+  @echo "  Start iOS simulator only:"
+  @echo "    just rmp devices start ios"
   @echo "  Generate bindings:"
   @echo "    just rmp bindings all"
 
@@ -51,6 +55,15 @@ info:
 # Run the new Rust `rmp` CLI.
 rmp *ARGS:
   cargo run -p rmp-cli -- {{ARGS}}
+
+# Ensure an Android target is booted and ready (without building/installing app).
+android-device-start *ARGS:
+  just rmp devices start android {{ARGS}}
+
+# Boot Android target and open app with agent-device.
+android-agent-open APP="com.justinmoon.pika.dev" *ARGS:
+  just android-device-start {{ARGS}}
+  ./tools/agent-device --platform android open {{APP}}
 
 # Smoke test `rmp init` output locally (scaffold + doctor + core check).
 rmp-init-smoke NAME="rmp-smoke" ORG="com.example":
@@ -309,7 +322,7 @@ android-install: gen-kotlin android-rust android-local-properties
 android-ui-test: gen-kotlin android-rust android-local-properties
   ./tools/android-ensure-debug-installable
   SERIAL="$(./tools/android-pick-serial)"; \
-  ANDROID_SERIAL="$SERIAL" cd android && ./gradlew :app:connectedDebugAndroidTest
+  cd android && ANDROID_SERIAL="$SERIAL" ./gradlew :app:connectedDebugAndroidTest
 
 # Android E2E: local Nostr relay + local Rust bot. Requires emulator.
 android-ui-e2e-local:
@@ -460,7 +473,8 @@ device:
 # Show Android manual QA instructions.
 android-manual-qa:
   @echo "Manual QA prompt: prompts/android-agent-device-manual-qa.md"
-  @echo "Tip: run `npx --yes agent-device --platform android open com.justinmoon.pika.dev` then follow the prompt."
+  @echo "Tip: run `just android-agent-open` then follow the prompt."
+  @echo "Amber tip: run `just android-agent-open APP=com.greenart7c3.nostrsigner` for the real signer flow."
 
 # Show iOS manual QA instructions.
 ios-manual-qa:
