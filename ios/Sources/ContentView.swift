@@ -142,20 +142,20 @@ struct ContentView: View {
                 peerName: callPeerDisplayName(for: call, in: state),
                 onAcceptCall: {
                     manager.dispatch(.openChat(chatId: call.chatId))
-                    manager.dispatch(.acceptCall(chatId: call.chatId))
+                    manager.acceptCall(chatId: call.chatId)
                 },
                 onRejectCall: {
-                    manager.dispatch(.rejectCall(chatId: call.chatId))
+                    manager.rejectCall(chatId: call.chatId)
                 },
                 onEndCall: {
-                    manager.dispatch(.endCall)
+                    manager.endCall()
                 },
                 onToggleMute: {
                     manager.dispatch(.toggleMute)
                 },
                 onStartAgain: {
                     manager.dispatch(.openChat(chatId: call.chatId))
-                    manager.dispatch(.startCall(chatId: call.chatId))
+                    manager.startCall(chatId: call.chatId)
                 },
                 onDismiss: {
                     isCallScreenPresented = false
@@ -218,7 +218,7 @@ private func screenView(
             activeCall: state.activeCall,
             callEvents: manager.callTimelineEventsByChatId[chatId] ?? [],
             onSendMessage: { manager.dispatch(.sendMessage(chatId: chatId, content: $0)) },
-            onStartCall: { manager.dispatch(.startCall(chatId: chatId)) },
+            onStartCall: { manager.startCall(chatId: chatId) },
             onOpenCallScreen: {
                 onOpenCallScreen()
             },
