@@ -18,7 +18,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
@@ -53,6 +52,7 @@ import androidx.compose.ui.unit.dp
 import com.pika.app.AppManager
 import com.pika.app.rust.AppAction
 import com.pika.app.rust.FollowListEntry
+import com.pika.app.ui.Avatar
 import com.pika.app.ui.PeerKeyNormalizer
 import com.pika.app.ui.PeerKeyValidator
 import com.pika.app.ui.TestTags
@@ -371,19 +371,12 @@ private fun FollowRow(
         horizontalArrangement = Arrangement.spacedBy(12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Box(
-            modifier = Modifier
-                .size(40.dp)
-                .clip(CircleShape)
-                .background(PikaBlue.copy(alpha = 0.12f)),
-            contentAlignment = Alignment.Center,
-        ) {
-            Text(
-                (entry.name ?: entry.npub).take(1).uppercase(),
-                style = MaterialTheme.typography.titleSmall,
-                color = PikaBlue,
-            )
-        }
+        Avatar(
+            name = entry.name,
+            npub = entry.npub,
+            pictureUrl = entry.pictureUrl,
+            size = 40.dp,
+        )
         Column(modifier = Modifier.weight(1f)) {
             if (entry.name != null) {
                 Text(

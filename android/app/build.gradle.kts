@@ -141,4 +141,7 @@ dependencies {
 
     // Markdown rendering in Compose
     implementation("com.github.jeziellago:compose-markdown:0.5.4")
+
+    // Async image loading
+    implementation("io.coil-kt:coil-compose:2.7.0")
 }
