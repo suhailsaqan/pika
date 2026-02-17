@@ -2279,7 +2279,6 @@ dependencies = [
 [[package]]
 name = "mdk-core"
 version = "0.5.3"
-source = "git+https://github.com/marmot-protocol/mdk?rev=d6777f73a35028bbfe638949a4963ecb9f3f4117#d6777f73a35028bbfe638949a4963ecb9f3f4117"
 dependencies = [
  "blurhash",
  "chacha20poly1305",
@@ -2287,6 +2286,8 @@ dependencies = [
  "hkdf",
  "image",
  "kamadak-exif",
+ "mdk-memory-storage",
+ "mdk-sqlite-storage",
  "mdk-storage-traits",
  "nostr",
  "openmls",
@@ -2295,15 +2296,31 @@ dependencies = [
  "openmls_traits",
  "serde",
  "sha2",
+ "tempfile",
  "thiserror 2.0.18",
  "tls_codec",
+ "tokio",
  "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
+name = "mdk-memory-storage"
+version = "0.5.1"
+dependencies = [
+ "lru",
+ "mdk-storage-traits",
+ "nostr",
+ "openmls",
+ "openmls_traits",
+ "parking_lot",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
 name = "mdk-sqlite-storage"
 version = "0.5.1"
-source = "git+https://github.com/marmot-protocol/mdk?rev=d6777f73a35028bbfe638949a4963ecb9f3f4117#d6777f73a35028bbfe638949a4963ecb9f3f4117"
 dependencies = [
  "getrandom 0.3.4",
  "hex",
@@ -2316,6 +2333,7 @@ dependencies = [
  "rusqlite",
  "serde",
  "serde_json",
+ "tempfile",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
@@ -2324,8 +2342,9 @@ dependencies = [
 [[package]]
 name = "mdk-storage-traits"
 version = "0.5.1"
-source = "git+https://github.com/marmot-protocol/mdk?rev=d6777f73a35028bbfe638949a4963ecb9f3f4117#d6777f73a35028bbfe638949a4963ecb9f3f4117"
 dependencies = [
+ "mdk-memory-storage",
+ "mdk-sqlite-storage",
  "nostr",
  "openmls",
  "openmls_traits",
