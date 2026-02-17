@@ -18,4 +18,13 @@ object TestTags {
     const val CHAT_CALL_REJECT = "chat_call_reject"
     const val CHAT_CALL_END = "chat_call_end"
     const val CHAT_CALL_MUTE = "chat_call_mute"
+
+    const val NEWGROUP_NAME = "newgroup_name"
+    const val NEWGROUP_PEER_NPUB = "newgroup_peer_npub"
+    const val NEWGROUP_ADD_MEMBER = "newgroup_add_member"
+    const val NEWGROUP_CREATE = "newgroup_create"
+
+    const val GROUPINFO_ADD_NPUB = "groupinfo_add_npub"
+    const val GROUPINFO_ADD_BUTTON = "groupinfo_add_button"
+    const val GROUPINFO_LEAVE = "groupinfo_leave"
 }
