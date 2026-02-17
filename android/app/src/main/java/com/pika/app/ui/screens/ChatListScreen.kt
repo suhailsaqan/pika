@@ -51,6 +51,7 @@ import com.pika.app.ui.QrCode
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.GroupAdd
 import androidx.compose.material.icons.filled.Person
 
 @Composable
@@ -81,6 +82,9 @@ fun ChatListScreen(manager: AppManager, padding: PaddingValues) {
                     }
                     IconButton(onClick = { manager.dispatch(AppAction.PushScreen(Screen.NewChat)) }) {
                         Icon(Icons.Default.Add, contentDescription = "New Chat")
+                    }
+                    IconButton(onClick = { manager.dispatch(AppAction.PushScreen(Screen.NewGroupChat)) }) {
+                        Icon(Icons.Default.GroupAdd, contentDescription = "New Group")
                     }
                     IconButton(onClick = { manager.logout() }) {
                         Icon(Icons.AutoMirrored.Filled.Logout, contentDescription = "Logout")

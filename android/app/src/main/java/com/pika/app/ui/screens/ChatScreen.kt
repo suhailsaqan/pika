@@ -58,6 +58,8 @@ import com.pika.app.rust.ChatMessage
 import com.pika.app.rust.MessageDeliveryState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.Info
+import com.pika.app.rust.Screen
 import com.pika.app.ui.theme.PikaBlue
 import com.pika.app.ui.TestTags
 import dev.jeziellago.compose.markdowntext.MarkdownText
@@ -102,6 +104,17 @@ fun ChatScreen(manager: AppManager, chatId: String, padding: PaddingValues) {
                         },
                     ) {
                         Icon(Icons.Default.ArrowBack, contentDescription = "Back")
+                    }
+                },
+                actions = {
+                    if (chat.isGroup) {
+                        IconButton(
+                            onClick = {
+                                manager.dispatch(AppAction.PushScreen(Screen.GroupInfo(chat.chatId)))
+                            },
+                        ) {
+                            Icon(Icons.Default.Info, contentDescription = "Group info")
+                        }
                     }
                 },
             )
