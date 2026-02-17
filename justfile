@@ -297,6 +297,18 @@ android-release:
   cp android/app/build/outputs/apk/release/app-release.apk "dist/pika-${version}-${abis}.apk"; \
   echo "ok: built dist/pika-${version}-${abis}.apk"
 
+# Encrypt Zapstore signing value to `secrets/zapstore-signing.env.age`.
+zapstore-encrypt-signing:
+  ./scripts/encrypt-zapstore-signing
+
+# Check Zapstore publish inputs for a local APK without publishing events.
+zapstore-check APK:
+  zsp publish --check "{{APK}}" -r https://github.com/sledtools/pika
+
+# Publish a local APK artifact to Zapstore.
+zapstore-publish APK:
+  ./scripts/zapstore-publish "{{APK}}" https://github.com/sledtools/pika
+
 # Build Android debug APK.
 android-assemble: gen-kotlin android-rust android-local-properties
   cd android && ./gradlew :app:assembleDebug
