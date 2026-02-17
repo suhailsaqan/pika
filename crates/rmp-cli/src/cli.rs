@@ -73,6 +73,14 @@ pub struct InitArgs {
     #[arg(long = "no-iced", action = ArgAction::SetTrue)]
     pub no_iced: bool,
 
+    /// Include a local flake.nix dev shell with an `rmp` wrapper.
+    #[arg(long, conflicts_with = "no_flake")]
+    pub flake: bool,
+
+    /// Exclude flake.nix generation.
+    #[arg(long = "no-flake", action = ArgAction::SetTrue)]
+    pub no_flake: bool,
+
     /// Reverse-DNS org prefix (e.g. com.example).
     #[arg(long)]
     pub org: Option<String>,

@@ -11,6 +11,7 @@ pub fn init(
     let include_ios = resolve_toggle(args.ios, args.no_ios, true);
     let include_android = resolve_toggle(args.android, args.no_android, true);
     let include_iced = resolve_toggle(args.iced, args.no_iced, false);
+    let include_flake = resolve_toggle(args.flake, args.no_flake, false);
     if !include_ios && !include_android && !include_iced {
         return Err(CliError::user(
             "at least one platform must be enabled (use --ios, --android, or --iced)",
@@ -97,6 +98,9 @@ pub fn init(
         &dest.join("README.md"),
         &tpl_readme(&display_name, include_ios, include_android, include_iced),
     )?;
+    if include_flake {
+        write_text(&dest.join("flake.nix"), &tpl_flake_nix())?;
+    }
 
     // ── Rust core ───────────────────────────────────────────────────────
     let rust_dir = dest.join("rust");
@@ -269,6 +273,7 @@ pub fn init(
                     "app_id": app_id,
                     "crate_name": crate_name,
                     "iced_package": iced_package,
+                    "flake": include_flake,
                 },
                 "platforms": platforms,
             }),
@@ -283,6 +288,9 @@ pub fn init(
         }
         if include_iced {
             eprintln!("  desktop package: {iced_package}");
+        }
+        if include_flake {
+            eprintln!("  nix shell: flake.nix generated (--flake)");
         }
         eprintln!("  next: cd {} && rmp doctor", dest.to_string_lossy());
     }
@@ -543,6 +551,84 @@ rmp bindings all
     }
     s.push_str("```\n");
     s
+}
+
+fn tpl_flake_nix() -> String {
+    r#"{
+  description = "RMP app dev environment";
+
+  inputs = {
+    nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
+    flake-utils.url = "github:numtide/flake-utils";
+    rust-overlay = {
+      url = "github:oxalica/rust-overlay";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+  };
+
+  outputs = { nixpkgs, flake-utils, rust-overlay, ... }:
+    flake-utils.lib.eachDefaultSystem (system:
+      let
+        pkgs = import nixpkgs {
+          inherit system;
+          overlays = [ (import rust-overlay) ];
+        };
+
+        rustToolchain = pkgs.rust-bin.stable.latest.default.override {
+          extensions = [ "rust-src" "rust-analyzer" ];
+          targets = [
+            "aarch64-linux-android"
+            "armv7-linux-androideabi"
+            "x86_64-linux-android"
+            "aarch64-apple-ios"
+            "aarch64-apple-ios-sim"
+            "x86_64-apple-ios"
+          ];
+        };
+
+        rmp = pkgs.writeShellScriptBin "rmp" ''
+          set -euo pipefail
+          rmp_repo="''${RMP_REPO:-$HOME/code/pika/worktrees/desktop}"
+          manifest="$rmp_repo/Cargo.toml"
+          if [ ! -f "$manifest" ]; then
+            echo "error: set RMP_REPO to your pika checkout (missing $manifest)" >&2
+            exit 2
+          fi
+          exec cargo run --manifest-path "$manifest" -p rmp-cli -- "$@"
+        '';
+
+        shell = pkgs.mkShell {
+          buildInputs = pkgs.lib.optionals pkgs.stdenv.isDarwin [
+            pkgs.libiconv
+          ];
+
+          packages = [
+            rustToolchain
+            pkgs.just
+            pkgs.nodejs_22
+            pkgs.python3
+            pkgs.curl
+            pkgs.git
+            rmp
+          ];
+
+          shellHook = ''
+            export IN_NIX_SHELL=1
+            echo ""
+            echo "RMP app dev environment ready"
+            echo "  Rust: $(rustc --version)"
+            echo "  RMP repo: ''${RMP_REPO:-$HOME/code/pika/worktrees/desktop}"
+            echo ""
+          '';
+        };
+      in {
+        devShells.default = shell;
+        devShells.rmp = shell;
+      }
+    );
+}
+"#
+    .to_string()
 }
 
 fn tpl_rust_cargo(crate_name: &str) -> String {
