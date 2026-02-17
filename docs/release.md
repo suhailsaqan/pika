@@ -73,10 +73,11 @@ gh release view v0.3.0
 - Commit only encrypted Zapstore signing env: `secrets/zapstore-signing.env.age`.
 - Keep plaintext `android/pika-release.jks` out of git.
 - Keep plaintext Zapstore signing env (`secrets/zapstore-signing.env`) out of git.
-- Encrypt all encrypted artifacts to all required recipients:
+- Encrypt all encrypted artifacts to all required recipients (source of truth: `scripts/release-age-recipients`):
   - YubiKey primary: `age1yubikey1q0zhu9e7zrj48zmnpx4fg07c0drt9f57e26uymgxa4h3fczwutzjjp5a6y5`
   - YubiKey backup: `age1yubikey1qtdv7spad78v4yhrtrts6tvv5wc80vw6mah6g64m9cr9l3ryxsf2jdx8gs9`
-  - CI age public key (dedicated release key)
+  - CI release key: `age1kywla84vx7ppelcaugeqvzghcggc3dsmskz7fugk6emdcc02zdqs0vzv93`
+- Do not use the configs host `server` recipient for Pika release artifacts.
 - CI env var required:
   - `AGE_SECRET_KEY` (decrypts all encrypted artifacts in CI)
 - Zapstore encrypted env format:
@@ -89,6 +90,21 @@ gh release view v0.3.0
   - used by both `just zapstore-publish` and CI to centralize secret handling
 - Optional for local hardware-key decrypt:
   - `PIKA_AGE_IDENTITY_FILE` (defaults to `~/configs/yubikeys/keys.txt`)
+
+### Rotate `AGE_SECRET_KEY` safely
+
+1. Generate a fresh CI age keypair and capture:
+   - private key (`AGE-SECRET-KEY-...`) for GitHub secret `AGE_SECRET_KEY`
+   - public recipient (`age1...`) for `scripts/release-age-recipients`
+2. Re-encrypt all release artifacts to the three recipients in `scripts/release-age-recipients`:
+   - `android/pika-release.jks.age`
+   - `secrets/android-signing.env.age`
+   - `secrets/zapstore-signing.env.age`
+3. Update GitHub Actions repo secret:
+   - `gh secret set AGE_SECRET_KEY --repo sledtools/pika --body '<AGE-SECRET-KEY-...>'`
+4. Verify before tagging:
+   - local hardware key can decrypt release artifacts
+   - `AGE_SECRET_KEY` can decrypt `secrets/android-signing.env.age` and `secrets/zapstore-signing.env.age`
 
 ### CI workflow
 

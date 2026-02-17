@@ -4,12 +4,13 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 OUTPUT_ENCRYPTED="$ROOT/secrets/zapstore-signing.env.age"
 OUTPUT_ENCRYPTED_NEXT="$ROOT/secrets/zapstore-signing.env.age.next"
-CI_KEY_TMP="$ROOT/secrets/.age-key.ci.tmp"
 
-# Defaults from ~/configs/secrets/secrets.nix; can be overridden via env.
-YUBIKEY_PRIMARY="${PIKA_YUBIKEY_PRIMARY_RECIPIENT:-age1yubikey1q0zhu9e7zrj48zmnpx4fg07c0drt9f57e26uymgxa4h3fczwutzjjp5a6y5}"
-YUBIKEY_BACKUP="${PIKA_YUBIKEY_BACKUP_RECIPIENT:-age1yubikey1qtdv7spad78v4yhrtrts6tvv5wc80vw6mah6g64m9cr9l3ryxsf2jdx8gs9}"
-CI_RECIPIENT="${PIKA_CI_AGE_RECIPIENT:-}"
+# shellcheck source=./release-age-recipients
+source "$ROOT/scripts/release-age-recipients"
+
+YUBIKEY_PRIMARY="${PIKA_YUBIKEY_PRIMARY_RECIPIENT:-$PIKA_RELEASE_YUBIKEY_PRIMARY_RECIPIENT_DEFAULT}"
+YUBIKEY_BACKUP="${PIKA_YUBIKEY_BACKUP_RECIPIENT:-$PIKA_RELEASE_YUBIKEY_BACKUP_RECIPIENT_DEFAULT}"
+CI_RECIPIENT="${PIKA_CI_AGE_RECIPIENT:-$PIKA_RELEASE_CI_RECIPIENT_DEFAULT}"
 
 usage() {
   cat <<'USAGE'
@@ -18,7 +19,7 @@ usage: ./scripts/encrypt-zapstore-signing
 Encrypts `secrets/zapstore-signing.env.age` with:
   - YubiKey primary recipient
   - YubiKey backup recipient
-  - CI recipient (from PIKA_CI_AGE_RECIPIENT, AGE_SECRET_KEY, `server` in configs, or prompt)
+  - CI recipient (from PIKA_CI_AGE_RECIPIENT or repo defaults)
 
 Input:
   - `PIKA_ZAPSTORE_SIGN_WITH` (recommended)
@@ -39,33 +40,8 @@ need_cmd() {
   fi
 }
 
-load_recipients_from_configs() {
-  local cfg="$HOME/configs/secrets/secrets.nix"
-  local candidate=""
-  if [ ! -f "$cfg" ]; then
-    return 0
-  fi
-
-  candidate="$(grep -E 'yubikey_primary = "age1' "$cfg" | head -n 1 | sed -E 's/.*"(age1[^"]+)".*/\1/')"
-  if [ -z "${PIKA_YUBIKEY_PRIMARY_RECIPIENT:-}" ] && [ -n "$candidate" ]; then
-    YUBIKEY_PRIMARY="$candidate"
-  fi
-
-  candidate="$(grep -E 'yubikey_backup = "age1' "$cfg" | head -n 1 | sed -E 's/.*"(age1[^"]+)".*/\1/')"
-  if [ -z "${PIKA_YUBIKEY_BACKUP_RECIPIENT:-}" ] && [ -n "$candidate" ]; then
-    YUBIKEY_BACKUP="$candidate"
-  fi
-
-  if [ -z "${PIKA_CI_AGE_RECIPIENT:-}" ] && [ -z "$CI_RECIPIENT" ]; then
-    candidate="$(grep -E 'server = "age1' "$cfg" | head -n 1 | sed -E 's/.*"(age1[^"]+)".*/\1/')"
-    if [ -n "$candidate" ]; then
-      CI_RECIPIENT="$candidate"
-    fi
-  fi
-}
-
 cleanup() {
-  rm -f "$CI_KEY_TMP" "$OUTPUT_ENCRYPTED_NEXT"
+  rm -f "$OUTPUT_ENCRYPTED_NEXT"
 }
 trap cleanup EXIT INT TERM
 
@@ -79,26 +55,6 @@ if [ "$#" -ne 0 ]; then
 fi
 
 need_cmd age
-need_cmd age-keygen
-need_cmd grep
-need_cmd sed
-
-load_recipients_from_configs
-
-if [ -z "$CI_RECIPIENT" ] && [ -n "${AGE_SECRET_KEY:-}" ]; then
-  umask 077
-  printf '%s\n' "$AGE_SECRET_KEY" >"$CI_KEY_TMP"
-  CI_RECIPIENT="$(age-keygen -y "$CI_KEY_TMP")"
-fi
-
-if [ -z "$CI_RECIPIENT" ]; then
-  if [ -t 0 ]; then
-    read -r -p "Enter CI age recipient (age1...): " CI_RECIPIENT
-  else
-    echo "error: set PIKA_CI_AGE_RECIPIENT, AGE_SECRET_KEY, or configure server recipient in ~/configs/secrets/secrets.nix" >&2
-    exit 1
-  fi
-fi
 
 if ! printf '%s\n' "$CI_RECIPIENT" | grep -Eq '^age1[023456789acdefghjklmnpqrstuvwxyz]+$'; then
   echo "error: invalid CI recipient format (expected age1...)" >&2

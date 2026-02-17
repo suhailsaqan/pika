@@ -153,23 +153,39 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Check Zapstore signing secret
+        id: zapstore_secret
+        run: |
+          set -euo pipefail
+          if [ -f secrets/zapstore-signing.env.age ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "note: secrets/zapstore-signing.env.age not found; skipping Zapstore publish"
+          fi
+
       - uses: useblacksmith/stickydisk@v1
+        if: steps.zapstore_secret.outputs.present == 'true'
         with:
           key: ${{ github.repository }}-nix-v1-${{ runner.os }}
           path: /nix
       - name: Fix /nix ownership
+        if: steps.zapstore_secret.outputs.present == 'true'
         run: |
           if [ -d /nix ] && [ "$(stat -c %u /nix)" != "$(id -u)" ]; then
             sudo chown -R $(id -u):$(id -g) /nix
           fi
       - uses: nixbuild/nix-quick-install-action@v30
+        if: steps.zapstore_secret.outputs.present == 'true'
 
       - uses: actions/download-artifact@v4
+        if: steps.zapstore_secret.outputs.present == 'true'
         with:
           name: release-apk
           path: dist
 
       - name: Validate tag matches VERSION
+        if: steps.zapstore_secret.outputs.present == 'true'
         run: |
           set -euo pipefail
           expected_tag="v$(./scripts/version-read --name)"
@@ -179,7 +195,7 @@ jobs:
           fi
 
       - name: Publish to Zapstore
-        if: hashFiles('secrets/zapstore-signing.env.age') != ''
+        if: steps.zapstore_secret.outputs.present == 'true'
         env:
           AGE_SECRET_KEY: ${{ secrets.AGE_SECRET_KEY }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
