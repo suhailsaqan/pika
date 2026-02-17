@@ -74,10 +74,42 @@ rmp-init-run PLATFORM="android" NAME="rmp-e2e" ORG="com.example":
   ROOT="$PWD"; \
   BIN="$ROOT/target/debug/rmp"; \
   TMP="$(mktemp -d "${TMPDIR:-/tmp}/rmp-init-run.XXXXXX")"; \
+  EXTRA_INIT=""; \
+  if [ "{{PLATFORM}}" = "iced" ]; then \
+    EXTRA_INIT="--no-ios --no-android --iced"; \
+  fi; \
   cargo build -p rmp-cli; \
-  "$BIN" init "$TMP/{{NAME}}" --yes --org "{{ORG}}"; \
+  "$BIN" init "$TMP/{{NAME}}" --yes --org "{{ORG}}" $EXTRA_INIT; \
   cd "$TMP/{{NAME}}"; \
   "$BIN" run {{PLATFORM}}
+
+# Phase 4 scaffold QA: core tests + workspace check + desktop runtime sanity.
+rmp-phase4-qa NAME="rmp-phase4-qa" ORG="com.example":
+  set -euo pipefail; \
+  ROOT="$PWD"; \
+  BIN="$ROOT/target/debug/rmp"; \
+  TMP="$(mktemp -d "${TMPDIR:-/tmp}/rmp-phase4-qa.XXXXXX")"; \
+  TARGET="$TMP/target"; \
+  cargo build -p rmp-cli; \
+  "$BIN" init "$TMP/{{NAME}}" --yes --org "{{ORG}}" --iced --json >/dev/null; \
+  cd "$TMP/{{NAME}}"; \
+  "$BIN" doctor --json >/dev/null; \
+  "$BIN" bindings all; \
+  CORE_CRATE="$(awk -F '\"' '/^crate = / { print $2; exit }' rmp.toml)"; \
+  if [ -z "$CORE_CRATE" ]; then echo "error: failed to read core crate from rmp.toml"; exit 1; fi; \
+  CARGO_TARGET_DIR="$TARGET" cargo test -p "$CORE_CRATE"; \
+  CARGO_TARGET_DIR="$TARGET" cargo check; \
+  if timeout 8s "$BIN" run iced --verbose; then \
+    echo "error: iced app exited before timeout (expected to keep running)" >&2; \
+    exit 1; \
+  else \
+    code=$?; \
+    if [ "$code" -ne 124 ]; then \
+      echo "error: iced runtime check failed with exit code $code" >&2; \
+      exit "$code"; \
+    fi; \
+  fi; \
+  echo "ok: phase4 QA passed ($TMP/{{NAME}})"
 
 # Linux-safe CI checks for `rmp init` output.
 rmp-init-smoke-ci ORG="com.example":

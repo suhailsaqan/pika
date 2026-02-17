@@ -312,13 +312,27 @@ fn generate_android_sources(
 fn clean_ios(root: &Path, verbose: bool) -> Result<(), CliError> {
     human_log(verbose, "clean ios bindings + build outputs");
     let bindings = root.join("ios/Bindings");
-    for f in [
-        "pika_core.swift",
-        "pika_coreFFI.h",
-        "pika_coreFFI.modulemap",
-    ] {
-        let p = bindings.join(f);
-        let _ = std::fs::remove_file(p);
+    if bindings.is_dir() {
+        for ent in std::fs::read_dir(&bindings).map_err(|e| {
+            CliError::operational(format!("failed to read {}: {e}", bindings.display()))
+        })? {
+            let ent =
+                ent.map_err(|e| CliError::operational(format!("failed to read dir entry: {e}")))?;
+            let p = ent.path();
+            if !p.is_file() {
+                continue;
+            }
+            let name = p.file_name().and_then(|v| v.to_str()).unwrap_or("");
+            if name == ".gitkeep" {
+                continue;
+            }
+            if name.ends_with(".swift")
+                || name.ends_with("FFI.h")
+                || name.ends_with("FFI.modulemap")
+            {
+                let _ = std::fs::remove_file(p);
+            }
+        }
     }
     let _ = std::fs::remove_dir_all(root.join("ios/.build"));
     let _ = std::fs::remove_dir_all(root.join("ios/Frameworks"));
@@ -488,8 +502,10 @@ fn build_ios_xcframework(
 
     // Ensure headers exist from UniFFI swift generation.
     let bindings_dir = root.join("ios/Bindings");
-    let hdr = bindings_dir.join("pika_coreFFI.h");
-    let mm = bindings_dir.join("pika_coreFFI.modulemap");
+    let hdr_name = format!("{core_lib}FFI.h");
+    let mm_name = format!("{core_lib}FFI.modulemap");
+    let hdr = bindings_dir.join(&hdr_name);
+    let mm = bindings_dir.join(&mm_name);
     if !hdr.is_file() || !mm.is_file() {
         return Err(CliError::operational(
             "missing ios/Bindings headers; run `rmp bindings swift` first",
@@ -507,7 +523,7 @@ fn build_ios_xcframework(
     std::fs::create_dir_all(&frameworks_dir)
         .map_err(|e| CliError::operational(format!("failed to create ios/Frameworks: {e}")))?;
 
-    std::fs::copy(&hdr, headers_dir.join("pika_coreFFI.h"))
+    std::fs::copy(&hdr, headers_dir.join(&hdr_name))
         .map_err(|e| CliError::operational(format!("copy header: {e}")))?;
     std::fs::copy(&mm, headers_dir.join("module.modulemap"))
         .map_err(|e| CliError::operational(format!("copy modulemap: {e}")))?;

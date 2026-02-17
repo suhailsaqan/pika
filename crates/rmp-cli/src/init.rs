@@ -91,7 +91,7 @@ pub fn init(
     )?;
     write_text(
         &dest.join("justfile"),
-        &tpl_justfile(include_ios, include_android, include_iced),
+        &tpl_justfile(include_ios, include_android, include_iced, &crate_name),
     )?;
     write_text(
         &dest.join("README.md"),
@@ -294,7 +294,10 @@ pub fn init(
         if include_iced {
             eprintln!("  desktop package: {iced_package}");
         }
-        eprintln!("  next: cd {} && rmp doctor", dest.to_string_lossy());
+        eprintln!(
+            "  next: cd {} && just qa && rmp run iced",
+            dest.to_string_lossy()
+        );
     }
 
     Ok(())
@@ -497,30 +500,53 @@ package = "{iced_package}"
     out
 }
 
-fn tpl_justfile(include_ios: bool, include_android: bool, include_iced: bool) -> String {
+fn tpl_justfile(
+    include_ios: bool,
+    include_android: bool,
+    include_iced: bool,
+    core_crate: &str,
+) -> String {
     let mut lines = vec![
-        "set shell := [\"bash\", \"-c\"]",
-        "",
-        "default:",
-        "  @just --list",
-        "",
-        "doctor:",
-        "  rmp doctor",
-        "",
-        "bindings:",
-        "  rmp bindings all",
+        "set shell := [\"bash\", \"-c\"]".to_string(),
+        "".to_string(),
+        "default:".to_string(),
+        "  @just --list".to_string(),
+        "".to_string(),
+        "doctor:".to_string(),
+        "  rmp doctor".to_string(),
+        "".to_string(),
+        "bindings:".to_string(),
+        "  rmp bindings all".to_string(),
+        "".to_string(),
+        "qa:".to_string(),
+        "  rmp doctor".to_string(),
+        "  rmp bindings all".to_string(),
+        format!("  cargo test -p {core_crate}"),
+        "  cargo check".to_string(),
     ];
 
     if include_ios {
-        lines.extend_from_slice(&["", "run-ios:", "  rmp run ios"]);
+        lines.extend(
+            ["", "run-ios:", "  rmp run ios"]
+                .iter()
+                .map(|s| s.to_string()),
+        );
     }
     if include_android {
-        lines.extend_from_slice(&["", "run-android:", "  rmp run android"]);
+        lines.extend(
+            ["", "run-android:", "  rmp run android"]
+                .iter()
+                .map(|s| s.to_string()),
+        );
     }
     if include_iced {
-        lines.extend_from_slice(&["", "run-iced:", "  rmp run iced"]);
+        lines.extend(
+            ["", "run-iced:", "  rmp run iced"]
+                .iter()
+                .map(|s| s.to_string()),
+        );
     }
-    lines.push("");
+    lines.push("".to_string());
     lines.join("\n")
 }
 
@@ -538,8 +564,12 @@ A cross-platform app built with [RMP](https://github.com/nickthecook/rmp) (Rust 
 ## Quick Start
 
 ```bash
-rmp doctor
-rmp bindings all
+just qa
+```
+
+## Run
+
+```bash
 "#
     );
     if include_ios {
@@ -551,7 +581,17 @@ rmp bindings all
     if include_iced {
         s.push_str("rmp run iced\n");
     }
-    s.push_str("```\n");
+    s.push_str(
+        r#"```
+
+## Demo Notes
+
+- Core state is shared in Rust. Mobile and desktop render different route projections:
+  - `mobile_route`: stacked, single-column flow (`timeline>note:...>compose`).
+  - `desktop_route`: split-shell flow (`main:selected=...:modal=...`).
+- This app is a local one-feed demo: refresh inserts a stub note; publish inserts a signed local note.
+"#,
+    );
     s
 }
 
@@ -1136,6 +1176,22 @@ mod tests {
     }
 
     #[test]
+    fn logged_out_projection_hides_overlay_and_selection() {
+        let nav = NavState {
+            session: SessionState::LoggedOut,
+            selected_note_id: Some("hidden".to_string()),
+            overlay: OverlayState::Compose,
+        };
+        let mobile = project_mobile(&nav);
+        let desktop = project_desktop(&nav);
+        assert_eq!(mobile.root, MobileRoot::Login);
+        assert!(mobile.stack.is_empty());
+        assert_eq!(desktop.shell, DesktopShell::Login);
+        assert_eq!(desktop.selected_note_id, None);
+        assert_eq!(desktop.modal, None);
+    }
+
+    #[test]
     fn reducer_updates_routes_and_rev_monotonically() {
         let mut core = CoreState::new();
         assert_eq!(core.app.rev, 0);
@@ -1158,6 +1214,24 @@ mod tests {
         assert_eq!(core.app.selected_note_id, Some("demo-welcome".to_string()));
         assert!(core.app.mobile_route.contains("note:demo-welcome"));
         assert!(core.app.desktop_route.contains("selected=demo-welcome"));
+    }
+
+    #[test]
+    fn logout_clears_nav_and_routes() {
+        let mut core = CoreState::new();
+        core.apply_action(AppAction::CreateAccount);
+        core.apply_action(AppAction::OpenSettings);
+        core.apply_action(AppAction::SelectNote {
+            note_id: "demo-welcome".to_string(),
+        });
+        core.apply_action(AppAction::Logout);
+
+        assert!(!core.app.is_logged_in);
+        assert!(core.app.npub.is_none());
+        assert!(core.app.selected_note_id.is_none());
+        assert_eq!(core.app.overlay, "none");
+        assert_eq!(core.app.mobile_route, "login");
+        assert_eq!(core.app.desktop_route, "login");
     }
 }
 "#
@@ -1199,7 +1273,7 @@ publish = false
 [dependencies]
 {core_crate} = {{ path = "../../rust" }}
 flume = "0.11"
-iced = "0.13"
+iced = {{ version = "0.13", features = ["tokio"] }}
 "#
     )
 }
@@ -1258,7 +1332,7 @@ impl DesktopApp {{
     }}
 
     fn subscription(&self) -> Subscription<Message> {{
-        iced::event::listen().map(|_| Message::Tick)
+        iced::time::every(std::time::Duration::from_millis(120)).map(|_| Message::Tick)
     }}
 
     fn update(&mut self, message: Message) -> Task<Message> {{
@@ -1293,10 +1367,13 @@ impl DesktopApp {{
                 self.dispatch(core::AppAction::CloseCompose);
             }}
             Message::PublishCompose => {{
+                let was_compose_open = self.manager.state.overlay == "compose";
                 self.dispatch(core::AppAction::PublishNote {{
                     content: self.compose_text.clone(),
                 }});
-                self.compose_text.clear();
+                if was_compose_open && self.manager.state.overlay != "compose" {{
+                    self.compose_text.clear();
+                }}
             }}
             Message::SelectNote(note_id) => {{
                 self.dispatch(core::AppAction::SelectNote {{ note_id }});
@@ -1503,7 +1580,7 @@ fn login_view<'a>(state: &'a core::AppState, login_nsec: &'a str) -> Element<'a,
     container(
         column![
             text("Desktop One-Feed Demo").size(28),
-            text("Phase 3 shell: Login + Timeline + Detail + Compose"),
+            text("Desktop shell: split timeline + detail, with modal overlays."),
             text_input("Paste nsec...", login_nsec).on_input(Message::LoginNsecChanged),
             row![
                 button("Create Account").on_press(Message::CreateAccount),
@@ -1530,6 +1607,7 @@ fn main_shell_view<'a>(
         column![
             text("Account").size(20),
             text(short(npub, 26)),
+            text(format!("mobile: {{}}", state.mobile_route)),
             text(format!("route: {{}}", route.route_label)),
             row![
                 button("Refresh").on_press(Message::Refresh),
@@ -1814,28 +1892,208 @@ fn tpl_ios_content_view(display_name: &str) -> String {
 
 struct ContentView: View {{
     @Bindable var manager: AppManager
-    @State private var nameInput = ""
+    @State private var loginNsec = ""
+    @State private var composeInput = ""
 
     var body: some View {{
-        VStack(spacing: 24) {{
-            Text("{display_name}")
-                .font(.largeTitle.weight(.semibold))
-
-            Text(manager.state.greeting)
-                .font(.title3)
-
-            TextField("Enter your name", text: $nameInput)
-                .textFieldStyle(.roundedBorder)
-                .onSubmit {{
-                    manager.dispatch(.setName(name: nameInput))
+        NavigationStack {{
+            ZStack(alignment: .bottom) {{
+                if manager.state.isLoggedIn {{
+                    mainFlow
+                }} else {{
+                    loginFlow
                 }}
 
-            Button("Greet") {{
-                manager.dispatch(.setName(name: nameInput))
+                if let toast = manager.state.toast {{
+                    HStack(spacing: 12) {{
+                        Text(toast)
+                            .font(.footnote)
+                        Spacer()
+                        Button("Dismiss") {{
+                            manager.dispatch(.clearToast)
+                        }}
+                        .buttonStyle(.borderedProminent)
+                    }}
+                    .padding(12)
+                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14))
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 16)
+                }}
             }}
-            .buttonStyle(.borderedProminent)
+
+            .navigationTitle("{display_name}")
+            .navigationBarTitleDisplayMode(.inline)
         }}
-        .padding(20)
+        .animation(.easeInOut(duration: 0.2), value: manager.state.rev)
+    }}
+
+    @ViewBuilder
+    private var loginFlow: some View {{
+        VStack(alignment: .leading, spacing: 12) {{
+            Text("Mobile Route: \(manager.state.mobileRoute)")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Text("One-Feed Demo")
+                .font(.title2.weight(.semibold))
+            TextField("Paste nsec (optional)", text: $loginNsec)
+                .textFieldStyle(.roundedBorder)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled(true)
+            HStack {{
+                Button("Create Account") {{
+                    manager.dispatch(.createAccount)
+                }}
+                .buttonStyle(.borderedProminent)
+
+                Button("Login") {{
+                    manager.dispatch(.login(nsec: loginNsec))
+                }}
+                .buttonStyle(.bordered)
+            }}
+        }}
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .padding(16)
+    }}
+
+    @ViewBuilder
+    private var mainFlow: some View {{
+        if manager.state.overlay == "compose" {{
+            composeScreen
+        }} else if manager.state.overlay == "settings" {{
+            settingsScreen
+        }} else if let note = selectedNote {{
+            noteDetail(note)
+        }} else {{
+            timelineScreen
+        }}
+    }}
+
+    @ViewBuilder
+    private var timelineScreen: some View {{
+        VStack(alignment: .leading, spacing: 12) {{
+            HStack {{
+                Text(short(manager.state.npub ?? "unknown", max: 28))
+                    .font(.caption.monospaced())
+                Spacer()
+                Button("Refresh") {{ manager.dispatch(.refreshTimeline) }}
+                Button("Compose") {{ manager.dispatch(.openCompose) }}
+                Button("Settings") {{ manager.dispatch(.openSettings) }}
+                Button("Logout") {{ manager.dispatch(.logout) }}
+            }}
+            .buttonStyle(.bordered)
+
+            Text("Mobile Route: \(manager.state.mobileRoute)")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            if manager.state.timeline.isEmpty {{
+                Text("Timeline is empty.")
+                    .foregroundStyle(.secondary)
+            }} else {{
+                ScrollView {{
+                    LazyVStack(alignment: .leading, spacing: 8) {{
+                        ForEach(manager.state.timeline, id: \.id) {{ note in
+                            Button {{
+                                manager.dispatch(.selectNote(noteId: note.id))
+                            }} label: {{
+                                VStack(alignment: .leading, spacing: 4) {{
+                                    Text(short(note.content, max: 100))
+                                        .font(.body)
+                                    Text(short(note.authorNpub, max: 24))
+                                        .font(.caption.monospaced())
+                                        .foregroundStyle(.secondary)
+                                }}
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(10)
+                                .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 10))
+                            }}
+                            .buttonStyle(.plain)
+                        }}
+                    }}
+                }}
+            }}
+        }}
+        .padding(16)
+    }}
+
+    @ViewBuilder
+    private func noteDetail(_ note: NoteSummary) -> some View {{
+        VStack(alignment: .leading, spacing: 12) {{
+            Text("Note Detail")
+                .font(.title3.weight(.semibold))
+            Text("id: \(note.id)")
+                .font(.caption.monospaced())
+                .foregroundStyle(.secondary)
+            Text("author: \(short(note.authorNpub, max: 30))")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            ScrollView {{
+                Text(note.content)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }}
+            Button("Back to Timeline") {{
+                manager.dispatch(.deselectNote)
+            }}
+            .buttonStyle(.bordered)
+        }}
+        .padding(16)
+    }}
+
+    @ViewBuilder
+    private var composeScreen: some View {{
+        VStack(alignment: .leading, spacing: 12) {{
+            Text("Compose")
+                .font(.title3.weight(.semibold))
+            TextEditor(text: $composeInput)
+                .frame(minHeight: 180)
+                .padding(8)
+                .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 10))
+            HStack {{
+                Button("Publish") {{
+                    manager.dispatch(.publishNote(content: composeInput))
+                }}
+                .buttonStyle(.borderedProminent)
+                Button("Cancel") {{
+                    manager.dispatch(.closeCompose)
+                }}
+                .buttonStyle(.bordered)
+            }}
+        }}
+        .padding(16)
+    }}
+
+    @ViewBuilder
+    private var settingsScreen: some View {{
+        VStack(alignment: .leading, spacing: 12) {{
+            Text("Settings")
+                .font(.title3.weight(.semibold))
+            Text("No settings in this demo.")
+                .foregroundStyle(.secondary)
+            Text("Mobile Route: \(manager.state.mobileRoute)")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Button("Close Settings") {{
+                manager.dispatch(.closeSettings)
+            }}
+            .buttonStyle(.bordered)
+        }}
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .padding(16)
+    }}
+
+    private var selectedNote: NoteSummary? {{
+        guard let selected = manager.state.selectedNoteId else {{
+            return nil
+        }}
+        return manager.state.timeline.first(where: {{ $0.id == selected }})
+    }}
+
+    private func short(_ value: String, max limit: Int) -> String {{
+        guard value.count > limit else {{
+            return value
+        }}
+        let prefix = value.prefix(Swift.max(limit - 3, 0))
+        return "\(prefix)..."
     }}
 }}
 "#
@@ -2077,9 +2335,7 @@ class AppManager private constructor(context: Context) : AppReconciler {{
     private val rust: FfiApp
     private var lastRevApplied: ULong = 0UL
 
-    var state: AppState by mutableStateOf(
-        AppState(rev = 0UL, greeting = ""),
-    )
+    var state: AppState? by mutableStateOf(null)
         private set
 
     init {{
@@ -2125,19 +2381,34 @@ fn tpl_android_main_app(kotlin_pkg: &str, display_name: &str) -> String {
     format!(
         r#"package {kotlin_pkg}.ui
 
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import {kotlin_pkg}.AppManager
 import {kotlin_pkg}.rust.AppAction
+import {kotlin_pkg}.rust.AppState
+import {kotlin_pkg}.rust.NoteSummary
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MainApp(manager: AppManager) {{
-    var nameInput by remember {{ mutableStateOf("") }}
+    var loginNsec by rememberSaveable {{ mutableStateOf("") }}
+    var composeInput by rememberSaveable {{ mutableStateOf("") }}
     val state = manager.state
 
     Scaffold(
@@ -2145,34 +2416,245 @@ fun MainApp(manager: AppManager) {{
             TopAppBar(title = {{ Text("{display_name}") }})
         }},
     ) {{ padding ->
-        Column(
+        if (state == null) {{
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(padding),
+                contentAlignment = Alignment.Center,
+            ) {{
+                Text("Loading...")
+            }}
+            return@Scaffold
+        }}
+
+        Box(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
-                .padding(20.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {{
-            Text(
-                state.greeting,
-                style = MaterialTheme.typography.headlineMedium,
-            )
+            if (!state.isLoggedIn) {{
+                LoginFlow(
+                    state = state,
+                    loginNsec = loginNsec,
+                    onLoginNsec = {{ loginNsec = it }},
+                    onCreateAccount = {{ manager.dispatch(AppAction.CreateAccount) }},
+                    onLogin = {{ manager.dispatch(AppAction.Login(loginNsec)) }},
+                )
+            }} else {{
+                val selected = state.selectedNoteId
+                val selectedNote = state.timeline.firstOrNull {{ it.id == selected }}
+                when {{
+                    state.overlay == "compose" -> ComposeFlow(
+                        composeInput = composeInput,
+                        onComposeInput = {{ composeInput = it }},
+                        onPublish = {{ manager.dispatch(AppAction.PublishNote(composeInput)) }},
+                        onCancel = {{ manager.dispatch(AppAction.CloseCompose) }},
+                    )
+                    state.overlay == "settings" -> SettingsFlow(
+                        state = state,
+                        onClose = {{ manager.dispatch(AppAction.CloseSettings) }},
+                    )
+                    selectedNote != null -> DetailFlow(
+                        note = selectedNote,
+                        onBack = {{ manager.dispatch(AppAction.DeselectNote) }},
+                    )
+                    else -> TimelineFlow(
+                        state = state,
+                        onRefresh = {{ manager.dispatch(AppAction.RefreshTimeline) }},
+                        onCompose = {{ manager.dispatch(AppAction.OpenCompose) }},
+                        onSettings = {{ manager.dispatch(AppAction.OpenSettings) }},
+                        onLogout = {{ manager.dispatch(AppAction.Logout) }},
+                        onSelect = {{ manager.dispatch(AppAction.SelectNote(it.id)) }},
+                    )
+                }}
+            }}
 
-            OutlinedTextField(
-                value = nameInput,
-                onValueChange = {{ nameInput = it }},
-                label = {{ Text("Enter your name") }},
-                modifier = Modifier.fillMaxWidth(),
-                singleLine = true,
-            )
-
-            Button(
-                onClick = {{ manager.dispatch(AppAction.SetName(nameInput)) }},
-                modifier = Modifier.fillMaxWidth(),
-            ) {{
-                Text("Greet")
+            state.toast?.let {{ toast ->
+                Row(
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .padding(12.dp)
+                        .background(
+                            MaterialTheme.colorScheme.surfaceVariant,
+                            shape = MaterialTheme.shapes.medium,
+                        )
+                        .padding(12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {{
+                    Text(
+                        text = toast,
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Button(onClick = {{ manager.dispatch(AppAction.ClearToast) }}) {{
+                        Text("Dismiss")
+                    }}
+                }}
             }}
         }}
+    }}
+}}
+
+@Composable
+private fun LoginFlow(
+    state: AppState,
+    loginNsec: String,
+    onLoginNsec: (String) -> Unit,
+    onCreateAccount: () -> Unit,
+    onLogin: () -> Unit,
+) {{
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {{
+        Text(
+            text = "Mobile Route: ${{state.mobileRoute}}",
+            style = MaterialTheme.typography.labelSmall,
+        )
+        Text("One-Feed Demo", style = MaterialTheme.typography.headlineSmall)
+        OutlinedTextField(
+            value = loginNsec,
+            onValueChange = onLoginNsec,
+            label = {{ Text("Paste nsec (optional)") }},
+            modifier = Modifier.fillMaxWidth(),
+            singleLine = true,
+        )
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {{
+            Button(onClick = onCreateAccount) {{ Text("Create Account") }}
+            OutlinedButton(onClick = onLogin) {{ Text("Login") }}
+        }}
+    }}
+}}
+
+@Composable
+private fun TimelineFlow(
+    state: AppState,
+    onRefresh: () -> Unit,
+    onCompose: () -> Unit,
+    onSettings: () -> Unit,
+    onLogout: () -> Unit,
+    onSelect: (NoteSummary) -> Unit,
+) {{
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(12.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {{
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {{
+            OutlinedButton(onClick = onRefresh) {{ Text("Refresh") }}
+            OutlinedButton(onClick = onCompose) {{ Text("Compose") }}
+            OutlinedButton(onClick = onSettings) {{ Text("Settings") }}
+            OutlinedButton(onClick = onLogout) {{ Text("Logout") }}
+        }}
+        Text(
+            text = "Mobile Route: ${{state.mobileRoute}}",
+            style = MaterialTheme.typography.labelSmall,
+        )
+        Text(
+            text = short(state.npub ?: "unknown", 28),
+            style = MaterialTheme.typography.labelSmall,
+        )
+        if (state.timeline.isEmpty()) {{
+            Text("Timeline is empty.")
+        }} else {{
+            LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {{
+                items(state.timeline) {{ note ->
+                    ElevatedCard(onClick = {{ onSelect(note) }}) {{
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(10.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp),
+                        ) {{
+                            Text(short(note.content, 100))
+                            Text(
+                                text = short(note.authorNpub, 24),
+                                style = MaterialTheme.typography.labelSmall,
+                            )
+                        }}
+                    }}
+                }}
+            }}
+        }}
+    }}
+}}
+
+@Composable
+private fun DetailFlow(note: NoteSummary, onBack: () -> Unit) {{
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {{
+        Text("Note Detail", style = MaterialTheme.typography.headlineSmall)
+        Text("id: ${{note.id}}", style = MaterialTheme.typography.labelSmall)
+        Text("author: ${{short(note.authorNpub, 30)}}", style = MaterialTheme.typography.labelSmall)
+        Text(text = note.content, modifier = Modifier.weight(1f, fill = false))
+        OutlinedButton(onClick = onBack) {{ Text("Back to Timeline") }}
+    }}
+}}
+
+@Composable
+private fun ComposeFlow(
+    composeInput: String,
+    onComposeInput: (String) -> Unit,
+    onPublish: () -> Unit,
+    onCancel: () -> Unit,
+) {{
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {{
+        Text("Compose", style = MaterialTheme.typography.headlineSmall)
+        OutlinedTextField(
+            value = composeInput,
+            onValueChange = onComposeInput,
+            label = {{ Text("Write a short note...") }},
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(180.dp),
+        )
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {{
+            Button(onClick = onPublish) {{ Text("Publish") }}
+            OutlinedButton(onClick = onCancel) {{ Text("Cancel") }}
+        }}
+    }}
+}}
+
+@Composable
+private fun SettingsFlow(state: AppState, onClose: () -> Unit) {{
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {{
+        Text("Settings", style = MaterialTheme.typography.headlineSmall)
+        Text("No settings in this demo.")
+        Text(
+            text = "Mobile Route: ${{state.mobileRoute}}",
+            style = MaterialTheme.typography.labelSmall,
+        )
+        OutlinedButton(onClick = onClose) {{ Text("Close Settings") }}
+    }}
+}}
+
+private fun short(value: String, max: Int): String {{
+    return if (value.length <= max) {{
+        value
+    }} else {{
+        value.take((max - 3).coerceAtLeast(0)) + "..."
     }}
 }}
 "#
