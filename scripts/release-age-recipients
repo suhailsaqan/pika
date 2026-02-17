@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# Public age recipients for release artifacts in this repo.
+#
+# These are recipients (public keys), not private keys.
+# Update this file when rotating the CI age key.
+
+PIKA_RELEASE_YUBIKEY_PRIMARY_RECIPIENT_DEFAULT="age1yubikey1q0zhu9e7zrj48zmnpx4fg07c0drt9f57e26uymgxa4h3fczwutzjjp5a6y5"
+PIKA_RELEASE_YUBIKEY_BACKUP_RECIPIENT_DEFAULT="age1yubikey1qtdv7spad78v4yhrtrts6tvv5wc80vw6mah6g64m9cr9l3ryxsf2jdx8gs9"
+PIKA_RELEASE_CI_RECIPIENT_DEFAULT="age1kywla84vx7ppelcaugeqvzghcggc3dsmskz7fugk6emdcc02zdqs0vzv93"
