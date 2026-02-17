@@ -1,6 +1,5 @@
 package com.pika.app.ui.screens
 
-import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -15,7 +14,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.Icon
@@ -46,7 +44,7 @@ import com.pika.app.rust.AppAction
 import com.pika.app.rust.AuthState
 import com.pika.app.rust.ChatSummary
 import com.pika.app.rust.Screen
-import com.pika.app.ui.theme.PikaBlue
+import com.pika.app.ui.Avatar
 import com.pika.app.ui.QrCode
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Logout
@@ -142,6 +140,10 @@ fun ChatListScreen(manager: AppManager, padding: PaddingValues) {
 @Composable
 private fun ChatRow(chat: ChatSummary, selfPubkey: String?, onClick: () -> Unit) {
     val title = chatTitle(chat, selfPubkey)
+    val peer = if (!chat.isGroup) {
+        chat.members.firstOrNull { selfPubkey == null || it.pubkey != selfPubkey }
+            ?: chat.members.firstOrNull()
+    } else null
     Row(
         modifier =
             Modifier
@@ -158,20 +160,11 @@ private fun ChatRow(chat: ChatSummary, selfPubkey: String?, onClick: () -> Unit)
                 }
             },
         ) {
-            Box(
-                modifier =
-                    Modifier
-                        .size(44.dp)
-                        .clip(CircleShape)
-                        .background(PikaBlue.copy(alpha = 0.12f)),
-                contentAlignment = Alignment.Center,
-            ) {
-                Text(
-                    title.take(1).uppercase(),
-                    style = MaterialTheme.typography.titleMedium,
-                    color = PikaBlue,
-                )
-            }
+            Avatar(
+                name = peer?.name ?: chat.groupName,
+                npub = peer?.npub ?: chat.chatId,
+                pictureUrl = peer?.pictureUrl,
+            )
         }
 
         Column(modifier = Modifier.weight(1f)) {

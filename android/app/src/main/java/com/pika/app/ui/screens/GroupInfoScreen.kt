@@ -1,6 +1,5 @@
 package com.pika.app.ui.screens
 
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -11,15 +10,12 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Edit
-import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PersonRemove
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -41,7 +37,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -49,10 +44,10 @@ import com.pika.app.AppManager
 import com.pika.app.rust.AppAction
 import com.pika.app.rust.AuthState
 import com.pika.app.rust.MemberInfo
+import com.pika.app.ui.Avatar
 import com.pika.app.ui.PeerKeyNormalizer
 import com.pika.app.ui.PeerKeyValidator
 import com.pika.app.ui.TestTags
-import com.pika.app.ui.theme.PikaBlue
 
 @Composable
 @OptIn(ExperimentalMaterial3Api::class)
@@ -74,10 +69,11 @@ fun GroupInfoScreen(manager: AppManager, chatId: String, padding: PaddingValues)
     var showLeaveDialog by remember { mutableStateOf(false) }
     var memberToRemove by remember { mutableStateOf<MemberInfo?>(null) }
 
-    val myPubkey = when (val a = manager.state.auth) {
-        is AuthState.LoggedIn -> a.pubkey
-        else -> null
+    val (myPubkey, myNpub) = when (val a = manager.state.auth) {
+        is AuthState.LoggedIn -> a.pubkey to a.npub
+        else -> null to null
     }
+    val myProfile = manager.state.myProfile
 
     Scaffold(
         modifier = Modifier.padding(padding),
@@ -180,20 +176,12 @@ fun GroupInfoScreen(manager: AppManager, chatId: String, padding: PaddingValues)
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Box(
-                        modifier = Modifier
-                            .size(40.dp)
-                            .clip(CircleShape)
-                            .background(PikaBlue.copy(alpha = 0.12f)),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Icon(
-                            Icons.Default.Person,
-                            contentDescription = null,
-                            tint = PikaBlue,
-                            modifier = Modifier.size(20.dp),
-                        )
-                    }
+                    Avatar(
+                        name = myProfile.name.takeIf { it.isNotBlank() },
+                        npub = myNpub ?: "",
+                        pictureUrl = myProfile.pictureUrl,
+                        size = 40.dp,
+                    )
                     Text(
                         "You",
                         style = MaterialTheme.typography.bodyLarge,
@@ -330,19 +318,12 @@ private fun MemberRow(
         horizontalArrangement = Arrangement.spacedBy(12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Box(
-            modifier = Modifier
-                .size(40.dp)
-                .clip(CircleShape)
-                .background(PikaBlue.copy(alpha = 0.12f)),
-            contentAlignment = Alignment.Center,
-        ) {
-            Text(
-                (member.name ?: member.npub).take(1).uppercase(),
-                style = MaterialTheme.typography.titleSmall,
-                color = PikaBlue,
-            )
-        }
+        Avatar(
+            name = member.name,
+            npub = member.npub,
+            pictureUrl = member.pictureUrl,
+            size = 40.dp,
+        )
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 member.name ?: truncatedNpub(member.npub),
