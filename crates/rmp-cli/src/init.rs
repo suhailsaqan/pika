@@ -689,10 +689,18 @@ fn tpl_flake_nix() -> String {
             pkgs.curl
             pkgs.git
             rmp
+          ] ++ pkgs.lib.optionals pkgs.stdenv.isDarwin [
+            pkgs.xcodegen
           ];
 
           shellHook = ''
             export IN_NIX_SHELL=1
+            if [ "$(uname -s)" = "Darwin" ]; then
+              DEV_DIR="$(ls -d /Applications/Xcode*.app/Contents/Developer 2>/dev/null | sort -V | tail -n 1 || true)"
+              if [ -n "$DEV_DIR" ]; then
+                export DEVELOPER_DIR="$DEV_DIR"
+              fi
+            fi
             echo ""
             echo "RMP app dev environment ready"
             echo "  Rust: $(rustc --version)"
