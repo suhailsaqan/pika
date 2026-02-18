@@ -650,14 +650,20 @@ fn tpl_flake_nix() -> String {
       url = "github:oxalica/rust-overlay";
       inputs.nixpkgs.follows = "nixpkgs";
     };
+    android-nixpkgs = {
+      url = "github:tadfisher/android-nixpkgs";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
   };
 
-  outputs = { nixpkgs, flake-utils, rust-overlay, ... }:
+  outputs = { nixpkgs, flake-utils, rust-overlay, android-nixpkgs, ... }:
     flake-utils.lib.eachDefaultSystem (system:
       let
         pkgs = import nixpkgs {
           inherit system;
           overlays = [ (import rust-overlay) ];
+          config.allowUnfree = true;
+          config.android_sdk.accept_license = true;
         };
 
         rustToolchain = pkgs.rust-bin.stable.latest.default.override {
@@ -671,6 +677,20 @@ fn tpl_flake_nix() -> String {
             "x86_64-apple-ios"
           ];
         };
+
+        androidSdk = android-nixpkgs.sdk.${system} (sdkPkgs: with sdkPkgs; [
+          cmdline-tools-latest
+          platform-tools
+          build-tools-34-0-0
+          build-tools-35-0-0
+          platforms-android-34
+          platforms-android-35
+          ndk-28-2-13676358
+          emulator
+          (if pkgs.stdenv.isDarwin
+           then system-images-android-35-google-apis-arm64-v8a
+           else system-images-android-35-google-apis-x86-64)
+        ]);
 
         rmp = pkgs.writeShellScriptBin "rmp" ''
           set -euo pipefail
@@ -690,11 +710,13 @@ fn tpl_flake_nix() -> String {
 
           packages = [
             rustToolchain
+            androidSdk
             pkgs.just
             pkgs.nodejs_22
             pkgs.python3
             pkgs.curl
             pkgs.git
+            pkgs.gradle
             rmp
           ] ++ pkgs.lib.optionals pkgs.stdenv.isDarwin [
             pkgs.xcodegen
@@ -702,12 +724,23 @@ fn tpl_flake_nix() -> String {
 
           shellHook = ''
             export IN_NIX_SHELL=1
+            export ANDROID_HOME=${androidSdk}/share/android-sdk
+            export ANDROID_SDK_ROOT=${androidSdk}/share/android-sdk
+            export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/28.2.13676358"
+            export PATH=$ANDROID_HOME/emulator:$ANDROID_HOME/platform-tools:$ANDROID_HOME/cmdline-tools/latest/bin:$PATH
+
             if [ "$(uname -s)" = "Darwin" ]; then
               DEV_DIR="$(ls -d /Applications/Xcode*.app/Contents/Developer 2>/dev/null | sort -V | tail -n 1 || true)"
               if [ -n "$DEV_DIR" ]; then
                 export DEVELOPER_DIR="$DEV_DIR"
               fi
             fi
+
+            mkdir -p android
+            cat > android/local.properties <<EOF
+            sdk.dir=$ANDROID_HOME
+EOF
+
             echo ""
             echo "RMP app dev environment ready"
             echo "  Rust: $(rustc --version)"

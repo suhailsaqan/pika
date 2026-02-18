@@ -7,7 +7,7 @@ use crate::cli::{human_log, json_print, CliError, JsonOk};
 use crate::config::{load_rmp_toml, RmpToml};
 use crate::util::{discover_xcode_dev_dir, run_capture, which};
 
-const BINDGEN_HASH_FILE: &str = "target/.rmp-bindgen-hash";
+const BINDGEN_HASH_FILE_PREFIX: &str = "target/.rmp-bindgen-hash";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum BuildProfile {
@@ -224,7 +224,7 @@ fn generate_ios_sources(
     let out_dir = root.join("ios/Bindings");
     std::fs::create_dir_all(&out_dir)
         .map_err(|e| CliError::operational(format!("failed to create ios/Bindings: {e}")))?;
-    if use_cache && bindgen_cache_hit(root, swift_bindings_present(root)?, verbose)? {
+    if use_cache && bindgen_cache_hit(root, swift_bindings_present(root)?, "swift", verbose)? {
         return Ok(());
     }
     cargo_build_host(root, core_pkg, profile, verbose)?;
@@ -255,7 +255,7 @@ fn generate_ios_sources(
         return Err(CliError::operational("uniffi swift generation failed"));
     }
     if use_cache {
-        write_bindgen_hash(root)?;
+        write_bindgen_hash(root, "swift")?;
     }
     Ok(())
 }
@@ -272,7 +272,7 @@ fn generate_android_sources(
     let out_dir = root.join("android/app/src/main/java");
     std::fs::create_dir_all(&out_dir)
         .map_err(|e| CliError::operational(format!("failed to create android java dir: {e}")))?;
-    if use_cache && bindgen_cache_hit(root, kotlin_bindings_present(root)?, verbose)? {
+    if use_cache && bindgen_cache_hit(root, kotlin_bindings_present(root)?, "kotlin", verbose)? {
         return Ok(());
     }
     cargo_build_host(root, core_pkg, profile, verbose)?;
@@ -304,7 +304,7 @@ fn generate_android_sources(
         return Err(CliError::operational("uniffi kotlin generation failed"));
     }
     if use_cache {
-        write_bindgen_hash(root)?;
+        write_bindgen_hash(root, "kotlin")?;
     }
     Ok(())
 }
@@ -336,6 +336,7 @@ fn clean_ios(root: &Path, verbose: bool) -> Result<(), CliError> {
     }
     let _ = std::fs::remove_dir_all(root.join("ios/.build"));
     let _ = std::fs::remove_dir_all(root.join("ios/Frameworks"));
+    let _ = std::fs::remove_file(bindgen_hash_path(root, "swift"));
     Ok(())
 }
 
@@ -343,6 +344,7 @@ fn clean_android(root: &Path, verbose: bool) -> Result<(), CliError> {
     human_log(verbose, "clean android bindings + jniLibs");
     let _ = std::fs::remove_dir_all(kotlin_bindings_dir(root)?);
     let _ = std::fs::remove_dir_all(root.join("android/app/src/main/jniLibs"));
+    let _ = std::fs::remove_file(bindgen_hash_path(root, "kotlin"));
     Ok(())
 }
 
@@ -860,12 +862,17 @@ fn kotlin_bindings_present(root: &Path) -> Result<bool, CliError> {
     Ok(false)
 }
 
-fn bindgen_cache_hit(root: &Path, outputs_present: bool, verbose: bool) -> Result<bool, CliError> {
+fn bindgen_cache_hit(
+    root: &Path,
+    outputs_present: bool,
+    key: &str,
+    verbose: bool,
+) -> Result<bool, CliError> {
     if !outputs_present {
         return Ok(false);
     }
     let hash = compute_bindgen_inputs_hash(root)?;
-    let cache_path = root.join(BINDGEN_HASH_FILE);
+    let cache_path = bindgen_hash_path(root, key);
     let cached = std::fs::read_to_string(cache_path).ok();
     let cached = cached.as_deref().map(str::trim);
     if cached == Some(hash.as_str()) {
@@ -878,9 +885,9 @@ fn bindgen_cache_hit(root: &Path, outputs_present: bool, verbose: bool) -> Resul
     Ok(false)
 }
 
-fn write_bindgen_hash(root: &Path) -> Result<(), CliError> {
+fn write_bindgen_hash(root: &Path, key: &str) -> Result<(), CliError> {
     let hash = compute_bindgen_inputs_hash(root)?;
-    let path = root.join(BINDGEN_HASH_FILE);
+    let path = bindgen_hash_path(root, key);
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(|e| {
             CliError::operational(format!("failed to create {}: {e}", parent.display()))
@@ -889,6 +896,10 @@ fn write_bindgen_hash(root: &Path) -> Result<(), CliError> {
     std::fs::write(&path, format!("{hash}\n"))
         .map_err(|e| CliError::operational(format!("failed to write {}: {e}", path.display())))?;
     Ok(())
+}
+
+fn bindgen_hash_path(root: &Path, key: &str) -> PathBuf {
+    root.join(format!("{BINDGEN_HASH_FILE_PREFIX}-{key}"))
 }
 
 fn compute_bindgen_inputs_hash(root: &Path) -> Result<String, CliError> {
