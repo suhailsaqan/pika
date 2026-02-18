@@ -81,6 +81,14 @@ pub struct InitArgs {
     #[arg(long = "no-flake", action = ArgAction::SetTrue)]
     pub no_flake: bool,
 
+    /// Initialize a local git repo and stage scaffold files.
+    #[arg(long, conflicts_with = "no_git")]
+    pub git: bool,
+
+    /// Skip local git repo initialization.
+    #[arg(long = "no-git", action = ArgAction::SetTrue)]
+    pub no_git: bool,
+
     /// Reverse-DNS org prefix (e.g. com.example).
     #[arg(long)]
     pub org: Option<String>,

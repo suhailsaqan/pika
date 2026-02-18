@@ -1,4 +1,5 @@
 use std::path::{Path, PathBuf};
+use std::process::Command;
 
 use crate::cli::{human_log, json_print, CliError, JsonOk};
 
@@ -12,6 +13,7 @@ pub fn init(
     let include_android = resolve_toggle(args.android, args.no_android, true);
     let include_iced = resolve_toggle(args.iced, args.no_iced, false);
     let include_flake = resolve_toggle(args.flake, args.no_flake, false);
+    let include_git = resolve_toggle(args.git, args.no_git, include_flake);
     if !include_ios && !include_android && !include_iced {
         return Err(CliError::user(
             "at least one platform must be enabled (use --ios, --android, or --iced)",
@@ -96,10 +98,17 @@ pub fn init(
     )?;
     write_text(
         &dest.join("README.md"),
-        &tpl_readme(&display_name, include_ios, include_android, include_iced),
+        &tpl_readme(
+            &display_name,
+            include_ios,
+            include_android,
+            include_iced,
+            include_flake,
+        ),
     )?;
     if include_flake {
         write_text(&dest.join("flake.nix"), &tpl_flake_nix())?;
+        write_text(&dest.join(".envrc"), &tpl_envrc())?;
     }
 
     // ── Rust core ───────────────────────────────────────────────────────
@@ -250,6 +259,10 @@ pub fn init(
         )?;
     }
 
+    if include_git {
+        init_git_repo(&dest)?;
+    }
+
     // ── Done ────────────────────────────────────────────────────────────
     if json {
         let mut platforms: Vec<&str> = vec![];
@@ -274,6 +287,7 @@ pub fn init(
                     "crate_name": crate_name,
                     "iced_package": iced_package,
                     "flake": include_flake,
+                    "git": include_git,
                 },
                 "platforms": platforms,
             }),
@@ -290,7 +304,10 @@ pub fn init(
             eprintln!("  desktop package: {iced_package}");
         }
         if include_flake {
-            eprintln!("  nix shell: flake.nix generated (--flake)");
+            eprintln!("  nix shell: flake.nix + .envrc generated (--flake)");
+        }
+        if include_git {
+            eprintln!("  git: initialized local repo + staged scaffold");
         }
         eprintln!("  next: cd {} && rmp doctor", dest.to_string_lossy());
     }
@@ -318,6 +335,32 @@ fn write_text(path: &Path, content: &str) -> Result<(), CliError> {
     }
     std::fs::write(path, content)
         .map_err(|e| CliError::operational(format!("failed to write {}: {e}", path.display())))?;
+    Ok(())
+}
+
+fn init_git_repo(dest: &Path) -> Result<(), CliError> {
+    let init = Command::new("git")
+        .args(["init", "-q"])
+        .current_dir(dest)
+        .status()
+        .map_err(|e| CliError::operational(format!("failed to run `git init`: {e}")))?;
+    if !init.success() {
+        return Err(CliError::operational(
+            "failed to initialize git repo (`git init` exited non-zero)",
+        ));
+    }
+
+    let add = Command::new("git")
+        .args(["add", "."])
+        .current_dir(dest)
+        .status()
+        .map_err(|e| CliError::operational(format!("failed to run `git add .`: {e}")))?;
+    if !add.success() {
+        return Err(CliError::operational(
+            "failed to stage scaffold files (`git add .` exited non-zero)",
+        ));
+    }
+
     Ok(())
 }
 
@@ -413,6 +456,7 @@ fn display_name(input: &str) -> String {
 
 fn tpl_gitignore() -> String {
     r#"/target
+.direnv/
 .DS_Store
 *.swp
 *.swo
@@ -527,9 +571,24 @@ fn tpl_readme(
     include_ios: bool,
     include_android: bool,
     include_iced: bool,
+    include_flake: bool,
 ) -> String {
-    let mut s = format!(
-        r#"# {display_name}
+    let mut s = if include_flake {
+        format!(
+            r#"# {display_name}
+
+A cross-platform app built with [RMP](https://github.com/nickthecook/rmp) (Rust Multiplatform).
+
+## Quick Start
+
+```bash
+nix develop -c just doctor
+nix develop -c just bindings
+"#
+        )
+    } else {
+        format!(
+            r#"# {display_name}
 
 A cross-platform app built with [RMP](https://github.com/nickthecook/rmp) (Rust Multiplatform).
 
@@ -539,18 +598,38 @@ A cross-platform app built with [RMP](https://github.com/nickthecook/rmp) (Rust 
 rmp doctor
 rmp bindings all
 "#
-    );
+        )
+    };
     if include_ios {
-        s.push_str("rmp run ios\n");
+        if include_flake {
+            s.push_str("nix develop -c just run-ios\n");
+        } else {
+            s.push_str("rmp run ios\n");
+        }
     }
     if include_android {
-        s.push_str("rmp run android\n");
+        if include_flake {
+            s.push_str("nix develop -c just run-android\n");
+        } else {
+            s.push_str("rmp run android\n");
+        }
     }
     if include_iced {
-        s.push_str("rmp run iced\n");
+        if include_flake {
+            s.push_str("nix develop -c just run-iced\n");
+        } else {
+            s.push_str("rmp run iced\n");
+        }
     }
     s.push_str("```\n");
+    if include_flake {
+        s.push_str("\nOptional: enable direnv (`.envrc` is included and uses `use flake`).\n");
+    }
     s
+}
+
+fn tpl_envrc() -> String {
+    "use flake\n".to_string()
 }
 
 fn tpl_flake_nix() -> String {
@@ -623,7 +702,6 @@ fn tpl_flake_nix() -> String {
         };
       in {
         devShells.default = shell;
-        devShells.rmp = shell;
       }
     );
 }
