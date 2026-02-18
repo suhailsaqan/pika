@@ -309,7 +309,14 @@ pub fn init(
         if include_git {
             eprintln!("  git: initialized local repo + staged scaffold");
         }
-        eprintln!("  next: cd {} && rmp doctor", dest.to_string_lossy());
+        if include_flake {
+            eprintln!(
+                "  next: cd {} && nix develop -c just doctor",
+                dest.to_string_lossy()
+            );
+        } else {
+            eprintln!("  next: cd {} && rmp doctor", dest.to_string_lossy());
+        }
     }
 
     Ok(())
