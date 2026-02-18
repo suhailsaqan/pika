@@ -34,7 +34,7 @@ pub fn message_bubble<'a>(msg: &'a ChatMessage, is_group: bool) -> Element<'a, M
         .max_width(500)
         .style(theme::bubble_sent_style);
 
-        row![Space::with_width(Fill), bubble]
+        row![Space::new().width(Fill), bubble]
             .width(Fill)
             .into()
     } else {
@@ -74,7 +74,7 @@ pub fn message_bubble<'a>(msg: &'a ChatMessage, is_group: bool) -> Element<'a, M
             .max_width(500)
             .style(theme::bubble_received_style);
 
-        row![bubble, Space::with_width(Fill)]
+        row![bubble, Space::new().width(Fill)]
             .width(Fill)
             .into()
     }

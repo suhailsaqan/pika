@@ -52,10 +52,10 @@ pub fn login_view<'a>(
     }
 
     let mut card = column![
-        Space::with_height(8),
+        Space::new().height(8),
         heading,
         subtitle,
-        Space::with_height(8),
+        Space::new().height(8),
         nsec_field,
         buttons,
     ]

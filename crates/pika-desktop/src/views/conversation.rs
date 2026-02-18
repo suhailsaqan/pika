@@ -1,4 +1,4 @@
-use iced::widget::{button, column, container, horizontal_rule, row, scrollable, text, text_input};
+use iced::widget::{button, column, container, row, rule, scrollable, text, text_input};
 use iced::{Alignment, Element, Fill, Theme};
 use pika_core::ChatViewState;
 
@@ -94,7 +94,7 @@ pub fn conversation_view<'a>(
     // ── Compose ─────────────────────────────────────────────────────
     column![
         header,
-        horizontal_rule(1),
+        rule::horizontal(1),
         message_scroll,
         input_bar,
     ]

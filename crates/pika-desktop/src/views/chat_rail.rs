@@ -17,7 +17,7 @@ pub fn chat_rail_view<'a>(
     // ── Header ──────────────────────────────────────────────────────
     let header = row![
         text("Chats").size(20).color(theme::TEXT_PRIMARY),
-        Space::with_width(Fill),
+        Space::new().width(Fill),
         button(text("+").size(18).color(theme::TEXT_PRIMARY).center())
             .on_press(Message::ToggleNewChatForm)
             .padding([4, 10])
@@ -124,7 +124,7 @@ fn chat_item<'a>(chat: &ChatSummary, selected_id: Option<&str>) -> Element<'a, M
             .color(theme::TEXT_FADED)
             .into()
     } else {
-        Space::with_width(0).into()
+        Space::new().width(0).into()
     };
 
     let picture_url = chat
@@ -141,7 +141,7 @@ fn chat_item<'a>(chat: &ChatSummary, selected_id: Option<&str>) -> Element<'a, M
         text(theme::truncate(&name, 20))
             .size(14)
             .color(theme::TEXT_PRIMARY),
-        Space::with_width(Fill),
+        Space::new().width(Fill),
         timestamp_text,
     ]
     .align_y(Alignment::Center);
@@ -153,7 +153,7 @@ fn chat_item<'a>(chat: &ChatSummary, selected_id: Option<&str>) -> Element<'a, M
     .align_y(Alignment::Center);
 
     if chat.unread_count > 0 {
-        bottom_row = bottom_row.push(Space::with_width(Fill));
+        bottom_row = bottom_row.push(Space::new().width(Fill));
         bottom_row = bottom_row.push(
             container(
                 text(chat.unread_count.to_string())

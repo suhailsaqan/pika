@@ -106,7 +106,7 @@ pub fn danger_button_style(_theme: &Theme, status: button::Status) -> button::St
 
 pub fn dark_input_style(_theme: &Theme, status: text_input::Status) -> text_input::Style {
     let border_color = match status {
-        text_input::Status::Focused => ACCENT_BLUE,
+        text_input::Status::Focused { .. } => ACCENT_BLUE,
         text_input::Status::Hovered => TEXT_FADED,
         _ => INPUT_BORDER,
     };

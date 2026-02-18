@@ -3,17 +3,24 @@ mod theme;
 mod views;
 
 use app_manager::AppManager;
-use iced::widget::{column, container, row, text, vertical_rule};
-use iced::{Element, Fill, Size, Subscription, Task, Theme};
+use iced::widget::{column, container, row, rule, text};
+use iced::{Element, Fill, Font, Size, Subscription, Task, Theme};
 use pika_core::{AppAction, AppState, AuthState};
 use std::time::Duration;
 
 pub fn main() -> iced::Result {
-    iced::application("Pika Desktop", DesktopApp::update, DesktopApp::view)
+    iced::application(DesktopApp::new, DesktopApp::update, DesktopApp::view)
+        .title("Pika Desktop")
         .subscription(DesktopApp::subscription)
-        .theme(|_| Theme::Dark)
+        .theme(dark_theme)
         .window_size(Size::new(1024.0, 720.0))
-        .run_with(DesktopApp::new)
+        .font(include_bytes!("../fonts/UbuntuSansMono.ttf").as_slice())
+        .default_font(Font::with_name("Ubuntu Sans Mono"))
+        .run()
+}
+
+fn dark_theme(_state: &DesktopApp) -> Theme {
+    Theme::Dark
 }
 
 struct DesktopApp {
@@ -239,7 +246,7 @@ impl DesktopApp {
                 views::empty_state::empty_state_view()
             };
 
-        let content = row![rail, vertical_rule(1), center_pane].height(Fill);
+        let content = row![rail, rule::vertical(1), center_pane].height(Fill);
 
         main_column = main_column.push(content);
 
