@@ -27,6 +27,54 @@ use crate::updates::{AppUpdate, CoreMsg, InternalEvent};
 
 use mdk_core::prelude::{GroupId, MessageProcessingResult, NostrGroupConfigData};
 use mdk_storage_traits::groups::Pagination;
+
+/// Load all cached profiles from the on-disk database as `FollowListEntry`.
+pub(crate) fn load_cached_profiles(data_dir: &str) -> Vec<crate::state::FollowListEntry> {
+    use nostr_sdk::ToBech32;
+
+    let conn = match profile_db::open_profile_db(data_dir) {
+        Ok(c) => c,
+        Err(_) => return vec![],
+    };
+    let profiles = profile_db::load_profiles(&conn);
+    let mut entries: Vec<crate::state::FollowListEntry> = profiles
+        .into_iter()
+        .filter_map(|(pubkey, cache)| {
+            let name = cache.name.as_ref()?;
+            if name.trim().is_empty() {
+                return None;
+            }
+            let npub = nostr_sdk::prelude::PublicKey::from_hex(&pubkey)
+                .ok()
+                .and_then(|pk| pk.to_bech32().ok())
+                .unwrap_or_else(|| pubkey.clone());
+            let picture_url = if cache.picture_url.is_some() {
+                let path = profile_pics::cached_path(data_dir, &pubkey);
+                if path.exists() {
+                    Some(profile_pics::path_to_file_url(&path))
+                } else {
+                    cache.picture_url.clone()
+                }
+            } else {
+                None
+            };
+            Some(crate::state::FollowListEntry {
+                pubkey,
+                npub,
+                name: Some(name.clone()),
+                picture_url,
+            })
+        })
+        .collect();
+    entries.sort_by(|a, b| {
+        a.name
+            .as_deref()
+            .unwrap_or("")
+            .to_lowercase()
+            .cmp(&b.name.as_deref().unwrap_or("").to_lowercase())
+    });
+    entries
+}
 use nostr_sdk::prelude::*;
 
 use interop::{

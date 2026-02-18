@@ -11,6 +11,7 @@ use crate::Message;
 pub fn conversation_view<'a>(
     chat: &'a ChatViewState,
     message_input: &str,
+    avatar_cache: &mut super::avatar::AvatarCache,
 ) -> Element<'a, Message, Theme> {
     // ── Header bar ──────────────────────────────────────────────────
     let title = chat_title(chat);
@@ -36,7 +37,7 @@ pub fn conversation_view<'a>(
 
     let header = container(
         row![
-            avatar_circle(Some(&*title), picture_url, 36.0),
+            avatar_circle(Some(&*title), picture_url, 36.0, avatar_cache),
             header_info,
         ]
         .spacing(10)

@@ -1,18 +1,63 @@
+use std::collections::HashMap;
+
 use iced::widget::{container, image, text};
 use iced::{Alignment, Element, Length, Theme};
 
 use crate::theme;
 
-/// Renders a circular avatar. Shows the profile picture if a local file:// URL
-/// is available, otherwise falls back to an initials circle.
+/// Cache of pre-processed circular avatar images keyed by file path.
+pub struct AvatarCache {
+    handles: HashMap<String, image::Handle>,
+    /// How many new images to decode per view() call (avoids stutter).
+    budget: usize,
+    spent: usize,
+}
+
+impl AvatarCache {
+    pub fn new() -> Self {
+        Self {
+            handles: HashMap::new(),
+            budget: 10,
+            spent: 0,
+        }
+    }
+
+    /// Reset the per-frame decode budget. Call once at the start of view().
+    pub fn reset_budget(&mut self) {
+        self.spent = 0;
+    }
+
+    /// Clear the entire cache (e.g. on logout).
+    pub fn clear(&mut self) {
+        self.handles.clear();
+    }
+
+    fn get_or_load(&mut self, path: &str, size: u32) -> Option<image::Handle> {
+        if let Some(handle) = self.handles.get(path) {
+            return Some(handle.clone());
+        }
+
+        // Limit decodes per frame to avoid stutter.
+        if self.spent >= self.budget {
+            return None;
+        }
+        self.spent += 1;
+
+        let handle = load_circular_image(path, size)?;
+        self.handles.insert(path.to_string(), handle.clone());
+        Some(handle)
+    }
+}
+
+/// Renders a circular avatar. Uses the cache to avoid repeated decoding.
 pub fn avatar_circle<'a, M: 'a>(
     name: Option<&str>,
     picture_url: Option<&str>,
     size: f32,
+    cache: &mut AvatarCache,
 ) -> Element<'a, M, Theme> {
-    // Try to use a cached profile picture (file:// URL from core).
     if let Some(path) = picture_url.and_then(local_path_from_url) {
-        if let Some(handle) = load_circular_image(&path, size as u32) {
+        if let Some(handle) = cache.get_or_load(&path, size as u32) {
             return image(handle)
                 .width(Length::Fixed(size))
                 .height(Length::Fixed(size))
@@ -41,14 +86,12 @@ pub fn avatar_circle<'a, M: 'a>(
     .into()
 }
 
-/// Load an image, resize it, and apply a circular alpha mask.
 fn load_circular_image(path: &str, size: u32) -> Option<image::Handle> {
     let bytes = std::fs::read(path).ok()?;
     let img = ::image::load_from_memory(&bytes).ok()?;
     let img = img.resize_to_fill(size, size, ::image::imageops::FilterType::Lanczos3);
     let mut rgba = img.into_rgba8();
 
-    // Apply circular mask: set alpha to 0 for pixels outside the circle.
     let center = size as f32 / 2.0;
     let radius = center;
     for y in 0..size {
@@ -64,7 +107,6 @@ fn load_circular_image(path: &str, size: u32) -> Option<image::Handle> {
     Some(image::Handle::from_rgba(size, size, rgba.into_raw()))
 }
 
-/// Extract a local filesystem path from a `file://` URL.
 fn local_path_from_url(url: &str) -> Option<String> {
     url.strip_prefix("file://").map(|s| s.to_string())
 }

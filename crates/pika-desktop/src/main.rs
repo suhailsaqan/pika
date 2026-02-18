@@ -27,8 +27,12 @@ struct DesktopApp {
     manager: Option<AppManager>,
     boot_error: Option<String>,
     state: AppState,
+    avatar_cache: std::cell::RefCell<views::avatar::AvatarCache>,
+    cached_profiles: Vec<pika_core::FollowListEntry>,
     nsec_input: String,
     new_chat_input: String,
+    new_chat_search: String,
+    filtered_follows: Vec<pika_core::FollowListEntry>,
     message_input: String,
     show_new_chat_form: bool,
     selected_chat_id: Option<String>,
@@ -42,7 +46,9 @@ pub enum Message {
     CreateAccount,
     Logout,
     NewChatChanged(String),
+    NewChatSearchChanged(String),
     StartChat,
+    StartChatWith(String),
     ToggleNewChatForm,
     OpenChat(String),
     MessageChanged(String),
@@ -52,6 +58,9 @@ pub enum Message {
 
 impl DesktopApp {
     fn new() -> (Self, Task<Message>) {
+        let data_dir = Self::data_dir();
+        let cached_profiles = pika_core::load_cached_profiles(&data_dir);
+
         match AppManager::new() {
             Ok(manager) => {
                 let state = manager.state();
@@ -60,8 +69,12 @@ impl DesktopApp {
                         manager: Some(manager),
                         boot_error: None,
                         state,
+                        avatar_cache: std::cell::RefCell::new(views::avatar::AvatarCache::new()),
+                        cached_profiles,
                         nsec_input: String::new(),
                         new_chat_input: String::new(),
+                        new_chat_search: String::new(),
+                        filtered_follows: Vec::new(),
                         message_input: String::new(),
                         show_new_chat_form: false,
                         selected_chat_id: None,
@@ -74,8 +87,12 @@ impl DesktopApp {
                     manager: None,
                     boot_error: Some(format!("failed to start desktop manager: {error}")),
                     state: AppState::empty(),
+                    avatar_cache: std::cell::RefCell::new(views::avatar::AvatarCache::new()),
+                    cached_profiles,
                     nsec_input: String::new(),
                     new_chat_input: String::new(),
+                    new_chat_search: String::new(),
+                    filtered_follows: Vec::new(),
                     message_input: String::new(),
                     show_new_chat_form: false,
                     selected_chat_id: None,
@@ -117,6 +134,18 @@ impl DesktopApp {
                             self.selected_chat_id = None;
                         }
                         self.state = latest;
+                        if self.show_new_chat_form {
+                            self.refilter_follows();
+                        }
+                    }
+                    // Retry outside the manager borrow
+                    if self.show_new_chat_form
+                        && self.state.follow_list.is_empty()
+                        && !self.state.busy.fetching_follow_list
+                    {
+                        if let Some(manager) = &self.manager {
+                            manager.dispatch(AppAction::RefreshFollowList);
+                        }
                     }
                 }
             }
@@ -135,14 +164,27 @@ impl DesktopApp {
                 if let Some(manager) = &self.manager {
                     manager.logout();
                 }
+                self.avatar_cache.borrow_mut().clear();
                 self.selected_chat_id = None;
                 self.show_new_chat_form = false;
             }
             Message::NewChatChanged(value) => self.new_chat_input = value,
+            Message::NewChatSearchChanged(value) => {
+                self.new_chat_search = value;
+                self.refilter_follows();
+            }
             Message::ToggleNewChatForm => {
                 self.show_new_chat_form = !self.show_new_chat_form;
                 if !self.show_new_chat_form {
                     self.new_chat_input.clear();
+                    self.new_chat_search.clear();
+                }
+                // Refresh follow list when opening
+                if self.show_new_chat_form {
+                    self.refilter_follows();
+                    if let Some(manager) = &self.manager {
+                        manager.dispatch(AppAction::RefreshFollowList);
+                    }
                 }
             }
             Message::StartChat => {
@@ -153,11 +195,17 @@ impl DesktopApp {
                 if let Some(manager) = &self.manager {
                     manager.dispatch(AppAction::CreateChat { peer_npub });
                 }
+            }
+            Message::StartChatWith(peer_npub) => {
+                if let Some(manager) = &self.manager {
+                    manager.dispatch(AppAction::CreateChat { peer_npub });
+                }
                 // Keep form open — it will show a loading state via busy.creating_chat.
                 // Form closes when the tick detects creating_chat went false.
             }
             Message::OpenChat(chat_id) => {
                 self.selected_chat_id = Some(chat_id.clone());
+                self.show_new_chat_form = false;
                 if let Some(manager) = &self.manager {
                     manager.dispatch(AppAction::OpenChat { chat_id });
                 }
@@ -229,22 +277,32 @@ impl DesktopApp {
             main_column = main_column.push(views::toast::toast_bar(toast_msg));
         }
 
+        let cache = &mut *self.avatar_cache.borrow_mut();
+        cache.reset_budget();
+
         // Chat rail (left sidebar)
         let rail = views::chat_rail::chat_rail_view(
             &self.state.chat_list,
             self.selected_chat_id.as_deref(),
             self.show_new_chat_form,
-            &self.new_chat_input,
-            self.state.busy.creating_chat,
+            cache,
         );
 
-        // Conversation or empty state (center)
-        let center_pane: Element<'_, Message> =
-            if let Some(chat) = &self.state.current_chat {
-                views::conversation::conversation_view(chat, &self.message_input)
-            } else {
-                views::empty_state::empty_state_view()
-            };
+        // Center pane: new chat, conversation, or empty state
+        let center_pane: Element<'_, Message> = if self.show_new_chat_form {
+            views::new_chat::new_chat_view(
+                &self.filtered_follows,
+                &self.new_chat_input,
+                self.state.busy.creating_chat,
+                self.state.busy.fetching_follow_list,
+                &self.new_chat_search,
+                cache,
+            )
+        } else if let Some(chat) = &self.state.current_chat {
+            views::conversation::conversation_view(chat, &self.message_input, cache)
+        } else {
+            views::empty_state::empty_state_view()
+        };
 
         let content = row![rail, rule::vertical(1), center_pane].height(Fill);
 
@@ -255,5 +313,46 @@ impl DesktopApp {
             .height(Fill)
             .style(theme::surface_style)
             .into()
+    }
+
+    fn data_dir() -> String {
+        if let Some(raw) = std::env::var_os("PIKA_DESKTOP_DATA_DIR") {
+            return raw.to_string_lossy().to_string();
+        }
+        if let Some(home) = std::env::var_os("HOME") {
+            return std::path::Path::new(&home)
+                .join(".pika-desktop")
+                .to_string_lossy()
+                .to_string();
+        }
+        ".pika-desktop".to_string()
+    }
+
+    fn refilter_follows(&mut self) {
+        // Use the relay follow list if available, otherwise fall back to
+        // all cached profiles from the on-disk database.
+        let source = if self.state.follow_list.is_empty() {
+            &self.cached_profiles
+        } else {
+            &self.state.follow_list
+        };
+
+        if self.new_chat_search.is_empty() {
+            self.filtered_follows = source.clone();
+        } else {
+            let q = self.new_chat_search.to_lowercase();
+            self.filtered_follows = source
+                .iter()
+                .filter(|e| {
+                    e.name
+                        .as_deref()
+                        .unwrap_or("")
+                        .to_lowercase()
+                        .contains(&q)
+                        || e.npub.to_lowercase().contains(&q)
+                })
+                .cloned()
+                .collect();
+        }
     }
 }

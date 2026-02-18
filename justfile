@@ -594,8 +594,8 @@ desktop-check:
   cargo check -p pika-desktop
 
 # Run the desktop ICED app.
-run-desktop:
-  cargo run -p pika-desktop
+run-desktop *ARGS:
+  cargo run -p pika-desktop {{ARGS}}
 
 # Check iOS dev environment (Xcode, simulators, runtimes).
 doctor-ios:
