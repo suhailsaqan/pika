@@ -53,7 +53,8 @@ impl ManagerModel {
             AppUpdate::FullState(state) => {
                 if self.is_restoring_session
                     && (!matches!(state.auth, AuthState::LoggedOut)
-                        || state.router.default_screen != Screen::Login)
+                        || state.router.default_screen != Screen::Login
+                        || state.toast.is_some())
                 {
                     self.is_restoring_session = false;
                 }

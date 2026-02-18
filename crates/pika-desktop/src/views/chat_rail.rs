@@ -12,6 +12,7 @@ pub fn chat_rail_view<'a>(
     selected_id: Option<&str>,
     show_new_chat_form: bool,
     new_chat_input: &str,
+    creating_chat: bool,
 ) -> Element<'a, Message, Theme> {
     // ── Header ──────────────────────────────────────────────────────
     let header = row![
@@ -27,13 +28,25 @@ pub fn chat_rail_view<'a>(
 
     // ── New-chat form (conditional) ─────────────────────────────────
     let new_chat_form: Option<Element<'a, Message, Theme>> = if show_new_chat_form {
-        Some(
-            column![
-                text_input("npub1\u{2026}", new_chat_input)
-                    .on_input(Message::NewChatChanged)
-                    .on_submit(Message::StartChat)
-                    .padding(8)
-                    .style(theme::dark_input_style),
+        let mut form = column![
+            text_input("npub1\u{2026}", new_chat_input)
+                .on_input(Message::NewChatChanged)
+                .on_submit(Message::StartChat)
+                .padding(8)
+                .style(theme::dark_input_style),
+        ]
+        .spacing(6);
+
+        if creating_chat {
+            form = form.push(
+                text("Creating chat\u{2026}")
+                    .size(13)
+                    .color(theme::TEXT_FADED)
+                    .center()
+                    .width(Fill),
+            );
+        } else {
+            form = form.push(
                 row![
                     button(text("Start Chat").size(13).center())
                         .on_press(Message::StartChat)
@@ -46,10 +59,10 @@ pub fn chat_rail_view<'a>(
                         .style(theme::secondary_button_style),
                 ]
                 .spacing(6),
-            ]
-            .spacing(6)
-            .into(),
-        )
+            );
+        }
+
+        Some(form.into())
     } else {
         None
     };
@@ -114,8 +127,14 @@ fn chat_item<'a>(chat: &ChatSummary, selected_id: Option<&str>) -> Element<'a, M
         Space::with_width(0).into()
     };
 
+    let picture_url = chat
+        .members
+        .iter()
+        .find(|m| !m.npub.is_empty())
+        .and_then(|m| m.picture_url.as_deref());
+
     let avatar: Element<'a, Message, Theme> =
-        avatar_circle(Some(&name), &chat.chat_id, 40.0);
+        avatar_circle(Some(&name), picture_url, 40.0);
 
     // Name + timestamp row
     let top_row = row![

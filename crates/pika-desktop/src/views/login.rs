@@ -9,6 +9,7 @@ pub fn login_view<'a>(
     nsec_input: &str,
     busy: bool,
     is_restoring: bool,
+    toast: Option<&'a str>,
 ) -> Element<'a, Message, Theme> {
     let heading = text("Pika").size(36).color(theme::TEXT_PRIMARY).center();
 
@@ -63,7 +64,23 @@ pub fn login_view<'a>(
     .max_width(420)
     .align_x(Center);
 
-    if is_restoring {
+    if let Some(msg) = toast {
+        card = card.push(
+            row![
+                text(msg).size(13).color(theme::DANGER),
+                button(text("\u{2715}").size(12).color(theme::TEXT_FADED))
+                    .on_press(Message::ClearToast)
+                    .padding([2, 6])
+                    .style(|_: &Theme, _: button::Status| button::Style {
+                        background: None,
+                        text_color: theme::TEXT_FADED,
+                        ..Default::default()
+                    }),
+            ]
+            .spacing(8)
+            .align_y(iced::Alignment::Center),
+        );
+    } else if is_restoring {
         card = card.push(
             text("Restoring previous session\u{2026}")
                 .size(13)

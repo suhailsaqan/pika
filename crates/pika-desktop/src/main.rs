@@ -92,6 +92,19 @@ impl DesktopApp {
                 if let Some(manager) = &self.manager {
                     let latest = manager.state();
                     if latest.rev != self.state.rev {
+                        // On login transition, dispatch Foregrounded to load profiles
+                        let was_logged_out = matches!(self.state.auth, AuthState::LoggedOut);
+                        let now_logged_in = matches!(latest.auth, AuthState::LoggedIn { .. });
+                        if was_logged_out && now_logged_in {
+                            manager.dispatch(AppAction::Foregrounded);
+                        }
+
+                        // Close new-chat form once creating_chat finishes
+                        if self.state.busy.creating_chat && !latest.busy.creating_chat {
+                            self.show_new_chat_form = false;
+                            self.new_chat_input.clear();
+                        }
+
                         // Sync selected_chat_id if core's current_chat changed
                         if latest.current_chat.is_none() {
                             self.selected_chat_id = None;
@@ -133,8 +146,8 @@ impl DesktopApp {
                 if let Some(manager) = &self.manager {
                     manager.dispatch(AppAction::CreateChat { peer_npub });
                 }
-                self.new_chat_input.clear();
-                self.show_new_chat_form = false;
+                // Keep form open — it will show a loading state via busy.creating_chat.
+                // Form closes when the tick detects creating_chat went false.
             }
             Message::OpenChat(chat_id) => {
                 self.selected_chat_id = Some(chat_id.clone());
@@ -197,6 +210,7 @@ impl DesktopApp {
                 &self.nsec_input,
                 self.state.busy.creating_account,
                 is_restoring,
+                self.state.toast.as_deref(),
             );
         }
 
@@ -214,6 +228,7 @@ impl DesktopApp {
             self.selected_chat_id.as_deref(),
             self.show_new_chat_form,
             &self.new_chat_input,
+            self.state.busy.creating_chat,
         );
 
         // Conversation or empty state (center)

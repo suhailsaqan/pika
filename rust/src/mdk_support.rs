@@ -63,7 +63,8 @@ fn init_keyring_inner(#[allow(unused)] keychain_group: &str) -> Result<()> {
 
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
     {
-        // Desktop/dev fallback: keep encrypted storage working for local iteration.
+        // Desktop/dev: mock store so keyring_core is initialized (the file-based key
+        // path in `open_mdk` bypasses keyring entirely on desktop).
         keyring_core::set_default_store(
             keyring_core::mock::Store::new().context("failed to create mock keyring store")?,
         );
@@ -81,6 +82,16 @@ pub fn open_mdk(data_dir: &str, pubkey: &PublicKey, keychain_group: &str) -> Res
             .with_context(|| format!("create mdk db dir: {}", parent.display()))?;
     }
 
+    // On desktop (non-iOS, non-Android) always use a file-based key because the
+    // mock keyring store is in-memory and keys are lost when the process exits.
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    {
+        return open_mdk_desktop_file_key(data_dir, pubkey).with_context(|| {
+            format!("open encrypted mdk sqlite db: {}", db_path.display())
+        });
+    }
+
+    #[allow(unreachable_code)]
     let storage = match MdkSqliteStorage::new(&db_path, SERVICE_ID, &db_key_id(&pubkey_hex)) {
         Ok(storage) => storage,
         Err(e) => {
@@ -112,6 +123,65 @@ fn mdk_config() -> MdkConfig {
     MdkConfig {
         ..Default::default()
     }
+}
+
+/// Desktop: file-based encryption key stored next to the DB file.
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+fn open_mdk_desktop_file_key(data_dir: &str, pubkey: &PublicKey) -> Result<PikaMdk> {
+    let pubkey_hex = pubkey.to_hex();
+    let db_path = mdk_db_path(data_dir, &pubkey_hex);
+    let key_path = db_path.with_extension("key");
+
+    if let Some(parent) = key_path.parent() {
+        std::fs::create_dir_all(parent)
+            .with_context(|| format!("create mdk key dir: {}", parent.display()))?;
+    }
+
+    let key: [u8; 32] = if key_path.exists() {
+        let bytes = std::fs::read(&key_path)
+            .with_context(|| format!("read mdk file key: {}", key_path.display()))?;
+        bytes.as_slice().try_into().map_err(|_| {
+            anyhow!(
+                "invalid mdk file key length: expected 32 bytes, got {}",
+                bytes.len()
+            )
+        })?
+    } else {
+        use rand::rngs::OsRng;
+        use rand::RngCore;
+
+        let mut k = [0u8; 32];
+        OsRng.fill_bytes(&mut k);
+        std::fs::write(&key_path, &k)
+            .with_context(|| format!("write mdk file key: {}", key_path.display()))?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = std::fs::set_permissions(&key_path, std::fs::Permissions::from_mode(0o600));
+        }
+        k
+    };
+
+    // If a previous attempt created an empty DB file (e.g., keyring failure mid-init),
+    // remove it so we can initialize encrypted storage cleanly.
+    if let Ok(meta) = std::fs::metadata(&db_path) {
+        if meta.len() == 0 {
+            let _ = std::fs::remove_file(&db_path);
+        }
+    }
+
+    let storage =
+        MdkSqliteStorage::new_with_key(&db_path, mdk_sqlite_storage::EncryptionConfig::new(key))
+            .with_context(|| {
+                format!(
+                    "open encrypted mdk sqlite db with file key: {}",
+                    db_path.display()
+                )
+            })?;
+
+    Ok(MDK::builder(storage)
+        .with_config(MdkConfig::default())
+        .build())
 }
 
 #[cfg(all(target_os = "ios", target_env = "sim"))]

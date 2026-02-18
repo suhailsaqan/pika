@@ -29,10 +29,14 @@ pub fn conversation_view<'a>(
         );
     }
 
-    let avatar_name = title.chars().next().unwrap_or('?').to_string();
+    let picture_url = chat
+        .members
+        .first()
+        .and_then(|m| m.picture_url.as_deref());
+
     let header = container(
         row![
-            avatar_circle(Some(&*avatar_name), &chat.chat_id, 36.0),
+            avatar_circle(Some(&*title), picture_url, 36.0),
             header_info,
         ]
         .spacing(10)
