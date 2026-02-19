@@ -280,7 +280,18 @@ impl DesktopApp {
                     manager.dispatch(AppAction::OpenChat { chat_id });
                 }
             }
-            Message::MessageChanged(value) => self.message_input = value,
+            Message::MessageChanged(value) => {
+                if !value.trim().is_empty() {
+                    if let Some(chat) = &self.state.current_chat {
+                        if let Some(manager) = &self.manager {
+                            manager.dispatch(AppAction::TypingStarted {
+                                chat_id: chat.chat_id.clone(),
+                            });
+                        }
+                    }
+                }
+                self.message_input = value;
+            }
             Message::SendMessage => {
                 let content = self.message_input.trim().to_string();
                 if content.is_empty() {

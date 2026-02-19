@@ -109,11 +109,42 @@ pub fn conversation_view<'a>(
     .width(Fill)
     .style(theme::input_bar_style);
 
+    // ── Typing indicator ─────────────────────────────────────────────
+    let typing_indicator: Option<Element<'a, Message, Theme>> = if !chat.typing_members.is_empty() {
+        let label = match chat.typing_members.len() {
+            1 => {
+                let name = chat.typing_members[0].name.as_deref().unwrap_or("Someone");
+                format!("{name} is typing\u{2026}")
+            }
+            2 => {
+                let a = chat.typing_members[0].name.as_deref().unwrap_or("Someone");
+                let b = chat.typing_members[1].name.as_deref().unwrap_or("Someone");
+                format!("{a} and {b} are typing\u{2026}")
+            }
+            n => {
+                let first = chat.typing_members[0].name.as_deref().unwrap_or("Someone");
+                format!("{first} and {} others are typing\u{2026}", n - 1)
+            }
+        };
+        Some(
+            container(text(label).size(12).color(theme::TEXT_SECONDARY))
+                .padding([4, 16])
+                .into(),
+        )
+    } else {
+        None
+    };
+
     // ── Compose ─────────────────────────────────────────────────────
-    column![header, rule::horizontal(1), message_scroll, input_bar,]
+    let mut layout = column![header, rule::horizontal(1), message_scroll,]
         .width(Fill)
-        .height(Fill)
-        .into()
+        .height(Fill);
+
+    if let Some(indicator) = typing_indicator {
+        layout = layout.push(indicator);
+    }
+
+    layout.push(input_bar).into()
 }
 
 fn chat_title(chat: &ChatViewState) -> String {
