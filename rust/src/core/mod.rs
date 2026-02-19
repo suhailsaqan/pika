@@ -39,11 +39,7 @@ pub(crate) fn load_cached_profiles(data_dir: &str) -> Vec<crate::state::FollowLi
     let profiles = profile_db::load_profiles(&conn);
     let mut entries: Vec<crate::state::FollowListEntry> = profiles
         .into_iter()
-        .filter_map(|(pubkey, cache)| {
-            let name = cache.name.as_ref()?;
-            if name.trim().is_empty() {
-                return None;
-            }
+        .map(|(pubkey, cache)| {
             let npub = nostr_sdk::prelude::PublicKey::from_hex(&pubkey)
                 .ok()
                 .and_then(|pk| pk.to_bech32().ok())
@@ -58,20 +54,18 @@ pub(crate) fn load_cached_profiles(data_dir: &str) -> Vec<crate::state::FollowLi
             } else {
                 None
             };
-            Some(crate::state::FollowListEntry {
+            crate::state::FollowListEntry {
                 pubkey,
                 npub,
-                name: Some(name.clone()),
+                name: cache.name.filter(|name| !name.trim().is_empty()),
                 picture_url,
-            })
+            }
         })
         .collect();
     entries.sort_by(|a, b| {
-        a.name
-            .as_deref()
-            .unwrap_or("")
-            .to_lowercase()
-            .cmp(&b.name.as_deref().unwrap_or("").to_lowercase())
+        let a_key = a.name.as_deref().unwrap_or(a.npub.as_str()).to_lowercase();
+        let b_key = b.name.as_deref().unwrap_or(b.npub.as_str()).to_lowercase();
+        a_key.cmp(&b_key)
     });
     entries
 }

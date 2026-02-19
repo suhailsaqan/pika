@@ -20,6 +20,7 @@ struct ManagerModel {
     state: AppState,
     last_rev_applied: u64,
     is_restoring_session: bool,
+    pending_login_nsec: Option<String>,
 }
 
 impl ManagerModel {
@@ -28,6 +29,7 @@ impl ManagerModel {
             last_rev_applied: initial.rev,
             state: initial,
             is_restoring_session: false,
+            pending_login_nsec: None,
         }
     }
 
@@ -51,6 +53,18 @@ impl ManagerModel {
         self.last_rev_applied = update_rev;
         match update {
             AppUpdate::FullState(state) => {
+                if matches!(state.auth, AuthState::LoggedIn { .. }) {
+                    if let Some(nsec) = self.pending_login_nsec.take() {
+                        nsec_store.set_nsec(&nsec);
+                    }
+                } else if state.toast.as_deref().is_some_and(|msg| {
+                    msg.starts_with("Invalid nsec:")
+                        || msg.starts_with("Login failed:")
+                        || msg == "Enter an nsec"
+                }) {
+                    self.pending_login_nsec = None;
+                }
+
                 if self.is_restoring_session
                     && (!matches!(state.auth, AuthState::LoggedOut)
                         || state.router.default_screen != Screen::Login
@@ -64,6 +78,7 @@ impl ManagerModel {
                 if !nsec.is_empty() {
                     nsec_store.set_nsec(&nsec);
                 }
+                self.pending_login_nsec = None;
                 self.state.rev = rev;
             }
         }
@@ -121,8 +136,14 @@ impl AppManager {
     }
 
     pub fn login_with_nsec(&self, nsec: String) {
-        if !nsec.is_empty() {
-            self.inner.nsec_store.set_nsec(&nsec);
+        let nsec = nsec.trim().to_string();
+        {
+            let mut model = write_model(&self.inner.model);
+            model.pending_login_nsec = if nsec.is_empty() {
+                None
+            } else {
+                Some(nsec.clone())
+            };
         }
         self.inner.core.dispatch(AppAction::Login { nsec });
     }
@@ -175,6 +196,30 @@ impl FileNsecStore {
         if nsec.trim().is_empty() {
             return;
         }
+        if let Some(parent) = self.path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+
+        #[cfg(unix)]
+        {
+            use std::io::Write as _;
+            use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+
+            if let Ok(mut file) = std::fs::OpenOptions::new()
+                .create(true)
+                .write(true)
+                .truncate(true)
+                .mode(0o600)
+                .open(&self.path)
+            {
+                let _ = file.write_all(nsec.as_bytes());
+                let _ = file.sync_data();
+                let _ =
+                    std::fs::set_permissions(&self.path, std::fs::Permissions::from_mode(0o600));
+                return;
+            }
+        }
+
         let _ = std::fs::write(&self.path, nsec.as_bytes());
     }
 
@@ -288,5 +333,52 @@ mod tests {
 
         assert!(!model.is_restoring_session);
         assert_eq!(model.state.rev, 1);
+    }
+
+    #[test]
+    fn pending_login_nsec_persists_after_successful_login() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let store = FileNsecStore::new(tmp.path().join("nsec.txt"));
+        let mut model = ManagerModel::new(state_with(0, false));
+        model.pending_login_nsec = Some("nsec1pending".to_string());
+
+        model.apply_update(AppUpdate::FullState(state_with(1, true)), &store);
+
+        assert_eq!(store.get_nsec().as_deref(), Some("nsec1pending"));
+        assert!(model.pending_login_nsec.is_none());
+    }
+
+    #[test]
+    fn pending_login_nsec_clears_after_login_error_toast() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let store = FileNsecStore::new(tmp.path().join("nsec.txt"));
+        let mut model = ManagerModel::new(state_with(0, false));
+        model.pending_login_nsec = Some("nsec1bad".to_string());
+
+        let mut failed = state_with(1, false);
+        failed.toast = Some("Invalid nsec: parse error".to_string());
+        model.apply_update(AppUpdate::FullState(failed), &store);
+
+        assert_eq!(store.get_nsec(), None);
+        assert!(model.pending_login_nsec.is_none());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn nsec_store_uses_owner_only_permissions() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let path = tmp.path().join("nsec.txt");
+        let store = FileNsecStore::new(path.clone());
+
+        store.set_nsec("nsec1secure");
+
+        let mode = std::fs::metadata(path)
+            .expect("metadata")
+            .permissions()
+            .mode()
+            & 0o777;
+        assert_eq!(mode, 0o600);
     }
 }

@@ -146,7 +146,7 @@ fn member_row<'a>(
     .spacing(10)
     .align_y(Alignment::Center);
 
-    if is_me {
+    if is_me && is_admin {
         row_content = row_content.push(text("Admin").size(12).color(theme::TEXT_FADED));
     } else if is_admin {
         let pubkey = member.pubkey.clone();
