@@ -69,6 +69,10 @@ pub(crate) fn load_cached_profiles(data_dir: &str) -> Vec<crate::state::FollowLi
     });
     entries
 }
+
+pub(crate) fn default_app_config_json() -> String {
+    config::default_app_config_json()
+}
 use nostr_sdk::prelude::*;
 
 use interop::{
@@ -852,10 +856,15 @@ impl AppCore {
             InternalEvent::KeyPackagePublished { ok, ref error } => {
                 tracing::info!(ok, ?error, "key_package_published");
                 if !ok {
-                    self.toast(format!(
-                        "Key package publish failed: {}",
-                        error.clone().unwrap_or_else(|| "unknown error".into())
-                    ));
+                    let msg = error.clone().unwrap_or_else(|| "unknown error".into());
+                    if msg.contains("no relays")
+                        || msg.contains("not ready")
+                        || msg.contains("not connected")
+                    {
+                        self.toast("Key package publish delayed: relay connection is not ready");
+                    } else {
+                        self.toast(format!("Key package publish failed: {msg}"));
+                    }
                 }
             }
             InternalEvent::PushSubscriptionsSynced { groups } => {

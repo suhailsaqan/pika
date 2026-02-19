@@ -22,6 +22,8 @@ const DEFAULT_KEY_PACKAGE_RELAY_URLS: &[&str] = &[
     "wss://nostr-02.yakihonne.com",
     "wss://relay.satlantis.io",
 ];
+const DEFAULT_CALL_MOQ_URL: &str = "https://us-east.moq.logos.surf/anon";
+const DEFAULT_CALL_BROADCAST_PREFIX: &str = "pika/calls";
 
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(default)]
@@ -43,6 +45,16 @@ pub(super) fn load_app_config(data_dir: &str) -> AppConfig {
         return AppConfig::default();
     };
     serde_json::from_slice::<AppConfig>(&bytes).unwrap_or_default()
+}
+
+pub(super) fn default_app_config_json() -> String {
+    serde_json::json!({
+        "relay_urls": DEFAULT_RELAY_URLS,
+        "key_package_relay_urls": DEFAULT_KEY_PACKAGE_RELAY_URLS,
+        "call_moq_url": DEFAULT_CALL_MOQ_URL,
+        "call_broadcast_prefix": DEFAULT_CALL_BROADCAST_PREFIX,
+    })
+    .to_string()
 }
 
 impl AppCore {
