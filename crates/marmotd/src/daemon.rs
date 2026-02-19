@@ -232,6 +232,11 @@ struct CallMediaCryptoContext {
 #[derive(Debug)]
 enum CallWorkerEvent {
     TranscriptFinal { call_id: String, text: String },
+    AudioPublished {
+        call_id: String,
+        request_id: Option<String>,
+        result: anyhow::Result<VoicePublishStats>,
+    },
 }
 
 #[derive(Debug)]
@@ -1092,6 +1097,9 @@ fn publish_pcm_audio_response_with_transport(
             .context("publish tts frame")?;
         seq = seq.saturating_add(1);
         frames = frames.saturating_add(1);
+        // Pace frame delivery at ~real-time so the receiver doesn't get a
+        // burst of frames it can't buffer properly.
+        std::thread::sleep(Duration::from_millis(track.frame_ms as u64));
     }
 
     Ok(VoicePublishStats {
@@ -2450,58 +2458,39 @@ pub async fn daemon_main(
                             channels,
                             pcm_i16,
                         };
-                        match publish_pcm_audio_response(
-                            &current.session,
-                            &current.media_crypto,
-                            current.next_voice_seq,
-                            tts_pcm,
-                        ) {
-                            Ok(stats) => {
-                                current.next_voice_seq = stats.next_seq;
-                                tracing::info!(
-                                    "[marmotd] send_audio_file ok call_id={} frames={} next_seq={}",
-                                    call_id,
-                                    stats.frames_published,
-                                    stats.next_seq
-                                );
-                                let publish_path = broadcast_path(
-                                    &current.session.broadcast_base,
-                                    &current.media_crypto.local_participant_label,
-                                )
-                                .ok();
-                                let subscribe_path = broadcast_path(
-                                    &current.session.broadcast_base,
-                                    &current.media_crypto.peer_participant_label,
-                                )
-                                .ok();
-                                let track_name = call_audio_track_spec(&current.session)
-                                    .map(|t| t.name.clone())
-                                    .unwrap_or_default();
-                                let _ = out_tx.send(out_ok(
-                                    request_id,
-                                    Some(json!({
-                                        "call_id": call_id,
-                                        "frames_published": stats.frames_published,
-                                        "publish_path": publish_path,
-                                        "subscribe_path": subscribe_path,
-                                        "track": track_name,
-                                        "local_label": current.media_crypto.local_participant_label,
-                                        "peer_label": current.media_crypto.peer_participant_label,
-                                    })),
-                                ));
-                            }
-                            Err(err) => {
-                                warn!(
-                                    "[marmotd] send_audio_file failed call_id={} err={err:#}",
-                                    call_id
-                                );
-                                let _ = out_tx.send(out_error(
-                                    request_id,
-                                    "runtime_error",
-                                    format!("audio file publish failed: {err:#}"),
-                                ));
-                            }
-                        }
+                        // Reserve the sequence range upfront so the main loop
+                        // can continue processing commands while audio publishes.
+                        let session = current.session.clone();
+                        let media_crypto = current.media_crypto.clone();
+                        let start_seq = current.next_voice_seq;
+                        // Estimate frames so we can reserve the seq range.
+                        let track_sample_rate = call_audio_track_spec(&current.session)
+                            .map(|t| t.sample_rate)
+                            .unwrap_or(48_000);
+                        let track_frame_ms = call_audio_track_spec(&current.session)
+                            .map(|t| t.frame_ms)
+                            .unwrap_or(20);
+                        let resampled_len = ((tts_pcm.pcm_i16.len() as u64)
+                            .saturating_mul(track_sample_rate as u64)
+                            / (tts_pcm.sample_rate_hz as u64).max(1)) as usize;
+                        let frame_samples = ((track_sample_rate as usize) * (track_frame_ms as usize) / 1000).max(1);
+                        let estimated_frames = resampled_len.div_ceil(frame_samples);
+                        current.next_voice_seq = start_seq.saturating_add(estimated_frames as u64);
+
+                        let evt_tx = call_evt_tx.clone();
+                        std::thread::spawn(move || {
+                            let result = publish_pcm_audio_response(
+                                &session,
+                                &media_crypto,
+                                start_seq,
+                                tts_pcm,
+                            );
+                            let _ = evt_tx.send(CallWorkerEvent::AudioPublished {
+                                call_id,
+                                request_id,
+                                result,
+                            });
+                        });
                     }
                     InCmd::Shutdown { request_id } => {
                         out_tx.send(out_ok(request_id, None)).ok();
@@ -2587,6 +2576,60 @@ pub async fn daemon_main(
                                         call_id
                                     );
                                 }
+                            }
+                        }
+                    }
+                    CallWorkerEvent::AudioPublished { call_id, request_id, result } => {
+                        match result {
+                            Ok(stats) => {
+                                // Update next_voice_seq to the actual value (may differ
+                                // slightly from the estimate used when spawning).
+                                if let Some(call) = active_call.as_mut().filter(|c| c.call_id == call_id) {
+                                    call.next_voice_seq = stats.next_seq;
+                                }
+                                tracing::info!(
+                                    "[marmotd] send_audio_file ok call_id={} frames={} next_seq={}",
+                                    call_id, stats.frames_published, stats.next_seq
+                                );
+                                let (publish_path, subscribe_path, track_name) = active_call
+                                    .as_ref()
+                                    .filter(|c| c.call_id == call_id)
+                                    .map(|c| {
+                                        let pp = broadcast_path(
+                                            &c.session.broadcast_base,
+                                            &c.media_crypto.local_participant_label,
+                                        ).ok();
+                                        let sp = broadcast_path(
+                                            &c.session.broadcast_base,
+                                            &c.media_crypto.peer_participant_label,
+                                        ).ok();
+                                        let tn = call_audio_track_spec(&c.session)
+                                            .map(|t| t.name.clone())
+                                            .unwrap_or_default();
+                                        (pp, sp, tn)
+                                    })
+                                    .unwrap_or((None, None, String::new()));
+                                let _ = out_tx.send(out_ok(
+                                    request_id,
+                                    Some(json!({
+                                        "call_id": call_id,
+                                        "frames_published": stats.frames_published,
+                                        "publish_path": publish_path,
+                                        "subscribe_path": subscribe_path,
+                                        "track": track_name,
+                                    })),
+                                ));
+                            }
+                            Err(err) => {
+                                warn!(
+                                    "[marmotd] send_audio_file failed call_id={} err={err:#}",
+                                    call_id
+                                );
+                                let _ = out_tx.send(out_error(
+                                    request_id,
+                                    "runtime_error",
+                                    format!("audio file publish failed: {err:#}"),
+                                ));
                             }
                         }
                     }
