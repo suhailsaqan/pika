@@ -260,8 +260,8 @@ impl AppCore {
         if entry.is_group {
             return None;
         }
-        if let Some((peer_pk, _, _)) = entry.members.first() {
-            return peer_pk.to_bech32().ok();
+        if let Some(peer) = entry.members.first() {
+            return peer.pubkey.to_bech32().ok();
         }
 
         // "Note to self" DMs have no members besides self. Allow them to participate in

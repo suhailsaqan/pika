@@ -62,13 +62,17 @@ impl AppCore {
 
             // Build member info with cached profiles.
             let now = crate::state::now_seconds();
-            let mut member_infos: Vec<(PublicKey, Option<String>, Option<String>)> = Vec::new();
+            let mut member_infos: Vec<super::GroupMember> = Vec::new();
             for pk in &other_members {
                 let hex = pk.to_hex();
                 let cached = self.profiles.get(&hex);
                 let name = cached.and_then(|p| p.name.clone());
                 let picture_url = cached.and_then(|p| p.display_picture_url(&self.data_dir, &hex));
-                member_infos.push((*pk, name, picture_url));
+                member_infos.push(super::GroupMember {
+                    pubkey: *pk,
+                    name,
+                    picture_url,
+                });
 
                 let needs_fetch = match cached {
                     None => true,
@@ -83,11 +87,11 @@ impl AppCore {
 
             let members_for_state: Vec<MemberInfo> = member_infos
                 .iter()
-                .map(|(pk, name, pic)| MemberInfo {
-                    pubkey: pk.to_hex(),
-                    npub: pk.to_bech32().unwrap_or_else(|_| pk.to_hex()),
-                    name: name.clone(),
-                    picture_url: pic.clone(),
+                .map(|m| MemberInfo {
+                    pubkey: m.pubkey.to_hex(),
+                    npub: m.pubkey.to_bech32().unwrap_or_else(|_| m.pubkey.to_hex()),
+                    name: m.name.clone(),
+                    picture_url: m.picture_url.clone(),
                 })
                 .collect();
 
@@ -256,9 +260,10 @@ impl AppCore {
         let mut sender_names: HashMap<String, String> = entry
             .members
             .iter()
-            .filter_map(|(pk, name, _)| {
-                let hex = pk.to_hex();
-                let display = name
+            .filter_map(|m| {
+                let hex = m.pubkey.to_hex();
+                let display = m
+                    .name
                     .clone()
                     .or_else(|| self.profiles.get(&hex).and_then(|p| p.name.clone()));
                 display.map(|n| (hex, n))
@@ -427,11 +432,11 @@ impl AppCore {
         let members_for_state: Vec<MemberInfo> = entry
             .members
             .iter()
-            .map(|(pk, name, pic)| MemberInfo {
-                pubkey: pk.to_hex(),
-                npub: pk.to_bech32().unwrap_or_else(|_| pk.to_hex()),
-                name: name.clone(),
-                picture_url: pic.clone(),
+            .map(|m| MemberInfo {
+                pubkey: m.pubkey.to_hex(),
+                npub: m.pubkey.to_bech32().unwrap_or_else(|_| m.pubkey.to_hex()),
+                name: m.name.clone(),
+                picture_url: m.picture_url.clone(),
             })
             .collect();
 
@@ -463,9 +468,10 @@ impl AppCore {
         let mut sender_names: HashMap<String, String> = entry
             .members
             .iter()
-            .filter_map(|(pk, name, _)| {
-                let hex = pk.to_hex();
-                let display = name
+            .filter_map(|m| {
+                let hex = m.pubkey.to_hex();
+                let display = m
+                    .name
                     .clone()
                     .or_else(|| self.profiles.get(&hex).and_then(|p| p.name.clone()));
                 display.map(|n| (hex, n))

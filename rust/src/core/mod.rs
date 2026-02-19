@@ -52,12 +52,19 @@ fn diag_nostr_publish_enabled() -> bool {
 }
 
 #[derive(Debug, Clone)]
+struct GroupMember {
+    pubkey: PublicKey,
+    name: Option<String>,
+    picture_url: Option<String>,
+}
+
+#[derive(Debug, Clone)]
 struct GroupIndexEntry {
     mls_group_id: GroupId,
     is_group: bool,
     group_name: Option<String>,
-    // (pubkey, name, picture_url) for each member except self
-    members: Vec<(PublicKey, Option<String>, Option<String>)>,
+    /// Every member except self.
+    members: Vec<GroupMember>,
     admin_pubkeys: Vec<String>,
 }
 
@@ -338,7 +345,7 @@ impl AppCore {
         };
 
         // Resolve display names from the group member list.
-        let members: Option<&[(PublicKey, Option<String>, Option<String>)]> = self
+        let members: Option<&[GroupMember]> = self
             .session
             .as_ref()
             .and_then(|s| s.groups.get(chat_id))
@@ -349,8 +356,8 @@ impl AppCore {
             .map(|pk_hex| {
                 let name = members.and_then(|ms| {
                     ms.iter()
-                        .find(|(pk, _, _)| pk.to_hex() == pk_hex)
-                        .and_then(|(_, n, _)| n.clone())
+                        .find(|m| m.pubkey.to_hex() == pk_hex)
+                        .and_then(|m| m.name.clone())
                 });
                 crate::state::TypingMember {
                     pubkey: pk_hex,
@@ -593,8 +600,8 @@ impl AppCore {
         let mut chat_member_pubkeys: HashSet<String> = HashSet::new();
         if let Some(sess) = self.session.as_ref() {
             for entry in sess.groups.values() {
-                for (pk, _, _) in &entry.members {
-                    chat_member_pubkeys.insert(pk.to_hex());
+                for m in &entry.members {
+                    chat_member_pubkeys.insert(m.pubkey.to_hex());
                 }
             }
         }
