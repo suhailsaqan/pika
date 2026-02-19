@@ -1,7 +1,7 @@
 mod mdk_support;
 
 use mdk_core::prelude::MessageProcessingResult;
-use nostr::Event;
+use nostr::{Event, Kind};
 
 uniffi::setup_scaffolding!();
 
@@ -46,6 +46,11 @@ pub fn decrypt_push_notification(
         MessageProcessingResult::ApplicationMessage(msg) => msg,
         _ => return None,
     };
+
+    // only give push notifications for chat messages
+    if msg.kind != Kind::Custom(9) {
+        return Some(PushNotificationResult::Suppress);
+    }
 
     // Don't notify for self-messages.
     if msg.pubkey == pubkey {

@@ -1777,9 +1777,10 @@ fn parse_relay_list(relay: &str, relays_override: &[String]) -> anyhow::Result<V
     Ok(out)
 }
 
+const TYPING_INDICATOR_KIND: Kind = Kind::Custom(20_067);
+
 fn is_typing_indicator(msg: &mdk_storage_traits::messages::types::Message) -> bool {
-    msg.kind == Kind::ApplicationSpecificData
-        && msg.content == "typing"
+    msg.kind == TYPING_INDICATOR_KIND && msg.content == "typing"
 }
 
 fn event_h_tag_hex(ev: &Event) -> Option<String> {
@@ -2203,7 +2204,7 @@ pub async fn daemon_main(
                         let rumor = UnsignedEvent::new(
                             keys.public_key(),
                             Timestamp::now(),
-                            Kind::ApplicationSpecificData,
+                            TYPING_INDICATOR_KIND,
                             [
                                 Tag::custom(TagKind::d(), ["pika"]),
                                 Tag::expiration(Timestamp::from_secs(expires_at)),
@@ -2213,9 +2214,6 @@ pub async fn daemon_main(
 
                         let options = CreateMessageOptions {
                             skip_storage: true,
-                            extra_wrapper_tags: vec![
-                                Tag::expiration(Timestamp::from_secs(expires_at)),
-                            ],
                         };
 
                         let wrapper = match mdk.create_message_with_options(&mls_group_id, rumor, options) {

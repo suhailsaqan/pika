@@ -37,6 +37,8 @@ use interop::{
 const DEFAULT_GROUP_NAME: &str = "DM";
 const DEFAULT_GROUP_DESCRIPTION: &str = "";
 
+const TYPING_INDICATOR_KIND: Kind = Kind::Custom(20_067);
+
 const LOCAL_OUTBOX_MAX_PER_CHAT: usize = 8;
 
 fn diag_nostr_publish_enabled() -> bool {
@@ -1442,8 +1444,8 @@ impl AppCore {
 
                 let mls_group_id: Option<GroupId> = match &result {
                     MessageProcessingResult::ApplicationMessage(msg) => {
-                        // Detect typing indicator: kind 30078, content "typing", d tag "pika"
-                        if msg.kind == Kind::ApplicationSpecificData
+                        // Detect typing indicator: kind 20_067, content "typing", d tag "pika"
+                        if msg.kind == TYPING_INDICATOR_KIND
                             && msg.content == "typing"
                             && msg.tags.iter().any(|t| {
                                 t.kind() == TagKind::d()
@@ -1491,10 +1493,8 @@ impl AppCore {
                             // Handle typing indicator: update in-memory state, refresh chat.
                             if let Some(sender) = app_sender {
                                 let sender_hex = sender.to_hex();
-                                let my_hex = self
-                                    .session
-                                    .as_ref()
-                                    .map(|s| s.keys.public_key().to_hex());
+                                let my_hex =
+                                    self.session.as_ref().map(|s| s.keys.public_key().to_hex());
                                 // Ignore our own typing indicators.
                                 if my_hex.as_deref() != Some(sender_hex.as_str()) {
                                     self.update_typing(&chat_id, &sender_hex, now_seconds() + 10);
@@ -1511,8 +1511,7 @@ impl AppCore {
                             if let (Some(sender), Some(content)) =
                                 (app_sender, app_content.as_deref())
                             {
-                                if let Some(signal) =
-                                    self.maybe_parse_call_signal(&sender, content)
+                                if let Some(signal) = self.maybe_parse_call_signal(&sender, content)
                                 {
                                     self.handle_incoming_call_signal(&chat_id, &sender, signal);
                                     is_call_signal = true;
@@ -1695,7 +1694,7 @@ impl AppCore {
                 let rumor = UnsignedEvent::new(
                     sess.keys.public_key(),
                     Timestamp::now(),
-                    Kind::ApplicationSpecificData,
+                    TYPING_INDICATOR_KIND,
                     [
                         Tag::custom(TagKind::d(), ["pika"]),
                         Tag::expiration(Timestamp::from_secs(expires_at)),
@@ -1703,23 +1702,19 @@ impl AppCore {
                     "typing",
                 );
 
-                let options = mdk_core::messages::CreateMessageOptions {
-                    skip_storage: true,
-                    extra_wrapper_tags: vec![
-                        Tag::expiration(Timestamp::from_secs(expires_at)),
-                    ],
-                };
+                let options = mdk_core::messages::CreateMessageOptions { skip_storage: true };
 
-                let wrapper = match sess
-                    .mdk
-                    .create_message_with_options(&group.mls_group_id, rumor, options)
-                {
-                    Ok(ev) => ev,
-                    Err(e) => {
-                        tracing::warn!(err = %e, "typing indicator create_message failed");
-                        return;
-                    }
-                };
+                let wrapper =
+                    match sess
+                        .mdk
+                        .create_message_with_options(&group.mls_group_id, rumor, options)
+                    {
+                        Ok(ev) => ev,
+                        Err(e) => {
+                            tracing::warn!(err = %e, "typing indicator create_message failed");
+                            return;
+                        }
+                    };
 
                 let client = sess.client.clone();
                 self.runtime.spawn(async move {
