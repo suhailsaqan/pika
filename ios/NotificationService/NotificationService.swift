@@ -67,6 +67,35 @@ class NotificationService: UNNotificationServiceExtension {
                 )
                 contentHandler(updated)
             }
+        case .callInvite(let info):
+            content.title = info.callerName
+            content.body = "Incoming call"
+            content.sound = .defaultCritical
+            content.userInfo["chat_id"] = info.chatId
+            content.userInfo["call_id"] = info.callId
+            content.threadIdentifier = info.chatId
+
+            if let urlStr = info.callerPictureUrl, let url = URL(string: urlStr) {
+                Self.downloadAvatar(url: url) { image in
+                    let updated = Self.applyCommNotification(
+                        to: content,
+                        senderName: info.callerName,
+                        senderPubkey: info.chatId,
+                        chatId: info.chatId,
+                        senderImage: image
+                    )
+                    contentHandler(updated)
+                }
+            } else {
+                let updated = Self.applyCommNotification(
+                    to: content,
+                    senderName: info.callerName,
+                    senderPubkey: info.chatId,
+                    chatId: info.chatId,
+                    senderImage: nil
+                )
+                contentHandler(updated)
+            }
         case .suppress, nil:
             // Suppress: self-message, call signal, already processed, or decrypt failure.
             // Deliver a fresh empty content so iOS has no alert to display.
