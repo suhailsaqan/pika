@@ -25,6 +25,13 @@ pub fn init_rustls_crypto_provider() {
     tls::init_rustls_crypto_provider();
 }
 
+/// Load all cached profiles from the on-disk database and return them as
+/// `FollowListEntry` values.  Synchronous read intended for populating the
+/// new-chat contact list immediately at startup.
+pub fn load_cached_profiles(data_dir: &str) -> Vec<FollowListEntry> {
+    core::load_cached_profiles(data_dir)
+}
+
 uniffi::setup_scaffolding!();
 
 #[uniffi::export(callback_interface)]

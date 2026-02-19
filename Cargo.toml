@@ -4,6 +4,7 @@ members = [
   "rust",
   "uniffi-bindgen",
   "cli",
+  "crates/pika-desktop",
   "crates/pika-media",
   "crates/pika-nse",
   "crates/pika-tls",

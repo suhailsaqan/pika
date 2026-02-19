@@ -37,6 +37,12 @@ info:
   @echo "    PIKA_CALL_MOQ_URL=...           (override MOQ relay URL)"
   @echo "    PIKA_MOQ_PROBE_ON_START=1       (log QUIC+TLS probe PASS/FAIL on startup)"
   @echo
+  @echo "Desktop (ICED)"
+  @echo "  Run desktop app:"
+  @echo "    just run-desktop"
+  @echo "  Build-check desktop app:"
+  @echo "    just desktop-check"
+  @echo
   @echo "RMP (new)"
   @echo "  Run iOS simulator:"
   @echo "    just rmp run ios"
@@ -582,6 +588,14 @@ run-android *ARGS:
 # Build, install, and launch iOS app on simulator/device.
 run-ios *ARGS:
   ./tools/pika-run ios run {{ARGS}}
+
+# Build-check the desktop ICED app.
+desktop-check:
+  cargo check -p pika-desktop
+
+# Run the desktop ICED app.
+run-desktop *ARGS:
+  cargo run -p pika-desktop {{ARGS}}
 
 # Check iOS dev environment (Xcode, simulators, runtimes).
 doctor-ios:
