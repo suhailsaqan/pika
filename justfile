@@ -396,6 +396,10 @@ android-ui-test: gen-kotlin android-rust android-local-properties
 android-ui-e2e-local:
   ./tools/ui-e2e-local --platform android
 
+# Desktop E2E: local Nostr relay + local Rust bot.
+desktop-e2e-local:
+  ./tools/ui-e2e-local --platform desktop
+
 # Android E2E: public relays + deployed bot (nondeterministic). Requires emulator.
 android-ui-e2e:
   ./tools/ui-e2e-public --platform android
@@ -592,6 +596,10 @@ run-ios *ARGS:
 # Build-check the desktop ICED app.
 desktop-check:
   cargo check -p pika-desktop
+
+# Run desktop tests (manager + UI wiring).
+desktop-ui-test:
+  cargo test -p pika-desktop
 
 # Run the desktop ICED app.
 run-desktop *ARGS:

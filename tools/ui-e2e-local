@@ -9,6 +9,7 @@ set -euo pipefail
 # Usage:
 #   tools/ui-e2e-local --platform android
 #   tools/ui-e2e-local --platform ios
+#   tools/ui-e2e-local --platform desktop
 #
 # Env:
 #   BOT_TIMEOUT_SEC=900
@@ -23,7 +24,7 @@ BOT_TIMEOUT_SEC="${BOT_TIMEOUT_SEC:-900}"
 
 usage() {
   cat >&2 <<EOF
-usage: tools/ui-e2e-local --platform android|ios
+usage: tools/ui-e2e-local --platform android|ios|desktop
 
 Starts a local relay+bot and runs the platform UI E2E ping/pong test.
 EOF
@@ -294,6 +295,14 @@ case "$platform" in
       PIKA_UI_E2E_NSEC="${CLIENT_NSEC}" \
       ./tools/xcode-run xcodebuild -project ios/Pika.xcodeproj -scheme Pika -destination "id=$udid" test CODE_SIGNING_ALLOWED=NO \
           -only-testing:PikaUITests/PikaUITests/testE2E_deployedRustBot_pingPong
+    ;;
+  desktop)
+    PIKA_UI_E2E=1 \
+      PIKA_UI_E2E_BOT_NPUB="${BOT_NPUB}" \
+      PIKA_UI_E2E_RELAYS="${RELAY_URL}" \
+      PIKA_UI_E2E_KP_RELAYS="${RELAY_URL}" \
+      PIKA_UI_E2E_NSEC="${CLIENT_NSEC}" \
+      cargo test -p pika-desktop desktop_e2e_local_ping_pong_with_bot -- --ignored --nocapture
     ;;
   *)
     echo "error: invalid platform: $platform" >&2
