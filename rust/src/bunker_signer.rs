@@ -55,6 +55,22 @@ pub trait BunkerSignerConnector: Send + Sync + 'static {
         bunker_uri: &str,
         client_keys: Keys,
     ) -> Result<BunkerConnectOutput, BunkerConnectError>;
+
+    /// Create a NostrConnect instance and subscribe to relays without blocking
+    /// on the signer response. Returns the pre-subscribed instance for later use.
+    fn prepare(
+        &self,
+        runtime: &tokio::runtime::Runtime,
+        bunker_uri: &str,
+        client_keys: Keys,
+    ) -> Result<NostrConnect, BunkerConnectError>;
+
+    /// Complete the handshake using a previously prepared NostrConnect instance.
+    fn finish(
+        &self,
+        runtime: &tokio::runtime::Runtime,
+        signer: NostrConnect,
+    ) -> Result<BunkerConnectOutput, BunkerConnectError>;
 }
 
 pub type SharedBunkerSignerConnector = Arc<RwLock<Arc<dyn BunkerSignerConnector>>>;
@@ -140,13 +156,12 @@ impl NostrConnectBunkerSignerConnector {
     }
 }
 
-impl BunkerSignerConnector for NostrConnectBunkerSignerConnector {
-    fn connect(
+impl NostrConnectBunkerSignerConnector {
+    fn parse_and_create(
         &self,
-        runtime: &tokio::runtime::Runtime,
         bunker_uri: &str,
         client_keys: Keys,
-    ) -> Result<BunkerConnectOutput, BunkerConnectError> {
+    ) -> Result<NostrConnect, BunkerConnectError> {
         let trimmed = bunker_uri.trim();
         if trimmed.is_empty() {
             return Err(BunkerConnectError {
@@ -160,23 +175,21 @@ impl BunkerSignerConnector for NostrConnectBunkerSignerConnector {
             message: "invalid bunker URI".to_string(),
         })?;
 
-        if !parsed.is_bunker() {
-            return Err(BunkerConnectError {
-                kind: BunkerConnectErrorKind::InvalidUri,
-                message: "invalid bunker URI: expected bunker://".to_string(),
-            });
-        }
-
         if parsed.relays().is_empty() {
             return Err(BunkerConnectError {
                 kind: BunkerConnectErrorKind::InvalidUri,
-                message: "invalid bunker URI: missing relay".to_string(),
+                message: "invalid signer URI: missing relay".to_string(),
             });
         }
 
-        let signer = NostrConnect::new(parsed, client_keys, self.timeout, None)
-            .map_err(Self::map_nostr_connect_error)?;
+        NostrConnect::new(parsed, client_keys, self.timeout, None)
+            .map_err(Self::map_nostr_connect_error)
+    }
 
+    fn complete(
+        runtime: &tokio::runtime::Runtime,
+        signer: &NostrConnect,
+    ) -> Result<BunkerConnectOutput, BunkerConnectError> {
         let user_pubkey = runtime
             .block_on(async { signer.get_public_key().await })
             .map_err(|e| Self::map_signer_error(format!("{e}")))?;
@@ -189,7 +202,36 @@ impl BunkerSignerConnector for NostrConnectBunkerSignerConnector {
         Ok(BunkerConnectOutput {
             user_pubkey,
             canonical_bunker_uri,
-            signer: Arc::new(signer),
+            signer: Arc::new(signer.clone()),
         })
+    }
+}
+
+impl BunkerSignerConnector for NostrConnectBunkerSignerConnector {
+    fn connect(
+        &self,
+        runtime: &tokio::runtime::Runtime,
+        bunker_uri: &str,
+        client_keys: Keys,
+    ) -> Result<BunkerConnectOutput, BunkerConnectError> {
+        let signer = self.parse_and_create(bunker_uri, client_keys)?;
+        Self::complete(runtime, &signer)
+    }
+
+    fn prepare(
+        &self,
+        _runtime: &tokio::runtime::Runtime,
+        bunker_uri: &str,
+        client_keys: Keys,
+    ) -> Result<NostrConnect, BunkerConnectError> {
+        self.parse_and_create(bunker_uri, client_keys)
+    }
+
+    fn finish(
+        &self,
+        runtime: &tokio::runtime::Runtime,
+        signer: NostrConnect,
+    ) -> Result<BunkerConnectOutput, BunkerConnectError> {
+        Self::complete(runtime, &signer)
     }
 }

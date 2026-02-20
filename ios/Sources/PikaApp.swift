@@ -13,7 +13,10 @@ struct PikaApp: App {
                         manager.onForeground()
                     }
                 }
+                .onOpenURL { url in
+                    NSLog("[PikaApp] onOpenURL: \(url.absoluteString)")
+                    manager.onOpenURL(url)
+                }
         }
     }
 }
-

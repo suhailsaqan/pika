@@ -119,6 +119,24 @@ fun LoginScreen(manager: AppManager, padding: PaddingValues) {
             }
         }
 
+        HorizontalDivider(modifier = Modifier.padding(vertical = 10.dp))
+        Button(
+            onClick = {
+                manager.loginWithNostrConnect()
+            },
+            enabled = !anyBusy,
+            modifier = Modifier.testTag(TestTags.LOGIN_WITH_NOSTR_CONNECT),
+        ) {
+            if (loginBusy) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(20.dp),
+                    strokeWidth = 2.dp,
+                )
+            } else {
+                Text("Login with Nostr Connect")
+            }
+        }
+
         if (BuildConfig.ENABLE_AMBER_SIGNER) {
             HorizontalDivider(modifier = Modifier.padding(vertical = 10.dp))
             Button(

@@ -12,23 +12,44 @@ final class AppManagerTests: XCTestCase {
             chatList: [],
             currentChat: nil,
             followList: [],
+            peerProfile: nil,
+            activeCall: nil,
             toast: toast
         )
     }
 
     func testInitRestoresSessionWhenNsecExists() async {
         let core = MockCore(state: makeState(rev: 1))
-        let store = MockNsecStore(nsec: "nsec1test")
+        let store = MockAuthStore(stored: StoredAuth(mode: .localNsec, nsec: "nsec1test", bunkerUri: nil, bunkerClientNsec: nil))
 
-        _ = await MainActor.run { AppManager(core: core, nsecStore: store) }
+        _ = await MainActor.run { AppManager(core: core, authStore: store) }
 
         XCTAssertEqual(core.dispatchedActions, [.restoreSession(nsec: "nsec1test")])
     }
 
+    func testInitRestoresSessionWhenBunkerStored() async {
+        let core = MockCore(state: makeState(rev: 1))
+        let store = MockAuthStore(
+            stored: StoredAuth(
+                mode: .bunker,
+                nsec: nil,
+                bunkerUri: "bunker://abc?relay=wss://relay.example.com",
+                bunkerClientNsec: "nsec1client"
+            )
+        )
+
+        _ = await MainActor.run { AppManager(core: core, authStore: store) }
+
+        XCTAssertEqual(
+            core.dispatchedActions,
+            [.restoreSessionBunker(bunkerUri: "bunker://abc?relay=wss://relay.example.com", clientNsec: "nsec1client")]
+        )
+    }
+
     func testApplyFullStateUpdatesState() async {
         let core = MockCore(state: makeState(rev: 1, toast: "old"))
-        let store = MockNsecStore()
-        let manager = await MainActor.run { AppManager(core: core, nsecStore: store) }
+        let store = MockAuthStore()
+        let manager = await MainActor.run { AppManager(core: core, authStore: store) }
 
         let newState = makeState(rev: 2, toast: "new")
         await MainActor.run { manager.apply(update: .fullState(newState)) }
@@ -40,8 +61,8 @@ final class AppManagerTests: XCTestCase {
     func testApplyDropsStaleFullState() async {
         let initial = makeState(rev: 2, toast: "keep")
         let core = MockCore(state: initial)
-        let store = MockNsecStore()
-        let manager = await MainActor.run { AppManager(core: core, nsecStore: store) }
+        let store = MockAuthStore()
+        let manager = await MainActor.run { AppManager(core: core, authStore: store) }
 
         let stale = makeState(rev: 1, toast: "stale")
         await MainActor.run { manager.apply(update: .fullState(stale)) }
@@ -52,14 +73,14 @@ final class AppManagerTests: XCTestCase {
 
     func testAccountCreatedStoresNsecEvenWhenStale() async {
         let core = MockCore(state: makeState(rev: 5))
-        let store = MockNsecStore()
-        let manager = await MainActor.run { AppManager(core: core, nsecStore: store) }
+        let store = MockAuthStore()
+        let manager = await MainActor.run { AppManager(core: core, authStore: store) }
 
         await MainActor.run {
             manager.apply(update: .accountCreated(rev: 3, nsec: "nsec1stale", pubkey: "pk", npub: "npub"))
         }
 
-        XCTAssertEqual(store.nsec, "nsec1stale")
+        XCTAssertEqual(store.stored?.nsec, "nsec1stale")
         let observedRev = await MainActor.run { manager.state.rev }
         XCTAssertEqual(observedRev, 5)
     }
@@ -87,22 +108,31 @@ final class MockCore: AppCore, @unchecked Sendable {
     }
 }
 
-final class MockNsecStore: NsecStore {
-    var nsec: String?
+final class MockAuthStore: AuthStore {
+    var stored: StoredAuth?
 
-    init(nsec: String? = nil) {
-        self.nsec = nsec
+    init(stored: StoredAuth? = nil) {
+        self.stored = stored
+    }
+
+    func load() -> StoredAuth? {
+        stored
+    }
+
+    func saveLocalNsec(_ nsec: String) {
+        stored = StoredAuth(mode: .localNsec, nsec: nsec, bunkerUri: nil, bunkerClientNsec: nil)
+    }
+
+    func saveBunker(bunkerUri: String, bunkerClientNsec: String) {
+        stored = StoredAuth(mode: .bunker, nsec: nil, bunkerUri: bunkerUri, bunkerClientNsec: bunkerClientNsec)
     }
 
     func getNsec() -> String? {
-        nsec
+        guard stored?.mode == .localNsec else { return nil }
+        return stored?.nsec
     }
 
-    func setNsec(_ nsec: String) {
-        self.nsec = nsec
-    }
-
-    func clearNsec() {
-        nsec = nil
+    func clear() {
+        stored = nil
     }
 }

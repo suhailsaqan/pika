@@ -20,12 +20,31 @@
 	<string>$(MARKETING_VERSION)</string>
 	<key>CFBundleVersion</key>
 	<string>$(CURRENT_PROJECT_VERSION)</string>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>CFBundleURLName</key>
+			<string>com.justinmoon.pika</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>pika</string>
+				<string>pika-dev</string>
+				<string>pika-test</string>
+			</array>
+		</dict>
+	</array>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>NSCameraUsageDescription</key>
 	<string>Scan QR codes to start new chats.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Voice calls require microphone access.</string>
+	<key>LSApplicationQueriesSchemes</key>
+	<array>
+		<string>nostrconnect</string>
+	</array>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

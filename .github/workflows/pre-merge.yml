@@ -233,9 +233,17 @@ jobs:
 
       - run: nix develop .#default -c just android-ui-e2e-local
 
+  nightly-primal-ios-interop:
+    if: (github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'nightly')) && vars.PIKA_NIGHTLY_PRIMAL_INTEROP == '1'
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: nixbuild/nix-quick-install-action@v30
+      - run: nix develop .#default -c just nightly-primal-ios-interop
+
   nightly:
     if: always() && (github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'nightly'))
-    needs: [nightly-linux, nightly-pika, nightly-marmotd, nightly-pika-ui-android]
+    needs: [nightly-linux, nightly-pika, nightly-marmotd, nightly-pika-ui-android, nightly-primal-ios-interop]
     runs-on: ubuntu-latest
     steps:
       - run: |
@@ -253,5 +261,9 @@ jobs:
           fi
           if [[ "${{ needs.nightly-pika-ui-android.result }}" != "success" ]]; then
             echo "nightly-pika-ui-android failed"
+            exit 1
+          fi
+          if [[ "${{ needs.nightly-primal-ios-interop.result }}" != "success" && "${{ needs.nightly-primal-ios-interop.result }}" != "skipped" ]]; then
+            echo "nightly-primal-ios-interop failed"
             exit 1
           fi

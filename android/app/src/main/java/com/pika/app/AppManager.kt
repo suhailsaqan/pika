@@ -1,6 +1,8 @@
 package com.pika.app
 
 import android.content.Context
+import android.content.Intent
+import android.net.Uri
 import android.os.Handler
 import android.os.Looper
 import androidx.compose.runtime.getValue
@@ -65,9 +67,7 @@ class AppManager private constructor(context: Context) : AppReconciler {
 
         val dataDir = appContext.filesDir.absolutePath
         rust = FfiApp(dataDir)
-        if (BuildConfig.ENABLE_AMBER_SIGNER) {
-            rust.setExternalSignerBridge(AmberRustBridge())
-        }
+        rust.setExternalSignerBridge(AmberRustBridge())
         val initial = rust.state()
         state = initial
         audioFocus.syncForCall(initial.activeCall)
@@ -151,6 +151,10 @@ class AppManager private constructor(context: Context) : AppReconciler {
 
     fun loginWithBunker(bunkerUri: String) {
         rust.dispatch(AppAction.BeginBunkerLogin(bunkerUri = bunkerUri))
+    }
+
+    fun loginWithNostrConnect() {
+        rust.dispatch(AppAction.BeginNostrConnectLogin)
     }
 
     fun logout() {
@@ -289,6 +293,57 @@ class AppManager private constructor(context: Context) : AppReconciler {
     private inline fun <T> withSignerRequestLock(block: () -> T): T = synchronized(signerRequestLock) { block() }
 
     private inner class AmberRustBridge : ExternalSignerBridge {
+        override fun openUrl(url: String): ExternalSignerResult =
+            withSignerRequestLock {
+                val trimmed = url.trim()
+                if (trimmed.isEmpty()) {
+                    return@withSignerRequestLock ExternalSignerResult(
+                        ok = false,
+                        value = null,
+                        errorKind = ExternalSignerErrorKind.INVALID_RESPONSE,
+                        errorMessage = "missing URL",
+                    )
+                }
+                val uri =
+                    runCatching { Uri.parse(trimmed) }.getOrElse {
+                        return@withSignerRequestLock ExternalSignerResult(
+                            ok = false,
+                            value = null,
+                            errorKind = ExternalSignerErrorKind.INVALID_RESPONSE,
+                            errorMessage = "invalid URL",
+                        )
+                    }
+                val intent =
+                    Intent(Intent.ACTION_VIEW, uri).apply {
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    }
+                val canHandle = intent.resolveActivity(appContext.packageManager) != null
+                if (!canHandle) {
+                    return@withSignerRequestLock ExternalSignerResult(
+                        ok = false,
+                        value = null,
+                        errorKind = ExternalSignerErrorKind.SIGNER_UNAVAILABLE,
+                        errorMessage = "no app can handle URL",
+                    )
+                }
+                return@withSignerRequestLock runCatching {
+                    appContext.startActivity(intent)
+                    ExternalSignerResult(
+                        ok = true,
+                        value = null,
+                        errorKind = null,
+                        errorMessage = null,
+                    )
+                }.getOrElse { err ->
+                    ExternalSignerResult(
+                        ok = false,
+                        value = null,
+                        errorKind = ExternalSignerErrorKind.OTHER,
+                        errorMessage = err.message ?: "failed to open URL",
+                    )
+                }
+            }
+
         override fun requestPublicKey(currentUserHint: String?): ExternalSignerHandshakeResult =
             withSignerRequestLock {
                 amberClient.requestPublicKey(currentUserHint).toExternalSignerHandshakeResult()

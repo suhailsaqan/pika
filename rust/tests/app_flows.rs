@@ -70,6 +70,8 @@ impl AppReconciler for TestReconciler {
 struct MockExternalSignerBridge {
     handshake_result: Arc<Mutex<ExternalSignerHandshakeResult>>,
     last_hint: Arc<Mutex<Option<String>>>,
+    open_url_result: Arc<Mutex<ExternalSignerResult>>,
+    last_opened_url: Arc<Mutex<Option<String>>>,
 }
 
 impl MockExternalSignerBridge {
@@ -77,15 +79,31 @@ impl MockExternalSignerBridge {
         Self {
             handshake_result: Arc::new(Mutex::new(handshake_result)),
             last_hint: Arc::new(Mutex::new(None)),
+            open_url_result: Arc::new(Mutex::new(ExternalSignerResult {
+                ok: true,
+                value: None,
+                error_kind: None,
+                error_message: None,
+            })),
+            last_opened_url: Arc::new(Mutex::new(None)),
         }
     }
 
     fn last_hint(&self) -> Option<String> {
         self.last_hint.lock().unwrap().clone()
     }
+
+    fn last_opened_url(&self) -> Option<String> {
+        self.last_opened_url.lock().unwrap().clone()
+    }
 }
 
 impl ExternalSignerBridge for MockExternalSignerBridge {
+    fn open_url(&self, url: String) -> ExternalSignerResult {
+        *self.last_opened_url.lock().unwrap() = Some(url);
+        self.open_url_result.lock().unwrap().clone()
+    }
+
     fn request_public_key(
         &self,
         current_user_hint: Option<String>,
@@ -224,6 +242,27 @@ impl BunkerSignerConnector for MockBunkerSignerConnector {
     ) -> Result<BunkerConnectOutput, BunkerConnectError> {
         *self.last_bunker_uri.lock().unwrap() = Some(bunker_uri.to_string());
         *self.last_client_pubkey.lock().unwrap() = Some(client_keys.public_key().to_hex());
+        self.result.lock().unwrap().clone()
+    }
+
+    fn prepare(
+        &self,
+        _runtime: &tokio::runtime::Runtime,
+        _bunker_uri: &str,
+        _client_keys: Keys,
+    ) -> Result<nostr_connect::prelude::NostrConnect, BunkerConnectError> {
+        // Mock: return an error so the code falls through to the `connect` path.
+        Err(BunkerConnectError {
+            kind: BunkerConnectErrorKind::Other,
+            message: "mock: prepare not supported".to_string(),
+        })
+    }
+
+    fn finish(
+        &self,
+        _runtime: &tokio::runtime::Runtime,
+        _signer: nostr_connect::prelude::NostrConnect,
+    ) -> Result<BunkerConnectOutput, BunkerConnectError> {
         self.result.lock().unwrap().clone()
     }
 }
@@ -912,6 +951,136 @@ fn begin_bunker_login_failure_shows_toast_and_clears_busy() {
         .unwrap_or_default()
         .to_lowercase()
         .contains("invalid bunker uri"));
+}
+
+#[test]
+fn begin_nostr_connect_login_launches_uri_and_logs_in() {
+    let dir = tempdir().unwrap();
+    let data_dir = dir.path().to_string_lossy().to_string();
+    write_config_with_external_signer(&data_dir, true, Some(true));
+
+    let app = FfiApp::new(data_dir);
+    let bridge = MockExternalSignerBridge::new(ExternalSignerHandshakeResult {
+        ok: false,
+        pubkey: None,
+        signer_package: None,
+        current_user: None,
+        error_kind: Some(ExternalSignerErrorKind::SignerUnavailable),
+        error_message: Some("unused".into()),
+    });
+    app.set_external_signer_bridge(Box::new(bridge.clone()));
+
+    let canonical_bunker_uri =
+        "bunker://79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798?relay=wss://relay.example.com";
+    let (connector, _expected_user_pubkey) =
+        MockBunkerSignerConnector::success(canonical_bunker_uri);
+    app.set_bunker_signer_connector_for_tests(Arc::new(connector.clone()));
+
+    app.dispatch(AppAction::BeginNostrConnectLogin);
+
+    wait_until("nostrconnect uri opened", Duration::from_secs(2), || {
+        bridge.last_opened_url().is_some()
+    });
+
+    // Rust should wait for the app callback before attempting the signer handshake.
+    assert!(matches!(app.state().auth, AuthState::LoggedOut));
+    assert!(app.state().busy.logging_in);
+    assert!(connector.last_bunker_uri().is_none());
+
+    app.dispatch(AppAction::NostrConnectCallback {
+        url: "pika://nostrconnect-return".into(),
+    });
+
+    wait_until("nostrconnect logged in", Duration::from_secs(2), || {
+        matches!(app.state().auth, AuthState::LoggedIn { .. })
+    });
+
+    let opened_url = bridge
+        .last_opened_url()
+        .expect("expected bridge open_url call");
+    assert!(opened_url.starts_with("nostrconnect://"));
+    assert!(opened_url.contains("metadata="));
+    assert!(opened_url.contains("relay="));
+    assert_eq!(connector.last_bunker_uri().as_deref(), Some(opened_url.as_str()));
+    assert!(!app.state().busy.logging_in);
+}
+
+#[test]
+fn begin_nostr_connect_login_without_bridge_shows_toast() {
+    let dir = tempdir().unwrap();
+    let data_dir = dir.path().to_string_lossy().to_string();
+    write_config_with_external_signer(&data_dir, true, Some(true));
+
+    let app = FfiApp::new(data_dir);
+    app.dispatch(AppAction::BeginNostrConnectLogin);
+
+    wait_until("toast shown", Duration::from_secs(2), || {
+        app.state().toast.is_some()
+    });
+    let s = app.state();
+    assert!(matches!(s.auth, AuthState::LoggedOut));
+    assert!(!s.busy.logging_in);
+    assert!(s
+        .toast
+        .unwrap_or_default()
+        .to_lowercase()
+        .contains("bridge unavailable"));
+}
+
+#[test]
+fn nostr_connect_callback_without_pending_is_noop() {
+    let dir = tempdir().unwrap();
+    let data_dir = dir.path().to_string_lossy().to_string();
+    write_config_with_external_signer(&data_dir, true, Some(true));
+
+    let app = FfiApp::new(data_dir);
+    app.dispatch(AppAction::NostrConnectCallback {
+        url: "pika://nostrconnect-return".into(),
+    });
+
+    // No-op: no pending login, no busy/toast changes.
+    let s = app.state();
+    assert!(matches!(s.auth, AuthState::LoggedOut));
+    assert!(!s.busy.logging_in);
+    assert!(s.toast.is_none());
+}
+
+#[test]
+fn foregrounded_continues_pending_nostr_connect_login() {
+    let dir = tempdir().unwrap();
+    let data_dir = dir.path().to_string_lossy().to_string();
+    write_config_with_external_signer(&data_dir, true, Some(true));
+
+    let app = FfiApp::new(data_dir);
+    let bridge = MockExternalSignerBridge::new(ExternalSignerHandshakeResult {
+        ok: false,
+        pubkey: None,
+        signer_package: None,
+        current_user: None,
+        error_kind: Some(ExternalSignerErrorKind::SignerUnavailable),
+        error_message: Some("unused".into()),
+    });
+    app.set_external_signer_bridge(Box::new(bridge));
+
+    let canonical_bunker_uri =
+        "bunker://79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798?relay=wss://relay.example.com";
+    let (connector, _expected_user_pubkey) =
+        MockBunkerSignerConnector::success(canonical_bunker_uri);
+    app.set_bunker_signer_connector_for_tests(Arc::new(connector));
+
+    app.dispatch(AppAction::BeginNostrConnectLogin);
+    wait_until("nostrconnect pending", Duration::from_secs(2), || {
+        app.state().busy.logging_in
+    });
+    assert!(matches!(app.state().auth, AuthState::LoggedOut));
+
+    // Simulate returning to app without URL callback.
+    app.dispatch(AppAction::Foregrounded);
+
+    wait_until("nostrconnect logged in via foreground", Duration::from_secs(2), || {
+        matches!(app.state().auth, AuthState::LoggedIn { .. })
+    });
+    assert!(!app.state().busy.logging_in);
 }
 
 #[test]

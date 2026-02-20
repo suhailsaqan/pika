@@ -9,7 +9,7 @@ private let keychainLog = Logger(subsystem: "com.pika.app", category: "Keychain"
 /// which fail with errSecMissingEntitlement / -34018).
 final class KeychainNsecStore {
     private let service = "com.pika.app"
-    private let account = "nsec"
+    private let account: String
 
     /// Controls whether the file fallback is permitted.
     /// Default: `true` on simulator, `false` on device (compile-time).
@@ -24,7 +24,8 @@ final class KeychainNsecStore {
     /// and fallback is allowed.
     private var useFileFallback: Bool = false
 
-    init(fileFallbackAllowed: Bool? = nil) {
+    init(account: String = "nsec", fileFallbackAllowed: Bool? = nil) {
+        self.account = account
         if let explicit = fileFallbackAllowed {
             self.fileFallbackAllowed = explicit
         } else {
@@ -58,7 +59,9 @@ final class KeychainNsecStore {
             return nsec
         }
         if status == -34018 {
-            switchToFileFallback(context: "getNsec")
+            guard switchToFileFallback(context: "getNsec") else {
+                return nil
+            }
             return fileGet()
         }
         keychainLog.warning("getNsec: no nsec found (OSStatus=\(status))")
@@ -97,7 +100,9 @@ final class KeychainNsecStore {
             return
         }
         if status == -34018 {
-            switchToFileFallback(context: "setNsec")
+            guard switchToFileFallback(context: "setNsec") else {
+                return
+            }
             fileSet(nsec)
             return
         }
@@ -123,7 +128,8 @@ final class KeychainNsecStore {
     /// Switch to the file-based fallback. Only allowed when `fileFallbackAllowed` is true
     /// (simulator by default). Otherwise crashes via `fatalError` — or calls `onFileFallbackDenied`
     /// if set (for test interception).
-    private func switchToFileFallback(context: String) {
+    @discardableResult
+    private func switchToFileFallback(context: String) -> Bool {
         let msg = "Keychain unavailable (errSecMissingEntitlement / -34018) during \(context). "
             + "This must not happen in a production build — check entitlements and provisioning."
         guard fileFallbackAllowed else {
@@ -132,10 +138,11 @@ final class KeychainNsecStore {
             } else {
                 fatalError(msg)
             }
-            return
+            return false
         }
         keychainLog.warning("\(context): keychain unavailable (OSStatus=-34018), switching to file fallback")
         useFileFallback = true
+        return true
     }
 
     // MARK: - File fallback (Application Support / .pika_nsec, simulator only)
@@ -173,4 +180,3 @@ final class KeychainNsecStore {
         }
     }
 }
-

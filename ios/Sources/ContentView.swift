@@ -20,7 +20,9 @@ struct ContentView: View {
                     LoginView(
                         state: loginState(from: appState),
                         onCreateAccount: { manager.dispatch(.createAccount) },
-                        onLogin: { manager.login(nsec: $0) }
+                        onLogin: { manager.login(nsec: $0) },
+                        onBunkerLogin: { manager.loginWithBunker(bunkerUri: $0) },
+                        onNostrConnectLogin: { manager.loginWithNostrConnect() }
                     )
                 default:
                     NavigationStack(path: $navPath) {
@@ -178,7 +180,9 @@ private func screenView(
         LoginView(
             state: loginState(from: state),
             onCreateAccount: { manager.dispatch(.createAccount) },
-            onLogin: { manager.login(nsec: $0) }
+            onLogin: { manager.login(nsec: $0) },
+            onBunkerLogin: { manager.loginWithBunker(bunkerUri: $0) },
+            onNostrConnectLogin: { manager.loginWithNostrConnect() }
         )
     case .chatList:
         ChatListView(

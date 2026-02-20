@@ -259,14 +259,14 @@ typedef void (*UniffiCallbackInterfaceExternalSignerBridgeMethod0)(uint64_t, Rus
 #endif
 #ifndef UNIFFI_FFIDEF_CALLBACK_INTERFACE_EXTERNAL_SIGNER_BRIDGE_METHOD1
 #define UNIFFI_FFIDEF_CALLBACK_INTERFACE_EXTERNAL_SIGNER_BRIDGE_METHOD1
-typedef void (*UniffiCallbackInterfaceExternalSignerBridgeMethod1)(uint64_t, RustBuffer, RustBuffer, RustBuffer, RustBuffer* _Nonnull, 
+typedef void (*UniffiCallbackInterfaceExternalSignerBridgeMethod1)(uint64_t, RustBuffer, RustBuffer* _Nonnull, 
         RustCallStatus *_Nonnull uniffiCallStatus
     );
 
 #endif
 #ifndef UNIFFI_FFIDEF_CALLBACK_INTERFACE_EXTERNAL_SIGNER_BRIDGE_METHOD2
 #define UNIFFI_FFIDEF_CALLBACK_INTERFACE_EXTERNAL_SIGNER_BRIDGE_METHOD2
-typedef void (*UniffiCallbackInterfaceExternalSignerBridgeMethod2)(uint64_t, RustBuffer, RustBuffer, RustBuffer, RustBuffer, RustBuffer* _Nonnull, 
+typedef void (*UniffiCallbackInterfaceExternalSignerBridgeMethod2)(uint64_t, RustBuffer, RustBuffer, RustBuffer, RustBuffer* _Nonnull, 
         RustCallStatus *_Nonnull uniffiCallStatus
     );
 
@@ -292,6 +292,13 @@ typedef void (*UniffiCallbackInterfaceExternalSignerBridgeMethod5)(uint64_t, Rus
     );
 
 #endif
+#ifndef UNIFFI_FFIDEF_CALLBACK_INTERFACE_EXTERNAL_SIGNER_BRIDGE_METHOD6
+#define UNIFFI_FFIDEF_CALLBACK_INTERFACE_EXTERNAL_SIGNER_BRIDGE_METHOD6
+typedef void (*UniffiCallbackInterfaceExternalSignerBridgeMethod6)(uint64_t, RustBuffer, RustBuffer, RustBuffer, RustBuffer, RustBuffer* _Nonnull, 
+        RustCallStatus *_Nonnull uniffiCallStatus
+    );
+
+#endif
 #ifndef UNIFFI_FFIDEF_V_TABLE_CALLBACK_INTERFACE_APP_RECONCILER
 #define UNIFFI_FFIDEF_V_TABLE_CALLBACK_INTERFACE_APP_RECONCILER
 typedef struct UniffiVTableCallbackInterfaceAppReconciler {
@@ -306,12 +313,13 @@ typedef struct UniffiVTableCallbackInterfaceAppReconciler {
 typedef struct UniffiVTableCallbackInterfaceExternalSignerBridge {
     UniffiCallbackInterfaceFree _Nonnull uniffiFree;
     UniffiCallbackInterfaceClone _Nonnull uniffiClone;
-    UniffiCallbackInterfaceExternalSignerBridgeMethod0 _Nonnull requestPublicKey;
-    UniffiCallbackInterfaceExternalSignerBridgeMethod1 _Nonnull signEvent;
-    UniffiCallbackInterfaceExternalSignerBridgeMethod2 _Nonnull nip44Encrypt;
-    UniffiCallbackInterfaceExternalSignerBridgeMethod3 _Nonnull nip44Decrypt;
-    UniffiCallbackInterfaceExternalSignerBridgeMethod4 _Nonnull nip04Encrypt;
-    UniffiCallbackInterfaceExternalSignerBridgeMethod5 _Nonnull nip04Decrypt;
+    UniffiCallbackInterfaceExternalSignerBridgeMethod0 _Nonnull openUrl;
+    UniffiCallbackInterfaceExternalSignerBridgeMethod1 _Nonnull requestPublicKey;
+    UniffiCallbackInterfaceExternalSignerBridgeMethod2 _Nonnull signEvent;
+    UniffiCallbackInterfaceExternalSignerBridgeMethod3 _Nonnull nip44Encrypt;
+    UniffiCallbackInterfaceExternalSignerBridgeMethod4 _Nonnull nip44Decrypt;
+    UniffiCallbackInterfaceExternalSignerBridgeMethod5 _Nonnull nip04Encrypt;
+    UniffiCallbackInterfaceExternalSignerBridgeMethod6 _Nonnull nip04Decrypt;
 } UniffiVTableCallbackInterfaceExternalSignerBridge;
 
 #endif
@@ -653,6 +661,12 @@ uint16_t uniffi_pika_core_checksum_constructor_ffiapp_new(void
 #ifndef UNIFFI_FFIDEF_UNIFFI_PIKA_CORE_CHECKSUM_METHOD_APPRECONCILER_RECONCILE
 #define UNIFFI_FFIDEF_UNIFFI_PIKA_CORE_CHECKSUM_METHOD_APPRECONCILER_RECONCILE
 uint16_t uniffi_pika_core_checksum_method_appreconciler_reconcile(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_PIKA_CORE_CHECKSUM_METHOD_EXTERNALSIGNERBRIDGE_OPEN_URL
+#define UNIFFI_FFIDEF_UNIFFI_PIKA_CORE_CHECKSUM_METHOD_EXTERNALSIGNERBRIDGE_OPEN_URL
+uint16_t uniffi_pika_core_checksum_method_externalsignerbridge_open_url(void
     
 );
 #endif

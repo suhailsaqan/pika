@@ -617,21 +617,24 @@ internal interface UniffiCallbackInterfaceAppReconcilerMethod0 : com.sun.jna.Cal
     fun callback(`uniffiHandle`: Long,`update`: RustBuffer.ByValue,`uniffiOutReturn`: Pointer,uniffiCallStatus: UniffiRustCallStatus,)
 }
 internal interface UniffiCallbackInterfaceExternalSignerBridgeMethod0 : com.sun.jna.Callback {
-    fun callback(`uniffiHandle`: Long,`currentUserHint`: RustBuffer.ByValue,`uniffiOutReturn`: RustBuffer,uniffiCallStatus: UniffiRustCallStatus,)
+    fun callback(`uniffiHandle`: Long,`url`: RustBuffer.ByValue,`uniffiOutReturn`: RustBuffer,uniffiCallStatus: UniffiRustCallStatus,)
 }
 internal interface UniffiCallbackInterfaceExternalSignerBridgeMethod1 : com.sun.jna.Callback {
-    fun callback(`uniffiHandle`: Long,`signerPackage`: RustBuffer.ByValue,`currentUser`: RustBuffer.ByValue,`unsignedEventJson`: RustBuffer.ByValue,`uniffiOutReturn`: RustBuffer,uniffiCallStatus: UniffiRustCallStatus,)
+    fun callback(`uniffiHandle`: Long,`currentUserHint`: RustBuffer.ByValue,`uniffiOutReturn`: RustBuffer,uniffiCallStatus: UniffiRustCallStatus,)
 }
 internal interface UniffiCallbackInterfaceExternalSignerBridgeMethod2 : com.sun.jna.Callback {
-    fun callback(`uniffiHandle`: Long,`signerPackage`: RustBuffer.ByValue,`currentUser`: RustBuffer.ByValue,`peerPubkey`: RustBuffer.ByValue,`content`: RustBuffer.ByValue,`uniffiOutReturn`: RustBuffer,uniffiCallStatus: UniffiRustCallStatus,)
+    fun callback(`uniffiHandle`: Long,`signerPackage`: RustBuffer.ByValue,`currentUser`: RustBuffer.ByValue,`unsignedEventJson`: RustBuffer.ByValue,`uniffiOutReturn`: RustBuffer,uniffiCallStatus: UniffiRustCallStatus,)
 }
 internal interface UniffiCallbackInterfaceExternalSignerBridgeMethod3 : com.sun.jna.Callback {
-    fun callback(`uniffiHandle`: Long,`signerPackage`: RustBuffer.ByValue,`currentUser`: RustBuffer.ByValue,`peerPubkey`: RustBuffer.ByValue,`payload`: RustBuffer.ByValue,`uniffiOutReturn`: RustBuffer,uniffiCallStatus: UniffiRustCallStatus,)
-}
-internal interface UniffiCallbackInterfaceExternalSignerBridgeMethod4 : com.sun.jna.Callback {
     fun callback(`uniffiHandle`: Long,`signerPackage`: RustBuffer.ByValue,`currentUser`: RustBuffer.ByValue,`peerPubkey`: RustBuffer.ByValue,`content`: RustBuffer.ByValue,`uniffiOutReturn`: RustBuffer,uniffiCallStatus: UniffiRustCallStatus,)
 }
+internal interface UniffiCallbackInterfaceExternalSignerBridgeMethod4 : com.sun.jna.Callback {
+    fun callback(`uniffiHandle`: Long,`signerPackage`: RustBuffer.ByValue,`currentUser`: RustBuffer.ByValue,`peerPubkey`: RustBuffer.ByValue,`payload`: RustBuffer.ByValue,`uniffiOutReturn`: RustBuffer,uniffiCallStatus: UniffiRustCallStatus,)
+}
 internal interface UniffiCallbackInterfaceExternalSignerBridgeMethod5 : com.sun.jna.Callback {
+    fun callback(`uniffiHandle`: Long,`signerPackage`: RustBuffer.ByValue,`currentUser`: RustBuffer.ByValue,`peerPubkey`: RustBuffer.ByValue,`content`: RustBuffer.ByValue,`uniffiOutReturn`: RustBuffer,uniffiCallStatus: UniffiRustCallStatus,)
+}
+internal interface UniffiCallbackInterfaceExternalSignerBridgeMethod6 : com.sun.jna.Callback {
     fun callback(`uniffiHandle`: Long,`signerPackage`: RustBuffer.ByValue,`currentUser`: RustBuffer.ByValue,`peerPubkey`: RustBuffer.ByValue,`payload`: RustBuffer.ByValue,`uniffiOutReturn`: RustBuffer,uniffiCallStatus: UniffiRustCallStatus,)
 }
 @Structure.FieldOrder("uniffiFree", "uniffiClone", "reconcile")
@@ -653,31 +656,34 @@ internal open class UniffiVTableCallbackInterfaceAppReconciler(
     }
 
 }
-@Structure.FieldOrder("uniffiFree", "uniffiClone", "requestPublicKey", "signEvent", "nip44Encrypt", "nip44Decrypt", "nip04Encrypt", "nip04Decrypt")
+@Structure.FieldOrder("uniffiFree", "uniffiClone", "openUrl", "requestPublicKey", "signEvent", "nip44Encrypt", "nip44Decrypt", "nip04Encrypt", "nip04Decrypt")
 internal open class UniffiVTableCallbackInterfaceExternalSignerBridge(
     @JvmField internal var `uniffiFree`: UniffiCallbackInterfaceFree? = null,
     @JvmField internal var `uniffiClone`: UniffiCallbackInterfaceClone? = null,
-    @JvmField internal var `requestPublicKey`: UniffiCallbackInterfaceExternalSignerBridgeMethod0? = null,
-    @JvmField internal var `signEvent`: UniffiCallbackInterfaceExternalSignerBridgeMethod1? = null,
-    @JvmField internal var `nip44Encrypt`: UniffiCallbackInterfaceExternalSignerBridgeMethod2? = null,
-    @JvmField internal var `nip44Decrypt`: UniffiCallbackInterfaceExternalSignerBridgeMethod3? = null,
-    @JvmField internal var `nip04Encrypt`: UniffiCallbackInterfaceExternalSignerBridgeMethod4? = null,
-    @JvmField internal var `nip04Decrypt`: UniffiCallbackInterfaceExternalSignerBridgeMethod5? = null,
+    @JvmField internal var `openUrl`: UniffiCallbackInterfaceExternalSignerBridgeMethod0? = null,
+    @JvmField internal var `requestPublicKey`: UniffiCallbackInterfaceExternalSignerBridgeMethod1? = null,
+    @JvmField internal var `signEvent`: UniffiCallbackInterfaceExternalSignerBridgeMethod2? = null,
+    @JvmField internal var `nip44Encrypt`: UniffiCallbackInterfaceExternalSignerBridgeMethod3? = null,
+    @JvmField internal var `nip44Decrypt`: UniffiCallbackInterfaceExternalSignerBridgeMethod4? = null,
+    @JvmField internal var `nip04Encrypt`: UniffiCallbackInterfaceExternalSignerBridgeMethod5? = null,
+    @JvmField internal var `nip04Decrypt`: UniffiCallbackInterfaceExternalSignerBridgeMethod6? = null,
 ) : Structure() {
     class UniffiByValue(
         `uniffiFree`: UniffiCallbackInterfaceFree? = null,
         `uniffiClone`: UniffiCallbackInterfaceClone? = null,
-        `requestPublicKey`: UniffiCallbackInterfaceExternalSignerBridgeMethod0? = null,
-        `signEvent`: UniffiCallbackInterfaceExternalSignerBridgeMethod1? = null,
-        `nip44Encrypt`: UniffiCallbackInterfaceExternalSignerBridgeMethod2? = null,
-        `nip44Decrypt`: UniffiCallbackInterfaceExternalSignerBridgeMethod3? = null,
-        `nip04Encrypt`: UniffiCallbackInterfaceExternalSignerBridgeMethod4? = null,
-        `nip04Decrypt`: UniffiCallbackInterfaceExternalSignerBridgeMethod5? = null,
-    ): UniffiVTableCallbackInterfaceExternalSignerBridge(`uniffiFree`,`uniffiClone`,`requestPublicKey`,`signEvent`,`nip44Encrypt`,`nip44Decrypt`,`nip04Encrypt`,`nip04Decrypt`,), Structure.ByValue
+        `openUrl`: UniffiCallbackInterfaceExternalSignerBridgeMethod0? = null,
+        `requestPublicKey`: UniffiCallbackInterfaceExternalSignerBridgeMethod1? = null,
+        `signEvent`: UniffiCallbackInterfaceExternalSignerBridgeMethod2? = null,
+        `nip44Encrypt`: UniffiCallbackInterfaceExternalSignerBridgeMethod3? = null,
+        `nip44Decrypt`: UniffiCallbackInterfaceExternalSignerBridgeMethod4? = null,
+        `nip04Encrypt`: UniffiCallbackInterfaceExternalSignerBridgeMethod5? = null,
+        `nip04Decrypt`: UniffiCallbackInterfaceExternalSignerBridgeMethod6? = null,
+    ): UniffiVTableCallbackInterfaceExternalSignerBridge(`uniffiFree`,`uniffiClone`,`openUrl`,`requestPublicKey`,`signEvent`,`nip44Encrypt`,`nip44Decrypt`,`nip04Encrypt`,`nip04Decrypt`,), Structure.ByValue
 
    internal fun uniffiSetValue(other: UniffiVTableCallbackInterfaceExternalSignerBridge) {
         `uniffiFree` = other.`uniffiFree`
         `uniffiClone` = other.`uniffiClone`
+        `openUrl` = other.`openUrl`
         `requestPublicKey` = other.`requestPublicKey`
         `signEvent` = other.`signEvent`
         `nip44Encrypt` = other.`nip44Encrypt`
@@ -721,6 +727,8 @@ internal object IntegrityCheckingUniffiLib {
     external fun uniffi_pika_core_checksum_constructor_ffiapp_new(
     ): Short
     external fun uniffi_pika_core_checksum_method_appreconciler_reconcile(
+    ): Short
+    external fun uniffi_pika_core_checksum_method_externalsignerbridge_open_url(
     ): Short
     external fun uniffi_pika_core_checksum_method_externalsignerbridge_request_public_key(
     ): Short
@@ -909,22 +917,25 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_pika_core_checksum_method_appreconciler_reconcile() != 10811.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_pika_core_checksum_method_externalsignerbridge_request_public_key() != 20534.toShort()) {
+    if (lib.uniffi_pika_core_checksum_method_externalsignerbridge_open_url() != 29331.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_pika_core_checksum_method_externalsignerbridge_sign_event() != 5558.toShort()) {
+    if (lib.uniffi_pika_core_checksum_method_externalsignerbridge_request_public_key() != 14823.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_pika_core_checksum_method_externalsignerbridge_nip44_encrypt() != 24811.toShort()) {
+    if (lib.uniffi_pika_core_checksum_method_externalsignerbridge_sign_event() != 61876.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_pika_core_checksum_method_externalsignerbridge_nip44_decrypt() != 40037.toShort()) {
+    if (lib.uniffi_pika_core_checksum_method_externalsignerbridge_nip44_encrypt() != 20399.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_pika_core_checksum_method_externalsignerbridge_nip04_encrypt() != 11537.toShort()) {
+    if (lib.uniffi_pika_core_checksum_method_externalsignerbridge_nip44_decrypt() != 4629.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_pika_core_checksum_method_externalsignerbridge_nip04_decrypt() != 52835.toShort()) {
+    if (lib.uniffi_pika_core_checksum_method_externalsignerbridge_nip04_encrypt() != 57904.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_pika_core_checksum_method_externalsignerbridge_nip04_decrypt() != 51079.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
 }
@@ -2546,6 +2557,9 @@ sealed class AppAction {
         companion object
     }
     
+    object BeginNostrConnectLogin : AppAction()
+    
+    
     data class RestoreSession(
         val `nsec`: kotlin.String) : AppAction()
         
@@ -2777,6 +2791,15 @@ sealed class AppAction {
     object Foregrounded : AppAction()
     
     
+    data class NostrConnectCallback(
+        val `url`: kotlin.String) : AppAction()
+        
+    {
+        
+
+        companion object
+    }
+    
     data class OpenPeerProfile(
         val `pubkey`: kotlin.String) : AppAction()
         
@@ -2836,102 +2859,106 @@ public object FfiConverterTypeAppAction : FfiConverterRustBuffer<AppAction>{
             4 -> AppAction.BeginBunkerLogin(
                 FfiConverterString.read(buf),
                 )
-            5 -> AppAction.RestoreSession(
+            5 -> AppAction.BeginNostrConnectLogin
+            6 -> AppAction.RestoreSession(
                 FfiConverterString.read(buf),
                 )
-            6 -> AppAction.RestoreSessionExternalSigner(
+            7 -> AppAction.RestoreSessionExternalSigner(
                 FfiConverterString.read(buf),
-                FfiConverterString.read(buf),
-                FfiConverterString.read(buf),
-                )
-            7 -> AppAction.RestoreSessionBunker(
                 FfiConverterString.read(buf),
                 FfiConverterString.read(buf),
                 )
-            8 -> AppAction.Logout
-            9 -> AppAction.RefreshMyProfile
-            10 -> AppAction.SaveMyProfile(
+            8 -> AppAction.RestoreSessionBunker(
                 FfiConverterString.read(buf),
                 FfiConverterString.read(buf),
                 )
-            11 -> AppAction.UploadMyProfileImage(
+            9 -> AppAction.Logout
+            10 -> AppAction.RefreshMyProfile
+            11 -> AppAction.SaveMyProfile(
                 FfiConverterString.read(buf),
                 FfiConverterString.read(buf),
                 )
-            12 -> AppAction.PushScreen(
+            12 -> AppAction.UploadMyProfileImage(
+                FfiConverterString.read(buf),
+                FfiConverterString.read(buf),
+                )
+            13 -> AppAction.PushScreen(
                 FfiConverterTypeScreen.read(buf),
                 )
-            13 -> AppAction.UpdateScreenStack(
+            14 -> AppAction.UpdateScreenStack(
                 FfiConverterSequenceTypeScreen.read(buf),
                 )
-            14 -> AppAction.CreateChat(
+            15 -> AppAction.CreateChat(
                 FfiConverterString.read(buf),
                 )
-            15 -> AppAction.SendMessage(
-                FfiConverterString.read(buf),
-                FfiConverterString.read(buf),
-                )
-            16 -> AppAction.RetryMessage(
+            16 -> AppAction.SendMessage(
                 FfiConverterString.read(buf),
                 FfiConverterString.read(buf),
                 )
-            17 -> AppAction.OpenChat(
+            17 -> AppAction.RetryMessage(
+                FfiConverterString.read(buf),
                 FfiConverterString.read(buf),
                 )
-            18 -> AppAction.LoadOlderMessages(
+            18 -> AppAction.OpenChat(
+                FfiConverterString.read(buf),
+                )
+            19 -> AppAction.LoadOlderMessages(
                 FfiConverterString.read(buf),
                 FfiConverterString.read(buf),
                 FfiConverterUInt.read(buf),
                 )
-            19 -> AppAction.StartCall(
+            20 -> AppAction.StartCall(
                 FfiConverterString.read(buf),
                 )
-            20 -> AppAction.AcceptCall(
+            21 -> AppAction.AcceptCall(
                 FfiConverterString.read(buf),
                 )
-            21 -> AppAction.RejectCall(
+            22 -> AppAction.RejectCall(
                 FfiConverterString.read(buf),
                 )
-            22 -> AppAction.EndCall
-            23 -> AppAction.ToggleMute
-            24 -> AppAction.CreateGroupChat(
+            23 -> AppAction.EndCall
+            24 -> AppAction.ToggleMute
+            25 -> AppAction.CreateGroupChat(
                 FfiConverterSequenceString.read(buf),
                 FfiConverterString.read(buf),
                 )
-            25 -> AppAction.AddGroupMembers(
+            26 -> AppAction.AddGroupMembers(
                 FfiConverterString.read(buf),
                 FfiConverterSequenceString.read(buf),
                 )
-            26 -> AppAction.RemoveGroupMembers(
+            27 -> AppAction.RemoveGroupMembers(
                 FfiConverterString.read(buf),
                 FfiConverterSequenceString.read(buf),
                 )
-            27 -> AppAction.LeaveGroup(
+            28 -> AppAction.LeaveGroup(
                 FfiConverterString.read(buf),
                 )
-            28 -> AppAction.RenameGroup(
-                FfiConverterString.read(buf),
-                FfiConverterString.read(buf),
-                )
-            29 -> AppAction.ArchiveChat(
-                FfiConverterString.read(buf),
-                )
-            30 -> AppAction.ReactToMessage(
-                FfiConverterString.read(buf),
+            29 -> AppAction.RenameGroup(
                 FfiConverterString.read(buf),
                 FfiConverterString.read(buf),
                 )
-            31 -> AppAction.ClearToast
-            32 -> AppAction.Foregrounded
-            33 -> AppAction.OpenPeerProfile(
+            30 -> AppAction.ArchiveChat(
                 FfiConverterString.read(buf),
                 )
-            34 -> AppAction.ClosePeerProfile
-            35 -> AppAction.RefreshFollowList
-            36 -> AppAction.FollowUser(
+            31 -> AppAction.ReactToMessage(
+                FfiConverterString.read(buf),
+                FfiConverterString.read(buf),
                 FfiConverterString.read(buf),
                 )
-            37 -> AppAction.UnfollowUser(
+            32 -> AppAction.ClearToast
+            33 -> AppAction.Foregrounded
+            34 -> AppAction.NostrConnectCallback(
+                FfiConverterString.read(buf),
+                )
+            35 -> AppAction.OpenPeerProfile(
+                FfiConverterString.read(buf),
+                )
+            36 -> AppAction.ClosePeerProfile
+            37 -> AppAction.RefreshFollowList
+            38 -> AppAction.FollowUser(
+                FfiConverterString.read(buf),
+                )
+            39 -> AppAction.UnfollowUser(
                 FfiConverterString.read(buf),
                 )
             else -> throw RuntimeException("invalid enum value, something is very wrong!!")
@@ -2964,6 +2991,12 @@ public object FfiConverterTypeAppAction : FfiConverterRustBuffer<AppAction>{
             (
                 4UL
                 + FfiConverterString.allocationSize(value.`bunkerUri`)
+            )
+        }
+        is AppAction.BeginNostrConnectLogin -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
             )
         }
         is AppAction.RestoreSession -> {
@@ -3171,6 +3204,13 @@ public object FfiConverterTypeAppAction : FfiConverterRustBuffer<AppAction>{
                 4UL
             )
         }
+        is AppAction.NostrConnectCallback -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterString.allocationSize(value.`url`)
+            )
+        }
         is AppAction.OpenPeerProfile -> {
             // Add the size for the Int that specifies the variant plus the size needed for all fields
             (
@@ -3227,175 +3267,184 @@ public object FfiConverterTypeAppAction : FfiConverterRustBuffer<AppAction>{
                 FfiConverterString.write(value.`bunkerUri`, buf)
                 Unit
             }
-            is AppAction.RestoreSession -> {
+            is AppAction.BeginNostrConnectLogin -> {
                 buf.putInt(5)
+                Unit
+            }
+            is AppAction.RestoreSession -> {
+                buf.putInt(6)
                 FfiConverterString.write(value.`nsec`, buf)
                 Unit
             }
             is AppAction.RestoreSessionExternalSigner -> {
-                buf.putInt(6)
+                buf.putInt(7)
                 FfiConverterString.write(value.`pubkey`, buf)
                 FfiConverterString.write(value.`signerPackage`, buf)
                 FfiConverterString.write(value.`currentUser`, buf)
                 Unit
             }
             is AppAction.RestoreSessionBunker -> {
-                buf.putInt(7)
+                buf.putInt(8)
                 FfiConverterString.write(value.`bunkerUri`, buf)
                 FfiConverterString.write(value.`clientNsec`, buf)
                 Unit
             }
             is AppAction.Logout -> {
-                buf.putInt(8)
-                Unit
-            }
-            is AppAction.RefreshMyProfile -> {
                 buf.putInt(9)
                 Unit
             }
-            is AppAction.SaveMyProfile -> {
+            is AppAction.RefreshMyProfile -> {
                 buf.putInt(10)
+                Unit
+            }
+            is AppAction.SaveMyProfile -> {
+                buf.putInt(11)
                 FfiConverterString.write(value.`name`, buf)
                 FfiConverterString.write(value.`about`, buf)
                 Unit
             }
             is AppAction.UploadMyProfileImage -> {
-                buf.putInt(11)
+                buf.putInt(12)
                 FfiConverterString.write(value.`imageBase64`, buf)
                 FfiConverterString.write(value.`mimeType`, buf)
                 Unit
             }
             is AppAction.PushScreen -> {
-                buf.putInt(12)
+                buf.putInt(13)
                 FfiConverterTypeScreen.write(value.`screen`, buf)
                 Unit
             }
             is AppAction.UpdateScreenStack -> {
-                buf.putInt(13)
+                buf.putInt(14)
                 FfiConverterSequenceTypeScreen.write(value.`stack`, buf)
                 Unit
             }
             is AppAction.CreateChat -> {
-                buf.putInt(14)
+                buf.putInt(15)
                 FfiConverterString.write(value.`peerNpub`, buf)
                 Unit
             }
             is AppAction.SendMessage -> {
-                buf.putInt(15)
+                buf.putInt(16)
                 FfiConverterString.write(value.`chatId`, buf)
                 FfiConverterString.write(value.`content`, buf)
                 Unit
             }
             is AppAction.RetryMessage -> {
-                buf.putInt(16)
+                buf.putInt(17)
                 FfiConverterString.write(value.`chatId`, buf)
                 FfiConverterString.write(value.`messageId`, buf)
                 Unit
             }
             is AppAction.OpenChat -> {
-                buf.putInt(17)
+                buf.putInt(18)
                 FfiConverterString.write(value.`chatId`, buf)
                 Unit
             }
             is AppAction.LoadOlderMessages -> {
-                buf.putInt(18)
+                buf.putInt(19)
                 FfiConverterString.write(value.`chatId`, buf)
                 FfiConverterString.write(value.`beforeMessageId`, buf)
                 FfiConverterUInt.write(value.`limit`, buf)
                 Unit
             }
             is AppAction.StartCall -> {
-                buf.putInt(19)
-                FfiConverterString.write(value.`chatId`, buf)
-                Unit
-            }
-            is AppAction.AcceptCall -> {
                 buf.putInt(20)
                 FfiConverterString.write(value.`chatId`, buf)
                 Unit
             }
-            is AppAction.RejectCall -> {
+            is AppAction.AcceptCall -> {
                 buf.putInt(21)
                 FfiConverterString.write(value.`chatId`, buf)
                 Unit
             }
-            is AppAction.EndCall -> {
+            is AppAction.RejectCall -> {
                 buf.putInt(22)
+                FfiConverterString.write(value.`chatId`, buf)
                 Unit
             }
-            is AppAction.ToggleMute -> {
+            is AppAction.EndCall -> {
                 buf.putInt(23)
                 Unit
             }
-            is AppAction.CreateGroupChat -> {
+            is AppAction.ToggleMute -> {
                 buf.putInt(24)
+                Unit
+            }
+            is AppAction.CreateGroupChat -> {
+                buf.putInt(25)
                 FfiConverterSequenceString.write(value.`peerNpubs`, buf)
                 FfiConverterString.write(value.`groupName`, buf)
                 Unit
             }
             is AppAction.AddGroupMembers -> {
-                buf.putInt(25)
+                buf.putInt(26)
                 FfiConverterString.write(value.`chatId`, buf)
                 FfiConverterSequenceString.write(value.`peerNpubs`, buf)
                 Unit
             }
             is AppAction.RemoveGroupMembers -> {
-                buf.putInt(26)
+                buf.putInt(27)
                 FfiConverterString.write(value.`chatId`, buf)
                 FfiConverterSequenceString.write(value.`memberPubkeys`, buf)
                 Unit
             }
             is AppAction.LeaveGroup -> {
-                buf.putInt(27)
+                buf.putInt(28)
                 FfiConverterString.write(value.`chatId`, buf)
                 Unit
             }
             is AppAction.RenameGroup -> {
-                buf.putInt(28)
+                buf.putInt(29)
                 FfiConverterString.write(value.`chatId`, buf)
                 FfiConverterString.write(value.`name`, buf)
                 Unit
             }
             is AppAction.ArchiveChat -> {
-                buf.putInt(29)
+                buf.putInt(30)
                 FfiConverterString.write(value.`chatId`, buf)
                 Unit
             }
             is AppAction.ReactToMessage -> {
-                buf.putInt(30)
+                buf.putInt(31)
                 FfiConverterString.write(value.`chatId`, buf)
                 FfiConverterString.write(value.`messageId`, buf)
                 FfiConverterString.write(value.`emoji`, buf)
                 Unit
             }
             is AppAction.ClearToast -> {
-                buf.putInt(31)
-                Unit
-            }
-            is AppAction.Foregrounded -> {
                 buf.putInt(32)
                 Unit
             }
-            is AppAction.OpenPeerProfile -> {
+            is AppAction.Foregrounded -> {
                 buf.putInt(33)
+                Unit
+            }
+            is AppAction.NostrConnectCallback -> {
+                buf.putInt(34)
+                FfiConverterString.write(value.`url`, buf)
+                Unit
+            }
+            is AppAction.OpenPeerProfile -> {
+                buf.putInt(35)
                 FfiConverterString.write(value.`pubkey`, buf)
                 Unit
             }
             is AppAction.ClosePeerProfile -> {
-                buf.putInt(34)
+                buf.putInt(36)
                 Unit
             }
             is AppAction.RefreshFollowList -> {
-                buf.putInt(35)
+                buf.putInt(37)
                 Unit
             }
             is AppAction.FollowUser -> {
-                buf.putInt(36)
+                buf.putInt(38)
                 FfiConverterString.write(value.`pubkey`, buf)
                 Unit
             }
             is AppAction.UnfollowUser -> {
-                buf.putInt(37)
+                buf.putInt(39)
                 FfiConverterString.write(value.`pubkey`, buf)
                 Unit
             }
@@ -4169,6 +4218,8 @@ public object FfiConverterTypeAppReconciler: FfiConverterCallbackInterface<AppRe
 
 public interface ExternalSignerBridge {
     
+    fun `openUrl`(`url`: kotlin.String): ExternalSignerResult
+    
     fun `requestPublicKey`(`currentUserHint`: kotlin.String?): ExternalSignerHandshakeResult
     
     fun `signEvent`(`signerPackage`: kotlin.String, `currentUser`: kotlin.String, `unsignedEventJson`: kotlin.String): ExternalSignerResult
@@ -4188,7 +4239,19 @@ public interface ExternalSignerBridge {
 
 // Put the implementation in an object so we don't pollute the top-level namespace
 internal object uniffiCallbackInterfaceExternalSignerBridge {
-    internal object `requestPublicKey`: UniffiCallbackInterfaceExternalSignerBridgeMethod0 {
+    internal object `openUrl`: UniffiCallbackInterfaceExternalSignerBridgeMethod0 {
+        override fun callback(`uniffiHandle`: Long,`url`: RustBuffer.ByValue,`uniffiOutReturn`: RustBuffer,uniffiCallStatus: UniffiRustCallStatus,) {
+            val uniffiObj = FfiConverterTypeExternalSignerBridge.handleMap.get(uniffiHandle)
+            val makeCall = { ->
+                uniffiObj.`openUrl`(
+                    FfiConverterString.lift(`url`),
+                )
+            }
+            val writeReturn = { value: ExternalSignerResult -> uniffiOutReturn.setValue(FfiConverterTypeExternalSignerResult.lower(value)) }
+            uniffiTraitInterfaceCall(uniffiCallStatus, makeCall, writeReturn)
+        }
+    }
+    internal object `requestPublicKey`: UniffiCallbackInterfaceExternalSignerBridgeMethod1 {
         override fun callback(`uniffiHandle`: Long,`currentUserHint`: RustBuffer.ByValue,`uniffiOutReturn`: RustBuffer,uniffiCallStatus: UniffiRustCallStatus,) {
             val uniffiObj = FfiConverterTypeExternalSignerBridge.handleMap.get(uniffiHandle)
             val makeCall = { ->
@@ -4200,7 +4263,7 @@ internal object uniffiCallbackInterfaceExternalSignerBridge {
             uniffiTraitInterfaceCall(uniffiCallStatus, makeCall, writeReturn)
         }
     }
-    internal object `signEvent`: UniffiCallbackInterfaceExternalSignerBridgeMethod1 {
+    internal object `signEvent`: UniffiCallbackInterfaceExternalSignerBridgeMethod2 {
         override fun callback(`uniffiHandle`: Long,`signerPackage`: RustBuffer.ByValue,`currentUser`: RustBuffer.ByValue,`unsignedEventJson`: RustBuffer.ByValue,`uniffiOutReturn`: RustBuffer,uniffiCallStatus: UniffiRustCallStatus,) {
             val uniffiObj = FfiConverterTypeExternalSignerBridge.handleMap.get(uniffiHandle)
             val makeCall = { ->
@@ -4214,7 +4277,7 @@ internal object uniffiCallbackInterfaceExternalSignerBridge {
             uniffiTraitInterfaceCall(uniffiCallStatus, makeCall, writeReturn)
         }
     }
-    internal object `nip44Encrypt`: UniffiCallbackInterfaceExternalSignerBridgeMethod2 {
+    internal object `nip44Encrypt`: UniffiCallbackInterfaceExternalSignerBridgeMethod3 {
         override fun callback(`uniffiHandle`: Long,`signerPackage`: RustBuffer.ByValue,`currentUser`: RustBuffer.ByValue,`peerPubkey`: RustBuffer.ByValue,`content`: RustBuffer.ByValue,`uniffiOutReturn`: RustBuffer,uniffiCallStatus: UniffiRustCallStatus,) {
             val uniffiObj = FfiConverterTypeExternalSignerBridge.handleMap.get(uniffiHandle)
             val makeCall = { ->
@@ -4229,7 +4292,7 @@ internal object uniffiCallbackInterfaceExternalSignerBridge {
             uniffiTraitInterfaceCall(uniffiCallStatus, makeCall, writeReturn)
         }
     }
-    internal object `nip44Decrypt`: UniffiCallbackInterfaceExternalSignerBridgeMethod3 {
+    internal object `nip44Decrypt`: UniffiCallbackInterfaceExternalSignerBridgeMethod4 {
         override fun callback(`uniffiHandle`: Long,`signerPackage`: RustBuffer.ByValue,`currentUser`: RustBuffer.ByValue,`peerPubkey`: RustBuffer.ByValue,`payload`: RustBuffer.ByValue,`uniffiOutReturn`: RustBuffer,uniffiCallStatus: UniffiRustCallStatus,) {
             val uniffiObj = FfiConverterTypeExternalSignerBridge.handleMap.get(uniffiHandle)
             val makeCall = { ->
@@ -4244,7 +4307,7 @@ internal object uniffiCallbackInterfaceExternalSignerBridge {
             uniffiTraitInterfaceCall(uniffiCallStatus, makeCall, writeReturn)
         }
     }
-    internal object `nip04Encrypt`: UniffiCallbackInterfaceExternalSignerBridgeMethod4 {
+    internal object `nip04Encrypt`: UniffiCallbackInterfaceExternalSignerBridgeMethod5 {
         override fun callback(`uniffiHandle`: Long,`signerPackage`: RustBuffer.ByValue,`currentUser`: RustBuffer.ByValue,`peerPubkey`: RustBuffer.ByValue,`content`: RustBuffer.ByValue,`uniffiOutReturn`: RustBuffer,uniffiCallStatus: UniffiRustCallStatus,) {
             val uniffiObj = FfiConverterTypeExternalSignerBridge.handleMap.get(uniffiHandle)
             val makeCall = { ->
@@ -4259,7 +4322,7 @@ internal object uniffiCallbackInterfaceExternalSignerBridge {
             uniffiTraitInterfaceCall(uniffiCallStatus, makeCall, writeReturn)
         }
     }
-    internal object `nip04Decrypt`: UniffiCallbackInterfaceExternalSignerBridgeMethod5 {
+    internal object `nip04Decrypt`: UniffiCallbackInterfaceExternalSignerBridgeMethod6 {
         override fun callback(`uniffiHandle`: Long,`signerPackage`: RustBuffer.ByValue,`currentUser`: RustBuffer.ByValue,`peerPubkey`: RustBuffer.ByValue,`payload`: RustBuffer.ByValue,`uniffiOutReturn`: RustBuffer,uniffiCallStatus: UniffiRustCallStatus,) {
             val uniffiObj = FfiConverterTypeExternalSignerBridge.handleMap.get(uniffiHandle)
             val makeCall = { ->
@@ -4290,6 +4353,7 @@ internal object uniffiCallbackInterfaceExternalSignerBridge {
     internal var vtable = UniffiVTableCallbackInterfaceExternalSignerBridge.UniffiByValue(
         uniffiFree,
         uniffiClone,
+        `openUrl`,
         `requestPublicKey`,
         `signEvent`,
         `nip44Encrypt`,

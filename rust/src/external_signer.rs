@@ -35,6 +35,7 @@ pub struct ExternalSignerHandshakeResult {
 
 #[uniffi::export(callback_interface)]
 pub trait ExternalSignerBridge: Send + Sync + 'static {
+    fn open_url(&self, url: String) -> ExternalSignerResult;
     fn request_public_key(
         &self,
         current_user_hint: Option<String>,

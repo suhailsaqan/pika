@@ -1862,6 +1862,7 @@ public enum AppAction: Equatable, Hashable {
     )
     case beginBunkerLogin(bunkerUri: String
     )
+    case beginNostrConnectLogin
     case restoreSession(nsec: String
     )
     case restoreSessionExternalSigner(pubkey: String, signerPackage: String, currentUser: String
@@ -1912,6 +1913,8 @@ public enum AppAction: Equatable, Hashable {
     )
     case clearToast
     case foregrounded
+    case nostrConnectCallback(url: String
+    )
     case openPeerProfile(pubkey: String
     )
     case closePeerProfile
@@ -1952,95 +1955,100 @@ public struct FfiConverterTypeAppAction: FfiConverterRustBuffer {
         case 4: return .beginBunkerLogin(bunkerUri: try FfiConverterString.read(from: &buf)
         )
 
-        case 5: return .restoreSession(nsec: try FfiConverterString.read(from: &buf)
+        case 5: return .beginNostrConnectLogin
+
+        case 6: return .restoreSession(nsec: try FfiConverterString.read(from: &buf)
         )
 
-        case 6: return .restoreSessionExternalSigner(pubkey: try FfiConverterString.read(from: &buf), signerPackage: try FfiConverterString.read(from: &buf), currentUser: try FfiConverterString.read(from: &buf)
+        case 7: return .restoreSessionExternalSigner(pubkey: try FfiConverterString.read(from: &buf), signerPackage: try FfiConverterString.read(from: &buf), currentUser: try FfiConverterString.read(from: &buf)
         )
 
-        case 7: return .restoreSessionBunker(bunkerUri: try FfiConverterString.read(from: &buf), clientNsec: try FfiConverterString.read(from: &buf)
+        case 8: return .restoreSessionBunker(bunkerUri: try FfiConverterString.read(from: &buf), clientNsec: try FfiConverterString.read(from: &buf)
         )
 
-        case 8: return .logout
+        case 9: return .logout
 
-        case 9: return .refreshMyProfile
+        case 10: return .refreshMyProfile
 
-        case 10: return .saveMyProfile(name: try FfiConverterString.read(from: &buf), about: try FfiConverterString.read(from: &buf)
+        case 11: return .saveMyProfile(name: try FfiConverterString.read(from: &buf), about: try FfiConverterString.read(from: &buf)
         )
 
-        case 11: return .uploadMyProfileImage(imageBase64: try FfiConverterString.read(from: &buf), mimeType: try FfiConverterString.read(from: &buf)
+        case 12: return .uploadMyProfileImage(imageBase64: try FfiConverterString.read(from: &buf), mimeType: try FfiConverterString.read(from: &buf)
         )
 
-        case 12: return .pushScreen(screen: try FfiConverterTypeScreen.read(from: &buf)
+        case 13: return .pushScreen(screen: try FfiConverterTypeScreen.read(from: &buf)
         )
 
-        case 13: return .updateScreenStack(stack: try FfiConverterSequenceTypeScreen.read(from: &buf)
+        case 14: return .updateScreenStack(stack: try FfiConverterSequenceTypeScreen.read(from: &buf)
         )
 
-        case 14: return .createChat(peerNpub: try FfiConverterString.read(from: &buf)
+        case 15: return .createChat(peerNpub: try FfiConverterString.read(from: &buf)
         )
 
-        case 15: return .sendMessage(chatId: try FfiConverterString.read(from: &buf), content: try FfiConverterString.read(from: &buf)
+        case 16: return .sendMessage(chatId: try FfiConverterString.read(from: &buf), content: try FfiConverterString.read(from: &buf)
         )
 
-        case 16: return .retryMessage(chatId: try FfiConverterString.read(from: &buf), messageId: try FfiConverterString.read(from: &buf)
+        case 17: return .retryMessage(chatId: try FfiConverterString.read(from: &buf), messageId: try FfiConverterString.read(from: &buf)
         )
 
-        case 17: return .openChat(chatId: try FfiConverterString.read(from: &buf)
+        case 18: return .openChat(chatId: try FfiConverterString.read(from: &buf)
         )
 
-        case 18: return .loadOlderMessages(chatId: try FfiConverterString.read(from: &buf), beforeMessageId: try FfiConverterString.read(from: &buf), limit: try FfiConverterUInt32.read(from: &buf)
+        case 19: return .loadOlderMessages(chatId: try FfiConverterString.read(from: &buf), beforeMessageId: try FfiConverterString.read(from: &buf), limit: try FfiConverterUInt32.read(from: &buf)
         )
 
-        case 19: return .startCall(chatId: try FfiConverterString.read(from: &buf)
+        case 20: return .startCall(chatId: try FfiConverterString.read(from: &buf)
         )
 
-        case 20: return .acceptCall(chatId: try FfiConverterString.read(from: &buf)
+        case 21: return .acceptCall(chatId: try FfiConverterString.read(from: &buf)
         )
 
-        case 21: return .rejectCall(chatId: try FfiConverterString.read(from: &buf)
+        case 22: return .rejectCall(chatId: try FfiConverterString.read(from: &buf)
         )
 
-        case 22: return .endCall
+        case 23: return .endCall
 
-        case 23: return .toggleMute
+        case 24: return .toggleMute
 
-        case 24: return .createGroupChat(peerNpubs: try FfiConverterSequenceString.read(from: &buf), groupName: try FfiConverterString.read(from: &buf)
+        case 25: return .createGroupChat(peerNpubs: try FfiConverterSequenceString.read(from: &buf), groupName: try FfiConverterString.read(from: &buf)
         )
 
-        case 25: return .addGroupMembers(chatId: try FfiConverterString.read(from: &buf), peerNpubs: try FfiConverterSequenceString.read(from: &buf)
+        case 26: return .addGroupMembers(chatId: try FfiConverterString.read(from: &buf), peerNpubs: try FfiConverterSequenceString.read(from: &buf)
         )
 
-        case 26: return .removeGroupMembers(chatId: try FfiConverterString.read(from: &buf), memberPubkeys: try FfiConverterSequenceString.read(from: &buf)
+        case 27: return .removeGroupMembers(chatId: try FfiConverterString.read(from: &buf), memberPubkeys: try FfiConverterSequenceString.read(from: &buf)
         )
 
-        case 27: return .leaveGroup(chatId: try FfiConverterString.read(from: &buf)
+        case 28: return .leaveGroup(chatId: try FfiConverterString.read(from: &buf)
         )
 
-        case 28: return .renameGroup(chatId: try FfiConverterString.read(from: &buf), name: try FfiConverterString.read(from: &buf)
+        case 29: return .renameGroup(chatId: try FfiConverterString.read(from: &buf), name: try FfiConverterString.read(from: &buf)
         )
 
-        case 29: return .archiveChat(chatId: try FfiConverterString.read(from: &buf)
+        case 30: return .archiveChat(chatId: try FfiConverterString.read(from: &buf)
         )
 
-        case 30: return .reactToMessage(chatId: try FfiConverterString.read(from: &buf), messageId: try FfiConverterString.read(from: &buf), emoji: try FfiConverterString.read(from: &buf)
+        case 31: return .reactToMessage(chatId: try FfiConverterString.read(from: &buf), messageId: try FfiConverterString.read(from: &buf), emoji: try FfiConverterString.read(from: &buf)
         )
 
-        case 31: return .clearToast
+        case 32: return .clearToast
 
-        case 32: return .foregrounded
+        case 33: return .foregrounded
 
-        case 33: return .openPeerProfile(pubkey: try FfiConverterString.read(from: &buf)
+        case 34: return .nostrConnectCallback(url: try FfiConverterString.read(from: &buf)
         )
 
-        case 34: return .closePeerProfile
-
-        case 35: return .refreshFollowList
-
-        case 36: return .followUser(pubkey: try FfiConverterString.read(from: &buf)
+        case 35: return .openPeerProfile(pubkey: try FfiConverterString.read(from: &buf)
         )
 
-        case 37: return .unfollowUser(pubkey: try FfiConverterString.read(from: &buf)
+        case 36: return .closePeerProfile
+
+        case 37: return .refreshFollowList
+
+        case 38: return .followUser(pubkey: try FfiConverterString.read(from: &buf)
+        )
+
+        case 39: return .unfollowUser(pubkey: try FfiConverterString.read(from: &buf)
         )
 
         default: throw UniffiInternalError.unexpectedEnumCase
@@ -2070,175 +2078,184 @@ public struct FfiConverterTypeAppAction: FfiConverterRustBuffer {
             FfiConverterString.write(bunkerUri, into: &buf)
 
 
-        case let .restoreSession(nsec):
+        case .beginNostrConnectLogin:
             writeInt(&buf, Int32(5))
+
+
+        case let .restoreSession(nsec):
+            writeInt(&buf, Int32(6))
             FfiConverterString.write(nsec, into: &buf)
 
 
         case let .restoreSessionExternalSigner(pubkey,signerPackage,currentUser):
-            writeInt(&buf, Int32(6))
+            writeInt(&buf, Int32(7))
             FfiConverterString.write(pubkey, into: &buf)
             FfiConverterString.write(signerPackage, into: &buf)
             FfiConverterString.write(currentUser, into: &buf)
 
 
         case let .restoreSessionBunker(bunkerUri,clientNsec):
-            writeInt(&buf, Int32(7))
+            writeInt(&buf, Int32(8))
             FfiConverterString.write(bunkerUri, into: &buf)
             FfiConverterString.write(clientNsec, into: &buf)
 
 
         case .logout:
-            writeInt(&buf, Int32(8))
-
-
-        case .refreshMyProfile:
             writeInt(&buf, Int32(9))
 
 
-        case let .saveMyProfile(name,about):
+        case .refreshMyProfile:
             writeInt(&buf, Int32(10))
+
+
+        case let .saveMyProfile(name,about):
+            writeInt(&buf, Int32(11))
             FfiConverterString.write(name, into: &buf)
             FfiConverterString.write(about, into: &buf)
 
 
         case let .uploadMyProfileImage(imageBase64,mimeType):
-            writeInt(&buf, Int32(11))
+            writeInt(&buf, Int32(12))
             FfiConverterString.write(imageBase64, into: &buf)
             FfiConverterString.write(mimeType, into: &buf)
 
 
         case let .pushScreen(screen):
-            writeInt(&buf, Int32(12))
+            writeInt(&buf, Int32(13))
             FfiConverterTypeScreen.write(screen, into: &buf)
 
 
         case let .updateScreenStack(stack):
-            writeInt(&buf, Int32(13))
+            writeInt(&buf, Int32(14))
             FfiConverterSequenceTypeScreen.write(stack, into: &buf)
 
 
         case let .createChat(peerNpub):
-            writeInt(&buf, Int32(14))
+            writeInt(&buf, Int32(15))
             FfiConverterString.write(peerNpub, into: &buf)
 
 
         case let .sendMessage(chatId,content):
-            writeInt(&buf, Int32(15))
+            writeInt(&buf, Int32(16))
             FfiConverterString.write(chatId, into: &buf)
             FfiConverterString.write(content, into: &buf)
 
 
         case let .retryMessage(chatId,messageId):
-            writeInt(&buf, Int32(16))
+            writeInt(&buf, Int32(17))
             FfiConverterString.write(chatId, into: &buf)
             FfiConverterString.write(messageId, into: &buf)
 
 
         case let .openChat(chatId):
-            writeInt(&buf, Int32(17))
+            writeInt(&buf, Int32(18))
             FfiConverterString.write(chatId, into: &buf)
 
 
         case let .loadOlderMessages(chatId,beforeMessageId,limit):
-            writeInt(&buf, Int32(18))
+            writeInt(&buf, Int32(19))
             FfiConverterString.write(chatId, into: &buf)
             FfiConverterString.write(beforeMessageId, into: &buf)
             FfiConverterUInt32.write(limit, into: &buf)
 
 
         case let .startCall(chatId):
-            writeInt(&buf, Int32(19))
-            FfiConverterString.write(chatId, into: &buf)
-
-
-        case let .acceptCall(chatId):
             writeInt(&buf, Int32(20))
             FfiConverterString.write(chatId, into: &buf)
 
 
-        case let .rejectCall(chatId):
+        case let .acceptCall(chatId):
             writeInt(&buf, Int32(21))
             FfiConverterString.write(chatId, into: &buf)
 
 
-        case .endCall:
+        case let .rejectCall(chatId):
             writeInt(&buf, Int32(22))
+            FfiConverterString.write(chatId, into: &buf)
 
 
-        case .toggleMute:
+        case .endCall:
             writeInt(&buf, Int32(23))
 
 
-        case let .createGroupChat(peerNpubs,groupName):
+        case .toggleMute:
             writeInt(&buf, Int32(24))
+
+
+        case let .createGroupChat(peerNpubs,groupName):
+            writeInt(&buf, Int32(25))
             FfiConverterSequenceString.write(peerNpubs, into: &buf)
             FfiConverterString.write(groupName, into: &buf)
 
 
         case let .addGroupMembers(chatId,peerNpubs):
-            writeInt(&buf, Int32(25))
+            writeInt(&buf, Int32(26))
             FfiConverterString.write(chatId, into: &buf)
             FfiConverterSequenceString.write(peerNpubs, into: &buf)
 
 
         case let .removeGroupMembers(chatId,memberPubkeys):
-            writeInt(&buf, Int32(26))
+            writeInt(&buf, Int32(27))
             FfiConverterString.write(chatId, into: &buf)
             FfiConverterSequenceString.write(memberPubkeys, into: &buf)
 
 
         case let .leaveGroup(chatId):
-            writeInt(&buf, Int32(27))
+            writeInt(&buf, Int32(28))
             FfiConverterString.write(chatId, into: &buf)
 
 
         case let .renameGroup(chatId,name):
-            writeInt(&buf, Int32(28))
+            writeInt(&buf, Int32(29))
             FfiConverterString.write(chatId, into: &buf)
             FfiConverterString.write(name, into: &buf)
 
 
         case let .archiveChat(chatId):
-            writeInt(&buf, Int32(29))
+            writeInt(&buf, Int32(30))
             FfiConverterString.write(chatId, into: &buf)
 
 
         case let .reactToMessage(chatId,messageId,emoji):
-            writeInt(&buf, Int32(30))
+            writeInt(&buf, Int32(31))
             FfiConverterString.write(chatId, into: &buf)
             FfiConverterString.write(messageId, into: &buf)
             FfiConverterString.write(emoji, into: &buf)
 
 
         case .clearToast:
-            writeInt(&buf, Int32(31))
-
-
-        case .foregrounded:
             writeInt(&buf, Int32(32))
 
 
-        case let .openPeerProfile(pubkey):
+        case .foregrounded:
             writeInt(&buf, Int32(33))
+
+
+        case let .nostrConnectCallback(url):
+            writeInt(&buf, Int32(34))
+            FfiConverterString.write(url, into: &buf)
+
+
+        case let .openPeerProfile(pubkey):
+            writeInt(&buf, Int32(35))
             FfiConverterString.write(pubkey, into: &buf)
 
 
         case .closePeerProfile:
-            writeInt(&buf, Int32(34))
+            writeInt(&buf, Int32(36))
 
 
         case .refreshFollowList:
-            writeInt(&buf, Int32(35))
+            writeInt(&buf, Int32(37))
 
 
         case let .followUser(pubkey):
-            writeInt(&buf, Int32(36))
+            writeInt(&buf, Int32(38))
             FfiConverterString.write(pubkey, into: &buf)
 
 
         case let .unfollowUser(pubkey):
-            writeInt(&buf, Int32(37))
+            writeInt(&buf, Int32(39))
             FfiConverterString.write(pubkey, into: &buf)
 
         }
@@ -3008,6 +3025,8 @@ public func FfiConverterCallbackInterfaceAppReconciler_lower(_ v: AppReconciler)
 
 public protocol ExternalSignerBridge: AnyObject, Sendable {
 
+    func openUrl(url: String)  -> ExternalSignerResult
+
     func requestPublicKey(currentUserHint: String?)  -> ExternalSignerHandshakeResult
 
     func signEvent(signerPackage: String, currentUser: String, unsignedEventJson: String)  -> ExternalSignerResult
@@ -3045,6 +3064,30 @@ fileprivate struct UniffiCallbackInterfaceExternalSignerBridge {
             } catch {
                 fatalError("Uniffi callback interface ExternalSignerBridge: handle missing in uniffiClone")
             }
+        },
+        openUrl: { (
+            uniffiHandle: UInt64,
+            url: RustBuffer,
+            uniffiOutReturn: UnsafeMutablePointer<RustBuffer>,
+            uniffiCallStatus: UnsafeMutablePointer<RustCallStatus>
+        ) in
+            let makeCall = {
+                () throws -> ExternalSignerResult in
+                guard let uniffiObj = try? FfiConverterCallbackInterfaceExternalSignerBridge.handleMap.get(handle: uniffiHandle) else {
+                    throw UniffiInternalError.unexpectedStaleHandle
+                }
+                return uniffiObj.openUrl(
+                     url: try FfiConverterString.lift(url)
+                )
+            }
+
+
+            let writeReturn = { uniffiOutReturn.pointee = FfiConverterTypeExternalSignerResult_lower($0) }
+            uniffiTraitInterfaceCall(
+                callStatus: uniffiCallStatus,
+                makeCall: makeCall,
+                writeReturn: writeReturn
+            )
         },
         requestPublicKey: { (
             uniffiHandle: UInt64,
@@ -3735,22 +3778,25 @@ private let initializationResult: InitializationResult = {
     if (uniffi_pika_core_checksum_method_appreconciler_reconcile() != 10811) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_pika_core_checksum_method_externalsignerbridge_request_public_key() != 20534) {
+    if (uniffi_pika_core_checksum_method_externalsignerbridge_open_url() != 29331) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_pika_core_checksum_method_externalsignerbridge_sign_event() != 5558) {
+    if (uniffi_pika_core_checksum_method_externalsignerbridge_request_public_key() != 14823) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_pika_core_checksum_method_externalsignerbridge_nip44_encrypt() != 24811) {
+    if (uniffi_pika_core_checksum_method_externalsignerbridge_sign_event() != 61876) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_pika_core_checksum_method_externalsignerbridge_nip44_decrypt() != 40037) {
+    if (uniffi_pika_core_checksum_method_externalsignerbridge_nip44_encrypt() != 20399) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_pika_core_checksum_method_externalsignerbridge_nip04_encrypt() != 11537) {
+    if (uniffi_pika_core_checksum_method_externalsignerbridge_nip44_decrypt() != 4629) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_pika_core_checksum_method_externalsignerbridge_nip04_decrypt() != 52835) {
+    if (uniffi_pika_core_checksum_method_externalsignerbridge_nip04_encrypt() != 57904) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_pika_core_checksum_method_externalsignerbridge_nip04_decrypt() != 51079) {
         return InitializationResult.apiChecksumMismatch
     }
 

@@ -191,6 +191,10 @@ nightly-marmotd:
   just e2e-local-marmotd
   just openclaw-marmot-scenarios
 
+# Nightly lane: iOS interop smoke (nostrconnect:// route + Pika bridge emission).
+nightly-primal-ios-interop:
+  ./tools/primal-ios-interop-nightly
+
 # openclaw-marmot scenario suite (local Nostr relay + marmotd scenarios).
 openclaw-marmot-scenarios:
   ./openclaw-marmot/scripts/phase1.sh

@@ -6,6 +6,7 @@ object TestTags {
     const val LOGIN_LOGIN = "login_login"
     const val LOGIN_BUNKER_URI = "login_bunker_uri"
     const val LOGIN_WITH_BUNKER = "login_with_bunker"
+    const val LOGIN_WITH_NOSTR_CONNECT = "login_with_nostr_connect"
     const val LOGIN_WITH_AMBER = "login_with_amber"
 
     const val NEWCHAT_PEER_NPUB = "newchat_peer_npub"

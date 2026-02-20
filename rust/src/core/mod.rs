@@ -99,6 +99,16 @@ enum SessionAuthMode {
     },
 }
 
+struct PendingNostrConnectLogin {
+    client_uri: String,
+    client_nsec: String,
+    /// Pre-created NostrConnect instance that is already subscribed to relays
+    /// and waiting for the signer's connect response. Created before the
+    /// external URL is opened so the subscription is active when the remote
+    /// signer (e.g. Primal) sends its response.
+    signer: Option<nostr_connect::prelude::NostrConnect>,
+}
+
 impl SessionAuthMode {
     fn to_state_mode(&self, pubkey_hex: &str) -> AuthMode {
         match self {
@@ -171,6 +181,7 @@ pub struct AppCore {
     archived_chats: HashSet<String>,
     call_runtime: call_runtime::CallRuntime,
     call_session_params: Option<call_control::CallSessionParams>,
+    pending_nostr_connect_login: Option<PendingNostrConnectLogin>,
 }
 
 impl AppCore {
@@ -227,6 +238,7 @@ impl AppCore {
             archived_chats: HashSet::new(),
             call_runtime: call_runtime::CallRuntime::default(),
             call_session_params: None,
+            pending_nostr_connect_login: None,
         };
 
         if run_moq_probe {
@@ -449,6 +461,33 @@ impl AppCore {
         "Bunker login failed".to_string()
     }
 
+    fn open_external_url(&self, url: String) -> anyhow::Result<()> {
+        let bridge = self
+            .external_signer_bridge()
+            .ok_or_else(|| anyhow::anyhow!("External signer bridge unavailable"))?;
+        let result = bridge.open_url(url);
+        if result.ok {
+            return Ok(());
+        }
+
+        if let Some(msg) = user_visible_signer_error_kind(result.error_kind) {
+            anyhow::bail!("{msg}");
+        }
+
+        let detail = result
+            .error_message
+            .unwrap_or_else(|| "Failed to open signer app".to_string());
+        anyhow::bail!("{detail}");
+    }
+
+    fn make_nostr_connect_client_uri(&self, client_keys: &Keys) -> anyhow::Result<String> {
+        let relays = self.default_relays();
+        if relays.is_empty() {
+            anyhow::bail!("No relays configured for signer login");
+        }
+        Ok(NostrConnectURI::client(client_keys.public_key(), relays, "Pika").to_string())
+    }
+
     fn start_bunker_signer_session(
         &mut self,
         bunker_uri_raw: String,
@@ -458,11 +497,17 @@ impl AppCore {
         if bunker_uri.is_empty() {
             anyhow::bail!("Invalid bunker URI");
         }
+        tracing::info!("nostr_connect: connecting to bunker");
         let client_nsec = client_keys.secret_key().to_bech32().expect("infallible");
         let connector = self.bunker_signer_connector();
         let output = connector
             .connect(&self.runtime, bunker_uri, client_keys)
-            .map_err(|e| anyhow::anyhow!(self.bunker_login_error_message(&e)))?;
+            .map_err(|e| {
+                let msg = self.bunker_login_error_message(&e);
+                tracing::error!(%msg, "nostr_connect: bunker connect failed");
+                anyhow::anyhow!(msg)
+            })?;
+        tracing::info!(user_pubkey = %output.user_pubkey.to_hex(), "nostr_connect: bunker connected, starting session");
         let mode = SessionAuthMode::BunkerSigner {
             bunker_uri: output.canonical_bunker_uri.clone(),
         };
@@ -489,6 +534,166 @@ impl AppCore {
         }
 
         self.clear_busy();
+    }
+
+    fn begin_nostr_connect_login(&mut self) {
+        self.pending_nostr_connect_login = None;
+        tracing::info!("nostr_connect: begin_nostr_connect_login");
+
+        if !self.external_signer_enabled() {
+            tracing::warn!("nostr_connect: external signer disabled");
+            self.toast("External signer is disabled");
+            return;
+        }
+
+        self.set_busy(|b| {
+            b.logging_in = true;
+            b.creating_account = false;
+        });
+
+        let client_keys = Keys::generate();
+        let client_uri = match self.make_nostr_connect_client_uri(&client_keys) {
+            Ok(uri) => uri,
+            Err(e) => {
+                tracing::error!(%e, "nostr_connect: make_client_uri failed");
+                self.clear_busy();
+                self.toast(format!("{e:#}"));
+                return;
+            }
+        };
+
+        // Create the NostrConnect instance and subscribe to relays BEFORE
+        // opening the external URL. This ensures the relay subscription is
+        // active when the remote signer (e.g. Primal) sends its connect
+        // response, avoiding the race where the response arrives before
+        // we start listening.
+        let connector = self.bunker_signer_connector();
+        let signer = match connector.prepare(
+            &self.runtime,
+            &client_uri,
+            client_keys.clone(),
+        ) {
+            Ok(s) => {
+                tracing::info!("nostr_connect: pre-subscribed NostrConnect instance created");
+                Some(s)
+            }
+            Err(e) => {
+                tracing::warn!(%e, "nostr_connect: prepare failed, will fall back to fresh connect");
+                None
+            }
+        };
+
+        // Kick off get_public_key() in the background so the subscription is
+        // actively waiting for the signer response while the user is in the
+        // external signer app.
+        if let Some(ref signer) = signer {
+            let signer_clone = signer.clone();
+            let tx = self.core_sender.clone();
+            self.runtime.spawn(async move {
+                tracing::info!("nostr_connect: background get_public_key started");
+                match signer_clone.get_public_key().await {
+                    Ok(pk) => {
+                        tracing::info!(pubkey = %pk.to_hex(), "nostr_connect: background got signer pubkey");
+                        let _ = tx.send(crate::updates::CoreMsg::Action(
+                            AppAction::NostrConnectCallback {
+                                url: "background-signer-ready".to_string(),
+                            },
+                        ));
+                    }
+                    Err(e) => {
+                        tracing::warn!(%e, "nostr_connect: background get_public_key failed");
+                    }
+                }
+            });
+        }
+
+        tracing::info!(uri = %client_uri, "nostr_connect: opening external URL");
+        if let Err(e) = self.open_external_url(client_uri.clone()) {
+            tracing::error!(%e, "nostr_connect: open_external_url failed");
+            self.clear_busy();
+            self.toast(format!("{e:#}"));
+            return;
+        }
+        tracing::info!("nostr_connect: external URL opened, waiting for callback");
+
+        self.pending_nostr_connect_login = Some(PendingNostrConnectLogin {
+            client_uri,
+            client_nsec: client_keys.secret_key().to_bech32().expect("infallible"),
+            signer,
+        });
+    }
+
+    fn on_nostr_connect_callback(&mut self, url: String) {
+        tracing::info!(%url, pending = self.pending_nostr_connect_login.is_some(), "nostr_connect: callback received");
+        let Some(pending) = self.pending_nostr_connect_login.take() else {
+            tracing::warn!("nostr_connect: callback but no pending login, ignoring");
+            return;
+        };
+
+        // Try using the pre-subscribed signer first. This avoids the race
+        // condition where a fresh NostrConnect instance misses the already-sent
+        // connect response from the remote signer.
+        if let Some(signer) = pending.signer {
+            tracing::info!("nostr_connect: completing with pre-subscribed signer");
+            let connector = self.bunker_signer_connector();
+            match connector.finish(&self.runtime, signer) {
+                Ok(output) => {
+                    tracing::info!(user_pubkey = %output.user_pubkey.to_hex(), "nostr_connect: bunker connected via pre-subscribed signer");
+                    let client_nsec = pending.client_nsec;
+                    let mode = SessionAuthMode::BunkerSigner {
+                        bunker_uri: output.canonical_bunker_uri.clone(),
+                    };
+                    if let Err(e) = self.start_session_with_signer(
+                        output.user_pubkey,
+                        output.signer,
+                        None,
+                        mode,
+                    ) {
+                        tracing::error!(%e, "nostr_connect: session start failed");
+                        self.clear_busy();
+                        self.toast(format!("{e:#}"));
+                        return;
+                    }
+                    self.emit_bunker_session_descriptor(output.canonical_bunker_uri, client_nsec);
+                    tracing::info!("nostr_connect: login complete");
+                    self.clear_busy();
+                    return;
+                }
+                Err(e) => {
+                    tracing::warn!(%e, "nostr_connect: pre-subscribed finish failed, falling back to fresh connect");
+                }
+            }
+        }
+
+        // Fallback: create a fresh connection (works for bunker:// URIs and
+        // cases where the pre-subscribed path failed).
+        let client_keys = match Keys::parse(&pending.client_nsec) {
+            Ok(keys) => keys,
+            Err(e) => {
+                tracing::error!(%e, "nostr_connect: invalid client key");
+                self.clear_busy();
+                self.toast(format!("Invalid bunker client key: {e}"));
+                return;
+            }
+        };
+
+        tracing::info!("nostr_connect: starting bunker signer session (fresh)");
+        if let Err(e) = self.start_bunker_signer_session(pending.client_uri, client_keys) {
+            tracing::error!(%e, "nostr_connect: bunker session failed");
+            self.clear_busy();
+            self.toast(format!("{e:#}"));
+            return;
+        }
+
+        tracing::info!("nostr_connect: login complete");
+        self.clear_busy();
+    }
+
+    fn continue_pending_nostr_connect_login(&mut self) {
+        if self.pending_nostr_connect_login.is_some() {
+            tracing::info!("nostr_connect: foregrounded with pending login, continuing");
+            self.on_nostr_connect_callback("foreground".to_string());
+        }
     }
 
     fn restore_bunker_session(&mut self, bunker_uri: String, client_nsec: String) {
@@ -1430,6 +1635,12 @@ impl AppCore {
             AppAction::BeginBunkerLogin { bunker_uri } => {
                 self.begin_bunker_login(bunker_uri);
             }
+            AppAction::BeginNostrConnectLogin => {
+                self.begin_nostr_connect_login();
+            }
+            AppAction::NostrConnectCallback { url } => {
+                self.on_nostr_connect_callback(url);
+            }
             AppAction::RestoreSessionExternalSigner {
                 pubkey,
                 signer_package,
@@ -1467,6 +1678,7 @@ impl AppCore {
                 self.restore_bunker_session(bunker_uri, client_nsec);
             }
             AppAction::Logout => {
+                self.pending_nostr_connect_login = None;
                 // Delete the MLS database before tearing down the session so stale
                 // ratchet state doesn't persist across logins.
                 if let Some(sess) = self.session.as_ref() {
@@ -1552,6 +1764,14 @@ impl AppCore {
                     self.refresh_all_from_storage();
                     self.refresh_my_profile(false);
                     self.refresh_follow_list();
+                } else {
+                    tracing::info!(
+                        pending_nostr_connect = self.pending_nostr_connect_login.is_some(),
+                        "foregrounded while logged out"
+                    );
+                    // Some signers fail to invoke callback URLs reliably.
+                    // If a nostr-connect login is pending, continue it on foreground.
+                    self.continue_pending_nostr_connect_login();
                 }
             }
             AppAction::OpenPeerProfile { pubkey } => {

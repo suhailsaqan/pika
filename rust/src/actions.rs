@@ -13,6 +13,7 @@ pub enum AppAction {
     BeginBunkerLogin {
         bunker_uri: String,
     },
+    BeginNostrConnectLogin,
     RestoreSession {
         nsec: String,
     },
@@ -112,6 +113,9 @@ pub enum AppAction {
 
     // Lifecycle
     Foregrounded,
+    NostrConnectCallback {
+        url: String,
+    },
 
     // Peer profile
     OpenPeerProfile {
@@ -138,6 +142,7 @@ impl AppAction {
             AppAction::Login { .. } => "Login",
             AppAction::BeginExternalSignerLogin { .. } => "BeginExternalSignerLogin",
             AppAction::BeginBunkerLogin { .. } => "BeginBunkerLogin",
+            AppAction::BeginNostrConnectLogin => "BeginNostrConnectLogin",
             AppAction::RestoreSession { .. } => "RestoreSession",
             AppAction::RestoreSessionExternalSigner { .. } => "RestoreSessionExternalSigner",
             AppAction::RestoreSessionBunker { .. } => "RestoreSessionBunker",
@@ -178,6 +183,7 @@ impl AppAction {
 
             // Lifecycle
             AppAction::Foregrounded => "Foregrounded",
+            AppAction::NostrConnectCallback { .. } => "NostrConnectCallback",
 
             // Peer profile
             AppAction::OpenPeerProfile { .. } => "OpenPeerProfile",

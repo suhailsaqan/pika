@@ -1,0 +1,172 @@
+import Foundation
+import UIKit
+
+final class IOSExternalSignerBridge: ExternalSignerBridge, @unchecked Sendable {
+    private var nostrConnectCallbackUrl: String {
+        let scheme = Self.callbackScheme(bundleIdentifier: Bundle.main.bundleIdentifier)
+        return "\(scheme)://nostrconnect-return"
+    }
+
+    private static func callbackScheme(bundleIdentifier: String?) -> String {
+        guard let bundleIdentifier else { return "pika" }
+        if bundleIdentifier.hasSuffix(".dev") { return "pika-dev" }
+        if bundleIdentifier.hasSuffix(".pikatest") { return "pika-test" }
+        return "pika"
+    }
+
+    func openUrl(url: String) -> ExternalSignerResult {
+        let trimmed = url.trimmingCharacters(in: .whitespacesAndNewlines)
+        let launchUrl = withNostrConnectCallback(trimmed)
+        NSLog("[PikaSignerBridge] openUrl: \(launchUrl)")
+        guard !launchUrl.isEmpty, let parsed = URL(string: launchUrl) else {
+            return ExternalSignerResult(
+                ok: false,
+                value: nil,
+                errorKind: .invalidResponse,
+                errorMessage: "Invalid URL"
+            )
+        }
+
+        if ProcessInfo.processInfo.environment["PIKA_UI_TEST_CAPTURE_OPEN_URL"] == "1" {
+            if let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first {
+                let marker = docs.appendingPathComponent("ui_test_open_url.txt")
+                try? launchUrl.write(to: marker, atomically: true, encoding: .utf8)
+            }
+        }
+
+        if Thread.isMainThread {
+            guard UIApplication.shared.canOpenURL(parsed) else {
+                return ExternalSignerResult(
+                    ok: false,
+                    value: nil,
+                    errorKind: .signerUnavailable,
+                    errorMessage: "No app can handle URL"
+                )
+            }
+            UIApplication.shared.open(parsed, options: [:], completionHandler: nil)
+            return ExternalSignerResult(ok: true, value: nil, errorKind: nil, errorMessage: nil)
+        }
+
+        let sema = DispatchSemaphore(value: 0)
+        var opened = false
+        DispatchQueue.main.async {
+            guard UIApplication.shared.canOpenURL(parsed) else {
+                sema.signal()
+                return
+            }
+            UIApplication.shared.open(parsed, options: [:]) { ok in
+                opened = ok
+                sema.signal()
+            }
+        }
+
+        let wait = sema.wait(timeout: .now() + 5)
+        if wait == .timedOut {
+            return ExternalSignerResult(
+                ok: false,
+                value: nil,
+                errorKind: .timeout,
+                errorMessage: "Timed out opening URL"
+            )
+        }
+        if !opened {
+            return ExternalSignerResult(
+                ok: false,
+                value: nil,
+                errorKind: .signerUnavailable,
+                errorMessage: "No app can handle URL"
+            )
+        }
+        return ExternalSignerResult(ok: true, value: nil, errorKind: nil, errorMessage: nil)
+    }
+
+    private func withNostrConnectCallback(_ raw: String) -> String {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.lowercased().hasPrefix("nostrconnect://") else {
+            return raw
+        }
+
+        if var components = URLComponents(string: trimmed) {
+            var queryItems = components.queryItems ?? []
+            let hasCallback = queryItems.contains(where: { $0.name.caseInsensitiveCompare("callback") == .orderedSame })
+            if !hasCallback {
+                queryItems.append(URLQueryItem(name: "callback", value: nostrConnectCallbackUrl))
+                components.queryItems = queryItems
+            }
+            return components.string ?? trimmed
+        }
+
+        // Fallback path when URLComponents cannot parse signer-provided URLs.
+        if trimmed.range(of: "(^|[?&])callback=", options: [.regularExpression, .caseInsensitive]) != nil {
+            return trimmed
+        }
+        let encoded = nostrConnectCallbackUrl.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed)
+            ?? nostrConnectCallbackUrl
+        let separator = trimmed.contains("?") ? "&" : "?"
+        return "\(trimmed)\(separator)callback=\(encoded)"
+    }
+
+    func requestPublicKey(currentUserHint _: String?) -> ExternalSignerHandshakeResult {
+        ExternalSignerHandshakeResult(
+            ok: false,
+            pubkey: nil,
+            signerPackage: nil,
+            currentUser: nil,
+            errorKind: .signerUnavailable,
+            errorMessage: "Amber signer bridge is unavailable on iOS"
+        )
+    }
+
+    func signEvent(
+        signerPackage _: String,
+        currentUser _: String,
+        unsignedEventJson _: String
+    ) -> ExternalSignerResult {
+        unsupported()
+    }
+
+    func nip44Encrypt(
+        signerPackage _: String,
+        currentUser _: String,
+        peerPubkey _: String,
+        content _: String
+    ) -> ExternalSignerResult {
+        unsupported()
+    }
+
+    func nip44Decrypt(
+        signerPackage _: String,
+        currentUser _: String,
+        peerPubkey _: String,
+        payload _: String
+    ) -> ExternalSignerResult {
+        unsupported()
+    }
+
+    func nip04Encrypt(
+        signerPackage _: String,
+        currentUser _: String,
+        peerPubkey _: String,
+        content _: String
+    ) -> ExternalSignerResult {
+        unsupported()
+    }
+
+    func nip04Decrypt(
+        signerPackage _: String,
+        currentUser _: String,
+        peerPubkey _: String,
+        payload _: String
+    ) -> ExternalSignerResult {
+        unsupported()
+    }
+
+    private func unsupported() -> ExternalSignerResult {
+        ExternalSignerResult(
+            ok: false,
+            value: nil,
+            errorKind: .signerUnavailable,
+            errorMessage: "Amber signer bridge is unavailable on iOS"
+        )
+    }
+}

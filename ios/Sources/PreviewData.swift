@@ -4,7 +4,7 @@ import SwiftUI
 @MainActor
 enum PreviewFactory {
     static func manager(_ state: AppState) -> AppManager {
-        AppManager(core: PreviewCore(state: state), nsecStore: PreviewNsecStore())
+        AppManager(core: PreviewCore(state: state), authStore: PreviewAuthStore())
     }
 }
 
@@ -24,10 +24,12 @@ final class PreviewCore: AppCore, @unchecked Sendable {
     }
 }
 
-final class PreviewNsecStore: NsecStore {
+final class PreviewAuthStore: AuthStore {
+    func load() -> StoredAuth? { nil }
+    func saveLocalNsec(_ nsec: String) {}
+    func saveBunker(bunkerUri: String, bunkerClientNsec: String) {}
+    func clear() {}
     func getNsec() -> String? { nil }
-    func setNsec(_ nsec: String) {}
-    func clearNsec() {}
 }
 
 enum PreviewAppState {
