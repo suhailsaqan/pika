@@ -13,7 +13,9 @@ class NotificationService: UNNotificationServiceExtension {
         withContentHandler contentHandler: @escaping (UNNotificationContent) -> Void
     ) {
         self.contentHandler = contentHandler
-        bestAttemptContent = request.content.mutableCopy() as? UNMutableNotificationContent
+        // Default to empty content so that if the NSE times out we suppress
+        // rather than showing the server's generic "New message" fallback.
+        bestAttemptContent = UNMutableNotificationContent()
 
         guard let content = bestAttemptContent,
               let eventJson = request.content.userInfo["nostr_event"] as? String else {
