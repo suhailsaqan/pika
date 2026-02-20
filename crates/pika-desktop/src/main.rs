@@ -8,6 +8,15 @@ use iced::{Element, Fill, Font, Size, Subscription, Task, Theme};
 use pika_core::{AppAction, AppState, AuthState};
 use std::time::Duration;
 
+fn app_version_display() -> String {
+    let version = env!("CARGO_PKG_VERSION");
+    if let Some(build) = option_env!("PIKA_BUILD_NUMBER") {
+        format!("v{version} ({build})")
+    } else {
+        format!("v{version}")
+    }
+}
+
 pub fn main() -> iced::Result {
     iced::application(DesktopApp::new, DesktopApp::update, DesktopApp::view)
         .title("Pika Desktop")
@@ -54,6 +63,8 @@ struct DesktopApp {
     show_my_profile: bool,
     profile_name_draft: String,
     profile_about_draft: String,
+    app_version_display: String,
+    profile_toast: Option<String>,
     // Group info
     show_group_info: bool,
     group_info_name_draft: String,
@@ -89,6 +100,7 @@ pub enum Message {
     ProfileAboutChanged(String),
     SaveProfile,
     CopyNpub,
+    CopyAppVersion,
     // Group info
     ShowGroupInfo,
     CloseGroupInfo,
@@ -160,6 +172,7 @@ impl DesktopApp {
                 }
                 self.avatar_cache.borrow_mut().clear();
                 self.selected_chat_id = None;
+                self.profile_toast = None;
                 self.clear_all_overlays();
             }
             Message::NewChatChanged(value) => self.new_chat_input = value,
@@ -233,7 +246,9 @@ impl DesktopApp {
                 }
             }
             Message::ClearToast => {
-                if let Some(manager) = &self.manager {
+                if self.profile_toast.is_some() {
+                    self.profile_toast = None;
+                } else if let Some(manager) = &self.manager {
                     manager.dispatch(AppAction::ClearToast);
                 }
             }
@@ -303,8 +318,13 @@ impl DesktopApp {
             }
             Message::CopyNpub => {
                 if let AuthState::LoggedIn { ref npub, .. } = self.state.auth {
+                    self.profile_toast = Some("Copied npub".to_string());
                     return iced::clipboard::write(npub.clone());
                 }
+            }
+            Message::CopyAppVersion => {
+                self.profile_toast = Some("Copied app version".to_string());
+                return iced::clipboard::write(self.app_version_display.clone());
             }
 
             // ── Group info ────────────────────────────────────────────
@@ -407,7 +427,11 @@ impl DesktopApp {
 
         // Toast bar (optional)
         let mut main_column = column![];
-        if let Some(toast_msg) = &self.state.toast {
+        if let Some(toast_msg) = self
+            .profile_toast
+            .as_deref()
+            .or(self.state.toast.as_deref())
+        {
             main_column = main_column.push(views::toast::toast_bar(toast_msg));
         }
 
@@ -436,6 +460,7 @@ impl DesktopApp {
                 &self.profile_name_draft,
                 &self.profile_about_draft,
                 npub,
+                &self.app_version_display,
                 self.state.my_profile.picture_url.as_deref(),
                 cache,
             )
@@ -517,6 +542,8 @@ impl DesktopApp {
             show_my_profile: false,
             profile_name_draft: String::new(),
             profile_about_draft: String::new(),
+            app_version_display: app_version_display(),
+            profile_toast: None,
             show_group_info: false,
             group_info_name_draft: String::new(),
             group_info_npub_input: String::new(),
