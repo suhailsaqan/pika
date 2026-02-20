@@ -186,6 +186,15 @@ impl AppCore {
         self.save_push_subscriptions();
     }
 
+    pub(super) fn reregister_push(&mut self) {
+        tracing::info!("push: re-registering device and re-subscribing to all chats");
+        // Clear tracked subscriptions so sync_push_subscriptions re-subscribes to everything.
+        self.push_subscribed_chat_ids.clear();
+        self.save_push_subscriptions();
+        self.register_push_device();
+        self.sync_push_subscriptions();
+    }
+
     pub(super) fn clear_push_subscriptions(&mut self) {
         let ids: Vec<String> = self.push_subscribed_chat_ids.drain().collect();
         if !ids.is_empty() {

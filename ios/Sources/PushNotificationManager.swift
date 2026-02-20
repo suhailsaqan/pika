@@ -18,6 +18,15 @@ final class PushNotificationManager: NSObject, ObservableObject {
     /// forward the token to Rust via `AppAction.setPushToken`.
     var onTokenReceived: ((String) -> Void)?
 
+    /// Callback invoked when the user requests a full push re-registration.
+    /// Set by AppManager to dispatch `AppAction.reregisterPush`.
+    var onReregisterRequested: (() -> Void)?
+
+    /// Re-register the device and re-subscribe to all chats.
+    func reregister() {
+        onReregisterRequested?()
+    }
+
     /// Request notification permission and register for remote notifications.
     func requestPermissionAndRegister() {
         let center = UNUserNotificationCenter.current()

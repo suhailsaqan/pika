@@ -149,20 +149,25 @@ env_json_for_device() {
   local relays kp_relays
   relays="$(effective_relays)"
   kp_relays="$(effective_kp_relays)"
-  local call_moq_url call_broadcast_prefix moq_probe_on_start
+  local call_moq_url call_broadcast_prefix moq_probe_on_start notification_url
   # Default to the deployed anonymous MOQ relay; override with PIKA_CALL_MOQ_URL for local setups.
   call_moq_url="${PIKA_CALL_MOQ_URL:-https://us-east.moq.logos.surf/anon}"
   call_broadcast_prefix="${PIKA_CALL_BROADCAST_PREFIX:-pika/calls}"
   moq_probe_on_start="${PIKA_MOQ_PROBE_ON_START:-0}"
+  notification_url="${PIKA_NOTIFICATION_URL:-}"
   python3 - <<PY
 import json
-print(json.dumps({
+d = {
   "PIKA_RELAY_URLS": "${relays}",
   "PIKA_KEY_PACKAGE_RELAY_URLS": "${kp_relays}",
   "PIKA_CALL_MOQ_URL": "${call_moq_url}",
   "PIKA_CALL_BROADCAST_PREFIX": "${call_broadcast_prefix}",
   "PIKA_MOQ_PROBE_ON_START": "${moq_probe_on_start}",
-}))
+}
+nu = "${notification_url}"
+if nu:
+    d["PIKA_NOTIFICATION_URL"] = nu
+print(json.dumps(d))
 PY
 }
 
@@ -362,28 +367,29 @@ maybe_write_config() {
   local relays kp_relays
   relays="$(effective_relays)"
   kp_relays="$(effective_kp_relays)"
-  local call_moq_url call_broadcast_prefix moq_probe_on_start
+  local call_moq_url call_broadcast_prefix moq_probe_on_start notification_url
   # Default to the deployed anonymous MOQ relay; override with PIKA_CALL_MOQ_URL for local setups.
   call_moq_url="${PIKA_CALL_MOQ_URL:-https://us-east.moq.logos.surf/anon}"
   call_broadcast_prefix="${PIKA_CALL_BROADCAST_PREFIX:-pika/calls}"
   moq_probe_on_start="${PIKA_MOQ_PROBE_ON_START:-0}"
+  notification_url="${PIKA_NOTIFICATION_URL:-}"
 
   local json
   json="$(
     python3 - <<PY
 import json
-relays = "${relays}".strip()
-kp_relays = "${kp_relays}".strip()
-relay_items = [x.strip() for x in relays.split(",") if x.strip()]
-kp_items = [x.strip() for x in kp_relays.split(",") if x.strip()]
-print(json.dumps({
+d = {
   "disable_network": False,
-  "relay_urls": relay_items,
-  "key_package_relay_urls": kp_items,
+  "relay_urls": [x.strip() for x in "${relays}".strip().split(",") if x.strip()],
+  "key_package_relay_urls": [x.strip() for x in "${kp_relays}".strip().split(",") if x.strip()],
   "call_moq_url": "${call_moq_url}",
   "call_broadcast_prefix": "${call_broadcast_prefix}",
   "moq_probe_on_start": True if "${moq_probe_on_start}" == "1" else False,
-}))
+}
+nu = "${notification_url}"
+if nu:
+    d["notification_url"] = nu
+print(json.dumps(d))
 PY
   )"
 

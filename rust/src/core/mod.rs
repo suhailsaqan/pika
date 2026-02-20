@@ -1875,6 +1875,9 @@ impl AppCore {
             AppAction::SetPushToken { token } => {
                 self.set_push_token(token);
             }
+            AppAction::ReregisterPush => {
+                self.reregister_push();
+            }
             AppAction::Foregrounded => {
                 // Native should send lifecycle signals as actions. Rust owns all state changes.
                 if self.is_logged_in() {

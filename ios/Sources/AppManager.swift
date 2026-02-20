@@ -46,6 +46,9 @@ final class AppManager: AppReconciler {
         PushNotificationManager.shared.onTokenReceived = { [weak self] token in
             self?.dispatch(.setPushToken(token: token))
         }
+        PushNotificationManager.shared.onReregisterRequested = { [weak self] in
+            self?.dispatch(.reregisterPush)
+        }
 
         if let nsec = nsecStore.getNsec(), !nsec.isEmpty {
             isRestoringSession = true

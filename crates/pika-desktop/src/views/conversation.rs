@@ -33,17 +33,11 @@ pub fn conversation_view<'a>(
     let call_button: Option<Element<'a, Message, Theme>> = if !chat.is_group {
         let has_live_call_for_chat = active_call
             .as_ref()
-            .map(|c| {
-                c.chat_id == chat.chat_id
-                    && !matches!(c.status, CallStatus::Ended { .. })
-            })
+            .map(|c| c.chat_id == chat.chat_id && !matches!(c.status, CallStatus::Ended { .. }))
             .unwrap_or(false);
         let has_live_call_elsewhere = active_call
             .as_ref()
-            .map(|c| {
-                c.chat_id != chat.chat_id
-                    && !matches!(c.status, CallStatus::Ended { .. })
-            })
+            .map(|c| c.chat_id != chat.chat_id && !matches!(c.status, CallStatus::Ended { .. }))
             .unwrap_or(false);
 
         let label = if has_live_call_for_chat {

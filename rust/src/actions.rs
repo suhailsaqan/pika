@@ -114,6 +114,7 @@ pub enum AppAction {
     SetPushToken {
         token: String,
     },
+    ReregisterPush,
 
     // Follow list
     RefreshFollowList,
@@ -180,6 +181,7 @@ impl AppAction {
 
             // Push notifications
             AppAction::SetPushToken { .. } => "SetPushToken",
+            AppAction::ReregisterPush => "ReregisterPush",
 
             // Follow list
             AppAction::RefreshFollowList => "RefreshFollowList",
