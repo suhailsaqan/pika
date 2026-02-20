@@ -195,6 +195,26 @@ nightly-marmotd:
 nightly-primal-ios-interop:
   ./tools/primal-ios-interop-nightly
 
+# Local Primal interop lab: dedicated simulator + local relay + event tap logs.
+primal-ios-lab:
+  ./tools/primal-ios-interop-lab run
+
+# Apply debug logging patch in local Primal checkout (~/code/primal-ios-app by default).
+primal-ios-lab-patch-primal:
+  ./tools/primal-ios-interop-lab patch-primal
+
+# Capture current lab simulator as a reusable seeded snapshot.
+primal-ios-lab-seed-capture:
+  ./tools/primal-ios-interop-lab seed-capture
+
+# Reset the lab simulator from the saved seed snapshot.
+primal-ios-lab-seed-reset:
+  ./tools/primal-ios-interop-lab seed-reset
+
+# Print Pika's latest nostr-connect debug snapshot and a decode helper command.
+primal-ios-lab-dump-debug:
+  ./tools/primal-ios-interop-lab dump-debug
+
 # openclaw-marmot scenario suite (local Nostr relay + marmotd scenarios).
 openclaw-marmot-scenarios:
   ./openclaw-marmot/scripts/phase1.sh

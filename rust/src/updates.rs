@@ -114,6 +114,9 @@ pub enum InternalEvent {
         toast: bool,
     },
 
+    // Async NIP-46 client-initiated login response became available.
+    NostrConnectConnectResponseReady,
+
     // Follow list (NIP-02 kind 3)
     FollowListFetched {
         entries: Vec<(String, Option<String>, Option<String>)>, // (hex_pubkey, name, picture_url)

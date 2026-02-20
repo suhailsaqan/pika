@@ -17,7 +17,6 @@ final class IOSExternalSignerBridge: ExternalSignerBridge, @unchecked Sendable {
     func openUrl(url: String) -> ExternalSignerResult {
         let trimmed = url.trimmingCharacters(in: .whitespacesAndNewlines)
         let launchUrl = withNostrConnectCallback(trimmed)
-        NSLog("[PikaSignerBridge] openUrl: \(launchUrl)")
         guard !launchUrl.isEmpty, let parsed = URL(string: launchUrl) else {
             return ExternalSignerResult(
                 ok: false,
@@ -26,6 +25,8 @@ final class IOSExternalSignerBridge: ExternalSignerBridge, @unchecked Sendable {
                 errorMessage: "Invalid URL"
             )
         }
+        let redactedTarget = "\(parsed.scheme ?? "url")://\(parsed.host ?? "<unknown>")?<redacted>"
+        NSLog("[PikaSignerBridge] openUrl: \(redactedTarget)")
 
         if ProcessInfo.processInfo.environment["PIKA_UI_TEST_CAPTURE_OPEN_URL"] == "1" {
             if let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first {
@@ -48,28 +49,27 @@ final class IOSExternalSignerBridge: ExternalSignerBridge, @unchecked Sendable {
         }
 
         let sema = DispatchSemaphore(value: 0)
-        var opened = false
+        var canOpen = false
         DispatchQueue.main.async {
-            guard UIApplication.shared.canOpenURL(parsed) else {
-                sema.signal()
-                return
+            canOpen = UIApplication.shared.canOpenURL(parsed)
+            if canOpen {
+                // Do not block Rust on user-facing app-switch confirmation.
+                // Rust owns the handshake timeout and will surface failures.
+                UIApplication.shared.open(parsed, options: [:], completionHandler: nil)
             }
-            UIApplication.shared.open(parsed, options: [:]) { ok in
-                opened = ok
-                sema.signal()
-            }
+            sema.signal()
         }
 
-        let wait = sema.wait(timeout: .now() + 5)
+        let wait = sema.wait(timeout: .now() + 2)
         if wait == .timedOut {
             return ExternalSignerResult(
                 ok: false,
                 value: nil,
                 errorKind: .timeout,
-                errorMessage: "Timed out opening URL"
+                errorMessage: "Timed out scheduling URL open"
             )
         }
-        if !opened {
+        if !canOpen {
             return ExternalSignerResult(
                 ok: false,
                 value: nil,

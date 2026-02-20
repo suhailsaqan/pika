@@ -1,7 +1,7 @@
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use nostr_sdk::prelude::{Keys, NostrSigner};
+use nostr_sdk::prelude::{Keys, NostrSigner, Url};
 use nostr_sdk::ToBech32;
 use pika_core::{
     AppAction, AppReconciler, AppUpdate, AuthMode, AuthState, BunkerConnectError,
@@ -42,6 +42,13 @@ fn wait_until(what: &str, timeout: Duration, mut f: impl FnMut() -> bool) {
         std::thread::sleep(Duration::from_millis(20));
     }
     panic!("{what}: condition not met within {timeout:?}");
+}
+
+fn query_param(url: &str, key: &str) -> Option<String> {
+    let parsed = Url::parse(url).ok()?;
+    parsed
+        .query_pairs()
+        .find_map(|(k, v)| if k == key { Some(v.into_owned()) } else { None })
 }
 
 struct TestReconciler {
@@ -264,6 +271,67 @@ impl BunkerSignerConnector for MockBunkerSignerConnector {
         _signer: nostr_connect::prelude::NostrConnect,
     ) -> Result<BunkerConnectOutput, BunkerConnectError> {
         self.result.lock().unwrap().clone()
+    }
+}
+
+#[derive(Clone)]
+struct SequenceBunkerSignerConnector {
+    results: Arc<Mutex<Vec<Result<BunkerConnectOutput, BunkerConnectError>>>>,
+    seen_uris: Arc<Mutex<Vec<String>>>,
+}
+
+impl SequenceBunkerSignerConnector {
+    fn new(results: Vec<Result<BunkerConnectOutput, BunkerConnectError>>) -> Self {
+        Self {
+            results: Arc::new(Mutex::new(results)),
+            seen_uris: Arc::new(Mutex::new(Vec::new())),
+        }
+    }
+
+    fn seen_uris(&self) -> Vec<String> {
+        self.seen_uris.lock().unwrap().clone()
+    }
+}
+
+impl BunkerSignerConnector for SequenceBunkerSignerConnector {
+    fn connect(
+        &self,
+        _runtime: &tokio::runtime::Runtime,
+        bunker_uri: &str,
+        _client_keys: Keys,
+    ) -> Result<BunkerConnectOutput, BunkerConnectError> {
+        self.seen_uris.lock().unwrap().push(bunker_uri.to_string());
+        let mut results = self.results.lock().unwrap();
+        if results.is_empty() {
+            return Err(BunkerConnectError {
+                kind: BunkerConnectErrorKind::Other,
+                message: "sequence connector exhausted".to_string(),
+            });
+        }
+        results.remove(0)
+    }
+
+    fn prepare(
+        &self,
+        _runtime: &tokio::runtime::Runtime,
+        _bunker_uri: &str,
+        _client_keys: Keys,
+    ) -> Result<nostr_connect::prelude::NostrConnect, BunkerConnectError> {
+        Err(BunkerConnectError {
+            kind: BunkerConnectErrorKind::Other,
+            message: "mock: prepare not supported".to_string(),
+        })
+    }
+
+    fn finish(
+        &self,
+        _runtime: &tokio::runtime::Runtime,
+        _signer: nostr_connect::prelude::NostrConnect,
+    ) -> Result<BunkerConnectOutput, BunkerConnectError> {
+        Err(BunkerConnectError {
+            kind: BunkerConnectErrorKind::Other,
+            message: "mock: finish not supported".to_string(),
+        })
     }
 }
 
@@ -988,7 +1056,7 @@ fn begin_nostr_connect_login_launches_uri_and_logs_in() {
     assert!(connector.last_bunker_uri().is_none());
 
     app.dispatch(AppAction::NostrConnectCallback {
-        url: "pika://nostrconnect-return".into(),
+        url: "pika://nostrconnect-return?remote_signer_pubkey=79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798".into(),
     });
 
     wait_until("nostrconnect logged in", Duration::from_secs(2), || {
@@ -999,10 +1067,141 @@ fn begin_nostr_connect_login_launches_uri_and_logs_in() {
         .last_opened_url()
         .expect("expected bridge open_url call");
     assert!(opened_url.starts_with("nostrconnect://"));
+    assert!(opened_url.contains("secret="));
     assert!(opened_url.contains("metadata="));
+    assert!(opened_url.contains("perms="));
     assert!(opened_url.contains("relay="));
-    assert_eq!(connector.last_bunker_uri().as_deref(), Some(opened_url.as_str()));
+    let connect_uri = connector
+        .last_bunker_uri()
+        .expect("expected bunker connect URI for signer bootstrap");
+    assert!(connect_uri
+        .starts_with("bunker://79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798"));
+    assert!(connect_uri.contains("relay="));
+    assert!(connect_uri.contains("secret="));
     assert!(!app.state().busy.logging_in);
+}
+
+#[test]
+fn begin_nostr_connect_login_retries_bunker_without_secret_on_new_secret_reject() {
+    let dir = tempdir().unwrap();
+    let data_dir = dir.path().to_string_lossy().to_string();
+    write_config_with_external_signer(&data_dir, true, Some(true));
+
+    let app = FfiApp::new(data_dir);
+    let bridge = MockExternalSignerBridge::new(ExternalSignerHandshakeResult {
+        ok: false,
+        pubkey: None,
+        signer_package: None,
+        current_user: None,
+        error_kind: Some(ExternalSignerErrorKind::SignerUnavailable),
+        error_message: Some("unused".into()),
+    });
+    app.set_external_signer_bridge(Box::new(bridge));
+
+    let signer_keys = Keys::generate();
+    let remote_signer_pubkey = signer_keys.public_key().to_hex();
+    let output = BunkerConnectOutput {
+        user_pubkey: signer_keys.public_key(),
+        canonical_bunker_uri: format!(
+            "bunker://{remote_signer_pubkey}?relay=wss://relay.example.com"
+        ),
+        signer: Arc::new(signer_keys) as Arc<dyn NostrSigner>,
+    };
+    let connector = SequenceBunkerSignerConnector::new(vec![
+        Err(BunkerConnectError {
+            kind: BunkerConnectErrorKind::Other,
+            message: "We don't accept connect requests with new secret.".into(),
+        }),
+        Ok(output),
+    ]);
+    app.set_bunker_signer_connector_for_tests(Arc::new(connector.clone()));
+
+    app.dispatch(AppAction::BeginNostrConnectLogin);
+    wait_until("nostrconnect pending", Duration::from_secs(2), || {
+        app.state().busy.logging_in
+    });
+    app.dispatch(AppAction::NostrConnectCallback {
+        url: format!("pika://nostrconnect-return?remote_signer_pubkey={remote_signer_pubkey}"),
+    });
+
+    wait_until("nostrconnect logged in", Duration::from_secs(2), || {
+        matches!(app.state().auth, AuthState::LoggedIn { .. })
+    });
+    assert!(!app.state().busy.logging_in);
+
+    let seen = connector.seen_uris();
+    assert_eq!(seen.len(), 2, "expected first call + retry");
+    assert!(
+        seen[0].contains("secret="),
+        "first attempt should include secret"
+    );
+    assert!(
+        !seen[1].contains("secret="),
+        "retry attempt should drop secret query parameter"
+    );
+}
+
+#[test]
+fn begin_nostr_connect_login_reuses_persisted_secret() {
+    let dir = tempdir().unwrap();
+    let data_dir = dir.path().to_string_lossy().to_string();
+    write_config_with_external_signer(&data_dir, true, Some(true));
+
+    let app = FfiApp::new(data_dir.clone());
+    let bridge = MockExternalSignerBridge::new(ExternalSignerHandshakeResult {
+        ok: false,
+        pubkey: None,
+        signer_package: None,
+        current_user: None,
+        error_kind: Some(ExternalSignerErrorKind::SignerUnavailable),
+        error_message: Some("unused".into()),
+    });
+    app.set_external_signer_bridge(Box::new(bridge.clone()));
+
+    app.dispatch(AppAction::BeginNostrConnectLogin);
+    wait_until(
+        "first nostrconnect uri opened",
+        Duration::from_secs(2),
+        || bridge.last_opened_url().is_some(),
+    );
+    let first_url = bridge.last_opened_url().expect("first opened URL");
+    let first_secret = query_param(&first_url, "secret").expect("first secret query");
+    assert_eq!(first_secret.len(), 32);
+
+    app.dispatch(AppAction::BeginNostrConnectLogin);
+    wait_until(
+        "second nostrconnect uri opened",
+        Duration::from_secs(2),
+        || bridge.last_opened_url().is_some_and(|url| url != first_url),
+    );
+    let second_url = bridge.last_opened_url().expect("second opened URL");
+    let second_secret = query_param(&second_url, "secret").expect("second secret query");
+    assert_eq!(first_secret, second_secret);
+
+    drop(app);
+
+    let app_after_restart = FfiApp::new(data_dir);
+    let bridge_after_restart = MockExternalSignerBridge::new(ExternalSignerHandshakeResult {
+        ok: false,
+        pubkey: None,
+        signer_package: None,
+        current_user: None,
+        error_kind: Some(ExternalSignerErrorKind::SignerUnavailable),
+        error_message: Some("unused".into()),
+    });
+    app_after_restart.set_external_signer_bridge(Box::new(bridge_after_restart.clone()));
+    app_after_restart.dispatch(AppAction::BeginNostrConnectLogin);
+
+    wait_until(
+        "nostrconnect uri opened after restart",
+        Duration::from_secs(2),
+        || bridge_after_restart.last_opened_url().is_some(),
+    );
+    let restarted_url = bridge_after_restart
+        .last_opened_url()
+        .expect("opened URL after restart");
+    let restarted_secret = query_param(&restarted_url, "secret").expect("restarted secret query");
+    assert_eq!(first_secret, restarted_secret);
 }
 
 #[test]
@@ -1077,9 +1276,16 @@ fn foregrounded_continues_pending_nostr_connect_login() {
     // Simulate returning to app without URL callback.
     app.dispatch(AppAction::Foregrounded);
 
-    wait_until("nostrconnect logged in via foreground", Duration::from_secs(2), || {
-        matches!(app.state().auth, AuthState::LoggedIn { .. })
+    // Then receive callback carrying signer identity.
+    app.dispatch(AppAction::NostrConnectCallback {
+        url: "pika://nostrconnect-return?remote_signer_pubkey=79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798".into(),
     });
+
+    wait_until(
+        "nostrconnect logged in via foreground",
+        Duration::from_secs(2),
+        || matches!(app.state().auth, AuthState::LoggedIn { .. }),
+    );
     assert!(!app.state().busy.logging_in);
 }
 

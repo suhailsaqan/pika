@@ -88,7 +88,7 @@ xcrun simctl launch "$udid" "$PRIMAL_BUNDLE_ID" >/dev/null 2>&1 || true
 xcrun simctl terminate "$udid" "$PRIMAL_BUNDLE_ID" >/dev/null 2>&1 || true
 
 echo "verifying simulator routes nostrconnect:// to Primal"
-PROBE_URL="nostrconnect://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa?name=Pika&url=https%3A%2F%2Fpika.chat&relay=wss%3A%2F%2Frelay.primal.net"
+PROBE_URL="nostrconnect://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa?name=Pika&url=https%3A%2F%2Fpika.chat&secret=sec-nightly-probe&relay=wss%3A%2F%2Frelay.primal.net"
 xcrun simctl openurl "$udid" "$PROBE_URL"
 
 echo "building pika ios artifacts"
@@ -120,6 +120,11 @@ if [ ! -f "$marker_file" ]; then
 fi
 if ! grep -E '^nostrconnect://' "$marker_file" >/dev/null; then
   echo "error: marker file did not contain nostrconnect URL: $marker_file" >&2
+  cat "$marker_file" >&2 || true
+  exit 1
+fi
+if ! grep -E '(^|[?&])secret=' "$marker_file" >/dev/null; then
+  echo "error: marker file did not include secret query param: $marker_file" >&2
   cat "$marker_file" >&2 || true
   exit 1
 fi

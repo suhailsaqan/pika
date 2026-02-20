@@ -8,7 +8,7 @@ mod storage;
 
 use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, Mutex, RwLock};
 use std::time::Duration;
 
 use flume::Sender;
@@ -100,13 +100,18 @@ enum SessionAuthMode {
 }
 
 struct PendingNostrConnectLogin {
-    client_uri: String,
     client_nsec: String,
-    /// Pre-created NostrConnect instance that is already subscribed to relays
-    /// and waiting for the signer's connect response. Created before the
-    /// external URL is opened so the subscription is active when the remote
-    /// signer (e.g. Primal) sends its response.
-    signer: Option<nostr_connect::prelude::NostrConnect>,
+    relays: Vec<RelayUrl>,
+    secret: String,
+    /// Result slot set by the in-flight NIP-46 connect-response waiter.
+    /// Contains remote signer pubkey once validated, or a user-visible error.
+    connect_response_result: Arc<Mutex<Option<Result<NostrConnectConnectResponse, String>>>>,
+}
+
+#[derive(Debug, Clone)]
+struct NostrConnectConnectResponse {
+    remote_signer_pubkey: PublicKey,
+    agreed_secret: String,
 }
 
 impl SessionAuthMode {
@@ -480,12 +485,471 @@ impl AppCore {
         anyhow::bail!("{detail}");
     }
 
-    fn make_nostr_connect_client_uri(&self, client_keys: &Keys) -> anyhow::Result<String> {
-        let relays = self.default_relays();
+    fn make_nostr_connect_client_uri(
+        &self,
+        client_keys: &Keys,
+        relays: &[RelayUrl],
+        secret: &str,
+    ) -> anyhow::Result<String> {
         if relays.is_empty() {
             anyhow::bail!("No relays configured for signer login");
         }
-        Ok(NostrConnectURI::client(client_keys.public_key(), relays, "Pika").to_string())
+        let metadata = serde_json::json!({ "name": "Pika" }).to_string();
+        let mut query = url::form_urlencoded::Serializer::new(String::new());
+        query.append_pair("metadata", &metadata);
+        query.append_pair("name", "Pika");
+        query.append_pair("url", "https://pika.chat");
+        query.append_pair(
+            "perms",
+            "get_public_key,sign_event,nip44_encrypt,nip44_decrypt,nip04_encrypt,nip04_decrypt",
+        );
+        query.append_pair("secret", secret);
+        for relay in relays {
+            query.append_pair("relay", relay.as_str_without_trailing_slash());
+        }
+        let query = query.finish();
+        Ok(format!(
+            "nostrconnect://{}?{query}",
+            client_keys.public_key().to_hex()
+        ))
+    }
+
+    fn spawn_nostr_connect_connect_response_waiter(
+        &self,
+        client_keys: Keys,
+        relays: Vec<RelayUrl>,
+        secret: String,
+        connect_response_result: Arc<Mutex<Option<Result<NostrConnectConnectResponse, String>>>>,
+    ) {
+        let core_sender = self.core_sender.clone();
+        self.runtime.spawn(async move {
+            let result =
+                Self::wait_for_nostr_connect_connect_response(client_keys, relays, secret).await;
+            let mapped = result.map_err(|e| e.to_string());
+            match connect_response_result.lock() {
+                Ok(mut slot) => {
+                    *slot = Some(mapped);
+                }
+                Err(poison) => {
+                    *poison.into_inner() = Some(mapped);
+                }
+            }
+            let _ = core_sender.send(CoreMsg::Internal(Box::new(
+                InternalEvent::NostrConnectConnectResponseReady,
+            )));
+        });
+    }
+
+    async fn wait_for_nostr_connect_connect_response(
+        client_keys: Keys,
+        relays: Vec<RelayUrl>,
+        expected_secret: String,
+    ) -> anyhow::Result<NostrConnectConnectResponse> {
+        let client = Client::new(client_keys.clone());
+        for relay in relays {
+            client.add_relay(relay).await?;
+        }
+        client.connect().await;
+
+        // Some signers omit `#p` on connect responses. Subscribe by kind and
+        // rely on successful decryption + response validation to identify ours.
+        let filter = Filter::new()
+            .kind(Kind::NostrConnect)
+            .since(Timestamp::now());
+        client.subscribe(filter, None).await?;
+
+        let mut notifications = client.notifications();
+        let timeout_at = std::time::Instant::now() + Duration::from_secs(95);
+        let outcome = loop {
+            let now = std::time::Instant::now();
+            if now >= timeout_at {
+                break Err(anyhow::anyhow!("signer connect response timed out"));
+            }
+            let wait_for = timeout_at.saturating_duration_since(now);
+            let notif = match tokio::time::timeout(wait_for, notifications.recv()).await {
+                Ok(Ok(n)) => n,
+                Ok(Err(_)) => break Err(anyhow::anyhow!("relay notifications closed")),
+                Err(_) => break Err(anyhow::anyhow!("signer connect response timed out")),
+            };
+
+            let RelayPoolNotification::Event { event, .. } = notif else {
+                continue;
+            };
+            if event.kind != Kind::NostrConnect {
+                continue;
+            }
+
+            let decrypted = match nip44::decrypt(
+                client_keys.secret_key(),
+                &event.pubkey,
+                event.content.as_str(),
+            ) {
+                Ok(v) => v,
+                Err(nip44_err) => match nip04::decrypt(
+                    client_keys.secret_key(),
+                    &event.pubkey,
+                    event.content.as_str(),
+                ) {
+                    Ok(v) => v,
+                    Err(nip04_err) => {
+                        tracing::debug!(
+                            nip44_err = %nip44_err,
+                            nip04_err = %nip04_err,
+                            "nostr_connect: ignoring undecryptable connect response"
+                        );
+                        continue;
+                    }
+                },
+            };
+            let message = match NostrConnectMessage::from_json(decrypted) {
+                Ok(msg) => msg,
+                Err(e) => {
+                    tracing::debug!(%e, "nostr_connect: ignoring unparsable connect response");
+                    continue;
+                }
+            };
+            match message {
+                NostrConnectMessage::Request { id, method, params } => {
+                    let request = match NostrConnectRequest::from_message(method, params) {
+                        Ok(req) => req,
+                        Err(e) => {
+                            tracing::debug!(%e, "nostr_connect: ignoring invalid connect request");
+                            continue;
+                        }
+                    };
+
+                    let NostrConnectRequest::Connect {
+                        remote_signer_public_key,
+                        secret,
+                    } = request
+                    else {
+                        continue;
+                    };
+
+                    if remote_signer_public_key != event.pubkey {
+                        tracing::debug!(
+                            requested_signer = %remote_signer_public_key.to_hex(),
+                            event_signer = %event.pubkey.to_hex(),
+                            "nostr_connect: ignoring connect request with mismatched signer pubkey"
+                        );
+                        continue;
+                    }
+
+                    let agreed_secret = match secret.as_deref() {
+                        Some(signer_secret) if signer_secret == expected_secret => {
+                            expected_secret.clone()
+                        }
+                        Some(signer_secret) => {
+                            if let Some(override_secret) =
+                                Self::normalize_nostr_connect_secret(signer_secret)
+                            {
+                                tracing::warn!(
+                                    "nostr_connect: signer provided connect secret in request; adopting signer-provided secret"
+                                );
+                                override_secret
+                            } else {
+                                tracing::warn!(
+                                    "nostr_connect: signer connect request had invalid secret; proceeding with local secret"
+                                );
+                                expected_secret.clone()
+                            }
+                        }
+                        None => expected_secret.clone(),
+                    };
+
+                    // NIP-46 client-initiated flow: acknowledge signer `connect` request.
+                    let ack_message = NostrConnectMessage::response(
+                        id,
+                        NostrConnectResponse::with_result(ResponseResult::Ack),
+                    );
+                    let ack_event = match EventBuilder::nostr_connect(
+                        &client_keys,
+                        event.pubkey,
+                        ack_message,
+                    ) {
+                        Ok(builder) => match builder.sign_with_keys(&client_keys) {
+                            Ok(event) => Some(event),
+                            Err(e) => {
+                                tracing::warn!(
+                                    %e,
+                                    "nostr_connect: failed to sign connect ack event"
+                                );
+                                None
+                            }
+                        },
+                        Err(e) => {
+                            tracing::warn!(%e, "nostr_connect: failed to build connect ack event");
+                            None
+                        }
+                    };
+
+                    if let Some(event) = ack_event {
+                        if let Err(e) = client.send_event(&event).await {
+                            tracing::warn!(%e, "nostr_connect: failed to send connect ack event");
+                        }
+                    }
+
+                    break Ok(NostrConnectConnectResponse {
+                        remote_signer_pubkey: event.pubkey,
+                        agreed_secret,
+                    });
+                }
+                NostrConnectMessage::Response { result, error, .. } => {
+                    if let Some(err) = error {
+                        break Err(anyhow::anyhow!("signer rejected connection: {err}"));
+                    }
+                    let Some(result_value) = result else {
+                        continue;
+                    };
+
+                    let agreed_secret = if result_value == expected_secret
+                        || result_value.eq_ignore_ascii_case("ack")
+                        || result_value.eq_ignore_ascii_case("ok")
+                        || result_value.eq_ignore_ascii_case("success")
+                    {
+                        expected_secret.clone()
+                    } else if let Some(override_secret) =
+                        Self::parse_nostr_connect_secret_override(&result_value)
+                    {
+                        tracing::warn!(
+                            "nostr_connect: signer returned a different connect secret; adopting signer-provided secret"
+                        );
+                        override_secret
+                    } else if !result_value.trim().is_empty() {
+                        tracing::warn!(
+                            result = %result_value,
+                            "nostr_connect: non-standard connect response; proceeding with local secret for interop"
+                        );
+                        expected_secret.clone()
+                    } else {
+                        tracing::debug!("nostr_connect: ignoring empty connect response result");
+                        continue;
+                    };
+
+                    break Ok(NostrConnectConnectResponse {
+                        remote_signer_pubkey: event.pubkey,
+                        agreed_secret,
+                    });
+                }
+            }
+        };
+
+        client.shutdown().await;
+        outcome
+    }
+
+    fn parse_remote_signer_from_callback(&self, callback_url: &str) -> Option<PublicKey> {
+        let parsed = Url::parse(callback_url).ok()?;
+        let candidate = parsed.query_pairs().find_map(|(k, v)| {
+            if k.eq_ignore_ascii_case("remote_signer_pubkey")
+                || k.eq_ignore_ascii_case("remote_signer")
+                || k.eq_ignore_ascii_case("signer_pubkey")
+            {
+                Some(v.to_string())
+            } else {
+                None
+            }
+        })?;
+        PublicKey::from_hex(&candidate).ok()
+    }
+
+    fn make_bunker_uri(
+        &self,
+        remote_signer_pubkey: PublicKey,
+        relays: &[RelayUrl],
+        secret: &str,
+    ) -> String {
+        let mut query = url::form_urlencoded::Serializer::new(String::new());
+        for relay in relays {
+            query.append_pair("relay", relay.as_str_without_trailing_slash());
+        }
+
+        if let Some(normalized_secret) = Self::normalize_nostr_connect_secret(secret) {
+            query.append_pair("secret", &normalized_secret);
+        }
+
+        let query = query.finish();
+        if query.is_empty() {
+            format!("bunker://{}", remote_signer_pubkey.to_hex())
+        } else {
+            format!("bunker://{}?{query}", remote_signer_pubkey.to_hex())
+        }
+    }
+
+    fn bunker_uri_without_secret(raw: &str) -> Option<String> {
+        let mut url = Url::parse(raw).ok()?;
+        let mut removed_secret = false;
+        let mut kept_pairs: Vec<(String, String)> = Vec::new();
+
+        for (k, v) in url.query_pairs() {
+            if k.eq_ignore_ascii_case("secret") {
+                removed_secret = true;
+                continue;
+            }
+            kept_pairs.push((k.into_owned(), v.into_owned()));
+        }
+
+        if !removed_secret {
+            return None;
+        }
+
+        if kept_pairs.is_empty() {
+            url.set_query(None);
+            return Some(url.to_string());
+        }
+
+        let mut serializer = url::form_urlencoded::Serializer::new(String::new());
+        for (k, v) in kept_pairs {
+            serializer.append_pair(&k, &v);
+        }
+        url.set_query(Some(&serializer.finish()));
+        Some(url.to_string())
+    }
+
+    fn nostr_connect_redacted_uri_for_log(client_uri: &str) -> String {
+        match Url::parse(client_uri) {
+            Ok(url) => {
+                if let Some(host) = url.host_str() {
+                    format!("{}://{}?<redacted>", url.scheme(), host)
+                } else {
+                    format!("{}://<redacted>", url.scheme())
+                }
+            }
+            Err(_) => "nostrconnect://<redacted>".to_string(),
+        }
+    }
+
+    fn wait_for_pending_nostr_connect_signer(
+        &self,
+        pending: &mut PendingNostrConnectLogin,
+        callback_url: &str,
+    ) -> anyhow::Result<Option<NostrConnectConnectResponse>> {
+        if let Some(pubkey) = self.parse_remote_signer_from_callback(callback_url) {
+            return Ok(Some(NostrConnectConnectResponse {
+                remote_signer_pubkey: pubkey,
+                agreed_secret: pending.secret.clone(),
+            }));
+        }
+
+        let next = match pending.connect_response_result.lock() {
+            Ok(mut slot) => slot.take(),
+            Err(poison) => poison.into_inner().take(),
+        };
+
+        match next {
+            Some(Ok(pubkey)) => Ok(Some(pubkey)),
+            Some(Err(e)) => Err(anyhow::anyhow!("{e}")),
+            None => Ok(None),
+        }
+    }
+
+    fn maybe_write_nostr_connect_debug_snapshot(
+        &self,
+        client_uri: &str,
+        client_nsec: &str,
+        secret: &str,
+        relays: &[RelayUrl],
+    ) {
+        let enabled = matches!(
+            std::env::var("PIKA_NOSTR_CONNECT_DEBUG_DUMP")
+                .ok()
+                .as_deref(),
+            Some("1") | Some("true") | Some("TRUE")
+        );
+        if !enabled {
+            return;
+        }
+
+        let path = std::path::Path::new(&self.data_dir).join("nostr_connect_debug.json");
+        let payload = serde_json::json!({
+            "generated_at_unix": now_seconds(),
+            "client_uri": client_uri,
+            "client_nsec": client_nsec,
+            "secret": secret,
+            "relay_urls": relays.iter().map(|r| r.as_str_without_trailing_slash().to_string()).collect::<Vec<_>>(),
+        });
+
+        match serde_json::to_string_pretty(&payload) {
+            Ok(json) => {
+                if let Err(e) = std::fs::write(&path, json) {
+                    tracing::warn!(%e, path = %path.display(), "nostr_connect: failed to write debug snapshot");
+                } else {
+                    tracing::info!(path = %path.display(), "nostr_connect: wrote debug snapshot");
+                }
+            }
+            Err(e) => {
+                tracing::warn!(%e, "nostr_connect: failed to serialize debug snapshot");
+            }
+        }
+    }
+
+    fn make_nostr_connect_secret() -> String {
+        // Keep this simple/alphanumeric for broad signer compatibility.
+        // 32 hex chars preserves entropy while avoiding punctuation.
+        uuid::Uuid::new_v4().simple().to_string()
+    }
+
+    fn normalize_nostr_connect_secret(raw: &str) -> Option<String> {
+        let candidate = raw.trim();
+        if candidate.is_empty() {
+            return None;
+        }
+
+        if candidate.len() > 256 {
+            return None;
+        }
+
+        if candidate
+            .chars()
+            .any(|ch| ch.is_ascii_control() || ch.is_whitespace())
+        {
+            return None;
+        }
+
+        Some(candidate.to_string())
+    }
+
+    fn parse_nostr_connect_secret_override(result_value: &str) -> Option<String> {
+        let candidate = result_value.trim();
+        if candidate.eq_ignore_ascii_case("ack")
+            || candidate.eq_ignore_ascii_case("ok")
+            || candidate.eq_ignore_ascii_case("success")
+        {
+            return None;
+        }
+
+        // Interop: some signers return their currently bound app secret instead
+        // of echoing ours when reconnecting.
+        Self::normalize_nostr_connect_secret(candidate)
+    }
+
+    fn nostr_connect_secret_path(&self) -> std::path::PathBuf {
+        std::path::Path::new(&self.data_dir).join("nostr_connect_secret.txt")
+    }
+
+    fn load_or_create_nostr_connect_secret(&self) -> String {
+        let path = self.nostr_connect_secret_path();
+        if let Ok(existing) = std::fs::read_to_string(&path) {
+            if let Some(secret) = Self::normalize_nostr_connect_secret(&existing) {
+                return secret;
+            }
+        }
+
+        let secret = Self::make_nostr_connect_secret();
+        if let Err(e) = std::fs::write(&path, &secret) {
+            tracing::warn!(%e, path = %path.display(), "nostr_connect: failed to persist client secret");
+        }
+        secret
+    }
+
+    fn maybe_persist_nostr_connect_secret(&self, secret: &str) {
+        let Some(secret) = Self::normalize_nostr_connect_secret(secret) else {
+            return;
+        };
+        let path = self.nostr_connect_secret_path();
+        if let Err(e) = std::fs::write(&path, secret) {
+            tracing::warn!(%e, path = %path.display(), "nostr_connect: failed to update client secret");
+        }
     }
 
     fn start_bunker_signer_session(
@@ -500,13 +964,41 @@ impl AppCore {
         tracing::info!("nostr_connect: connecting to bunker");
         let client_nsec = client_keys.secret_key().to_bech32().expect("infallible");
         let connector = self.bunker_signer_connector();
-        let output = connector
-            .connect(&self.runtime, bunker_uri, client_keys)
-            .map_err(|e| {
-                let msg = self.bunker_login_error_message(&e);
-                tracing::error!(%msg, "nostr_connect: bunker connect failed");
-                anyhow::anyhow!(msg)
-            })?;
+        let connect_once = |uri: &str| connector.connect(&self.runtime, uri, client_keys.clone());
+        let output = match connect_once(bunker_uri) {
+            Ok(output) => output,
+            Err(primary_error) => {
+                let primary_msg = self.bunker_login_error_message(&primary_error);
+                let should_retry_without_secret = primary_msg.to_lowercase().contains("new secret");
+                if !should_retry_without_secret {
+                    tracing::error!(%primary_msg, "nostr_connect: bunker connect failed");
+                    return Err(anyhow::anyhow!(primary_msg));
+                }
+
+                let Some(uri_without_secret) = Self::bunker_uri_without_secret(bunker_uri) else {
+                    tracing::error!(
+                        %primary_msg,
+                        "nostr_connect: bunker connect failed (no secret parameter to drop)"
+                    );
+                    return Err(anyhow::anyhow!(primary_msg));
+                };
+
+                tracing::warn!(
+                    "nostr_connect: bunker connect rejected new secret; retrying without secret query parameter"
+                );
+                match connect_once(&uri_without_secret) {
+                    Ok(output) => output,
+                    Err(retry_error) => {
+                        let retry_msg = self.bunker_login_error_message(&retry_error);
+                        tracing::error!(
+                            %retry_msg,
+                            "nostr_connect: bunker connect retry without secret failed"
+                        );
+                        return Err(anyhow::anyhow!(retry_msg));
+                    }
+                }
+            }
+        };
         tracing::info!(user_pubkey = %output.user_pubkey.to_hex(), "nostr_connect: bunker connected, starting session");
         let mode = SessionAuthMode::BunkerSigner {
             bunker_uri: output.canonical_bunker_uri.clone(),
@@ -552,7 +1044,9 @@ impl AppCore {
         });
 
         let client_keys = Keys::generate();
-        let client_uri = match self.make_nostr_connect_client_uri(&client_keys) {
+        let relays = self.default_relays();
+        let secret = self.load_or_create_nostr_connect_secret();
+        let client_uri = match self.make_nostr_connect_client_uri(&client_keys, &relays, &secret) {
             Ok(uri) => uri,
             Err(e) => {
                 tracing::error!(%e, "nostr_connect: make_client_uri failed");
@@ -562,52 +1056,26 @@ impl AppCore {
             }
         };
 
-        // Create the NostrConnect instance and subscribe to relays BEFORE
-        // opening the external URL. This ensures the relay subscription is
-        // active when the remote signer (e.g. Primal) sends its connect
-        // response, avoiding the race where the response arrives before
-        // we start listening.
-        let connector = self.bunker_signer_connector();
-        let signer = match connector.prepare(
-            &self.runtime,
-            &client_uri,
+        let connect_response_result = Arc::new(Mutex::new(
+            None::<Result<NostrConnectConnectResponse, String>>,
+        ));
+        self.spawn_nostr_connect_connect_response_waiter(
             client_keys.clone(),
-        ) {
-            Ok(s) => {
-                tracing::info!("nostr_connect: pre-subscribed NostrConnect instance created");
-                Some(s)
-            }
-            Err(e) => {
-                tracing::warn!(%e, "nostr_connect: prepare failed, will fall back to fresh connect");
-                None
-            }
-        };
+            relays.clone(),
+            secret.clone(),
+            connect_response_result.clone(),
+        );
 
-        // Kick off get_public_key() in the background so the subscription is
-        // actively waiting for the signer response while the user is in the
-        // external signer app.
-        if let Some(ref signer) = signer {
-            let signer_clone = signer.clone();
-            let tx = self.core_sender.clone();
-            self.runtime.spawn(async move {
-                tracing::info!("nostr_connect: background get_public_key started");
-                match signer_clone.get_public_key().await {
-                    Ok(pk) => {
-                        tracing::info!(pubkey = %pk.to_hex(), "nostr_connect: background got signer pubkey");
-                        let _ = tx.send(crate::updates::CoreMsg::Action(
-                            AppAction::NostrConnectCallback {
-                                url: "background-signer-ready".to_string(),
-                            },
-                        ));
-                    }
-                    Err(e) => {
-                        tracing::warn!(%e, "nostr_connect: background get_public_key failed");
-                    }
-                }
-            });
-        }
-
-        tracing::info!(uri = %client_uri, "nostr_connect: opening external URL");
+        tracing::info!(
+            uri = %Self::nostr_connect_redacted_uri_for_log(&client_uri),
+            "nostr_connect: opening external URL"
+        );
+        self.maybe_write_nostr_connect_debug_snapshot(
+            &client_uri,
+            &client_keys.secret_key().to_bech32().expect("infallible"),
+            &secret,
+            &relays,
+        );
         if let Err(e) = self.open_external_url(client_uri.clone()) {
             tracing::error!(%e, "nostr_connect: open_external_url failed");
             self.clear_busy();
@@ -617,56 +1085,19 @@ impl AppCore {
         tracing::info!("nostr_connect: external URL opened, waiting for callback");
 
         self.pending_nostr_connect_login = Some(PendingNostrConnectLogin {
-            client_uri,
             client_nsec: client_keys.secret_key().to_bech32().expect("infallible"),
-            signer,
+            relays,
+            secret,
+            connect_response_result,
         });
     }
 
     fn on_nostr_connect_callback(&mut self, url: String) {
         tracing::info!(%url, pending = self.pending_nostr_connect_login.is_some(), "nostr_connect: callback received");
-        let Some(pending) = self.pending_nostr_connect_login.take() else {
+        let Some(mut pending) = self.pending_nostr_connect_login.take() else {
             tracing::warn!("nostr_connect: callback but no pending login, ignoring");
             return;
         };
-
-        // Try using the pre-subscribed signer first. This avoids the race
-        // condition where a fresh NostrConnect instance misses the already-sent
-        // connect response from the remote signer.
-        if let Some(signer) = pending.signer {
-            tracing::info!("nostr_connect: completing with pre-subscribed signer");
-            let connector = self.bunker_signer_connector();
-            match connector.finish(&self.runtime, signer) {
-                Ok(output) => {
-                    tracing::info!(user_pubkey = %output.user_pubkey.to_hex(), "nostr_connect: bunker connected via pre-subscribed signer");
-                    let client_nsec = pending.client_nsec;
-                    let mode = SessionAuthMode::BunkerSigner {
-                        bunker_uri: output.canonical_bunker_uri.clone(),
-                    };
-                    if let Err(e) = self.start_session_with_signer(
-                        output.user_pubkey,
-                        output.signer,
-                        None,
-                        mode,
-                    ) {
-                        tracing::error!(%e, "nostr_connect: session start failed");
-                        self.clear_busy();
-                        self.toast(format!("{e:#}"));
-                        return;
-                    }
-                    self.emit_bunker_session_descriptor(output.canonical_bunker_uri, client_nsec);
-                    tracing::info!("nostr_connect: login complete");
-                    self.clear_busy();
-                    return;
-                }
-                Err(e) => {
-                    tracing::warn!(%e, "nostr_connect: pre-subscribed finish failed, falling back to fresh connect");
-                }
-            }
-        }
-
-        // Fallback: create a fresh connection (works for bunker:// URIs and
-        // cases where the pre-subscribed path failed).
         let client_keys = match Keys::parse(&pending.client_nsec) {
             Ok(keys) => keys,
             Err(e) => {
@@ -677,8 +1108,31 @@ impl AppCore {
             }
         };
 
-        tracing::info!("nostr_connect: starting bunker signer session (fresh)");
-        if let Err(e) = self.start_bunker_signer_session(pending.client_uri, client_keys) {
+        let connect_response = match self.wait_for_pending_nostr_connect_signer(&mut pending, &url)
+        {
+            Ok(Some(connect_response)) => connect_response,
+            Ok(None) => {
+                // Foreground retry path: response not received yet.
+                tracing::info!("nostr_connect: signer response not ready yet; still waiting");
+                self.pending_nostr_connect_login = Some(pending);
+                return;
+            }
+            Err(e) => {
+                tracing::error!(%e, "nostr_connect: connect response validation failed");
+                self.clear_busy();
+                self.toast(format!("{e:#}"));
+                return;
+            }
+        };
+        self.maybe_persist_nostr_connect_secret(&connect_response.agreed_secret);
+        let bunker_uri = self.make_bunker_uri(
+            connect_response.remote_signer_pubkey,
+            &pending.relays,
+            &connect_response.agreed_secret,
+        );
+
+        tracing::info!("nostr_connect: starting bunker signer session");
+        if let Err(e) = self.start_bunker_signer_session(bunker_uri, client_keys) {
             tracing::error!(%e, "nostr_connect: bunker session failed");
             self.clear_busy();
             self.toast(format!("{e:#}"));
@@ -916,6 +1370,14 @@ impl AppCore {
             InternalEvent::Toast(ref msg) => {
                 tracing::info!(msg, "toast");
                 self.toast(msg.clone());
+            }
+            InternalEvent::NostrConnectConnectResponseReady => {
+                if self.pending_nostr_connect_login.is_some() {
+                    tracing::info!(
+                        "nostr_connect: connect response ready, continuing pending login"
+                    );
+                    self.on_nostr_connect_callback("connect-response-ready".to_string());
+                }
             }
             InternalEvent::CallRuntimeConnected { call_id } => {
                 if let Some(call) = self.state.active_call.as_mut() {
