@@ -182,7 +182,7 @@ fun ChatScreen(manager: AppManager, chatId: String, padding: PaddingValues) {
                     MessageBubble(
                         message = msg,
                         onSendMessage = { text ->
-                            manager.dispatch(AppAction.SendMessage(chat.chatId, text))
+                            manager.dispatch(AppAction.SendMessage(chat.chatId, text, null))
                         },
                     )
                 }
@@ -210,7 +210,7 @@ fun ChatScreen(manager: AppManager, chatId: String, padding: PaddingValues) {
                     onClick = {
                         val text = draft
                         draft = ""
-                        manager.dispatch(AppAction.SendMessage(chat.chatId, text))
+                        manager.dispatch(AppAction.SendMessage(chat.chatId, text, null))
                     },
                     modifier = Modifier.testTag(TestTags.CHAT_SEND),
                 ) {

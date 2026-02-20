@@ -66,7 +66,7 @@ class PikaE2eUiTest {
         val nonce = java.util.UUID.randomUUID().toString().replace("-", "").lowercase()
         val probe = "ping:$nonce"
         val expect = "pong:$nonce"
-        runOnMain { AppManager.getInstance(ctx).dispatch(AppAction.SendMessage(chatId, probe)) }
+        runOnMain { AppManager.getInstance(ctx).dispatch(AppAction.SendMessage(chatId, probe, null)) }
 
         dumpState("after probe", ctx)
 
@@ -131,7 +131,7 @@ class PikaE2eUiTest {
             val nonce = java.util.UUID.randomUUID().toString().replace("-", "").lowercase()
             val probe = "ping:$nonce"
             val expect = "pong:$nonce"
-            runOnMain { AppManager.getInstance(ctx).dispatch(AppAction.SendMessage(chatId, probe)) }
+            runOnMain { AppManager.getInstance(ctx).dispatch(AppAction.SendMessage(chatId, probe, null)) }
             compose.waitUntil(90_000) {
                 runOnMain {
                     AppManager.getInstance(ctx).state.currentChat?.messages?.any {
