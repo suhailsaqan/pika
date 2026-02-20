@@ -57,6 +57,29 @@ pub(super) fn default_app_config_json() -> String {
     .to_string()
 }
 
+pub(super) fn relay_reset_config_json(existing_json: Option<&str>) -> String {
+    let mut value = existing_json
+        .and_then(|raw| serde_json::from_str::<serde_json::Value>(raw).ok())
+        .unwrap_or_else(|| {
+            serde_json::from_str::<serde_json::Value>(&default_app_config_json())
+                .unwrap_or_else(|_| serde_json::json!({}))
+        });
+
+    if !value.is_object() {
+        value = serde_json::json!({});
+    }
+
+    if let Some(obj) = value.as_object_mut() {
+        obj.insert("relay_urls".into(), serde_json::json!(DEFAULT_RELAY_URLS));
+        obj.insert(
+            "key_package_relay_urls".into(),
+            serde_json::json!(DEFAULT_KEY_PACKAGE_RELAY_URLS),
+        );
+    }
+
+    value.to_string()
+}
+
 impl AppCore {
     pub(super) fn network_enabled(&self) -> bool {
         // Used to keep Rust tests deterministic and offline.

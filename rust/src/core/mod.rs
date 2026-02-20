@@ -73,6 +73,10 @@ pub(crate) fn load_cached_profiles(data_dir: &str) -> Vec<crate::state::FollowLi
 pub(crate) fn default_app_config_json() -> String {
     config::default_app_config_json()
 }
+
+pub(crate) fn relay_reset_config_json(existing_json: Option<&str>) -> String {
+    config::relay_reset_config_json(existing_json)
+}
 use nostr_sdk::prelude::*;
 
 use interop::{

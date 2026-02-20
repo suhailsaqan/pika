@@ -39,6 +39,11 @@ pub fn default_config_json() -> String {
     core::default_app_config_json()
 }
 
+/// Reset only relay-related config keys to defaults while preserving unrelated keys.
+pub fn reset_relay_config_json(existing_json: Option<String>) -> String {
+    core::relay_reset_config_json(existing_json.as_deref())
+}
+
 uniffi::setup_scaffolding!();
 
 #[uniffi::export(callback_interface)]

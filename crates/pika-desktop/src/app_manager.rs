@@ -184,12 +184,10 @@ impl AppManager {
     }
 
     pub fn reset_relay_config_to_defaults(&self) {
-        if std::fs::write(
-            self.inner.data_dir.join("pika_config.json"),
-            pika_core::default_config_json(),
-        )
-        .is_ok()
-        {
+        let path = self.inner.data_dir.join("pika_config.json");
+        let existing = std::fs::read_to_string(&path).ok();
+        let merged = pika_core::reset_relay_config_json(existing);
+        if std::fs::write(path, merged).is_ok() {
             self.inner.core.dispatch(AppAction::ReloadConfig);
         }
     }
@@ -494,7 +492,7 @@ mod tests {
         std::fs::create_dir_all(&data_dir).expect("create data dir");
         std::fs::write(
             data_dir.join("pika_config.json"),
-            r#"{"relay_urls":["wss://invalid.local"]}"#,
+            r#"{"relay_urls":["wss://invalid.local"],"key_package_relay_urls":["wss://invalid-kp.local"],"disable_network":true,"notification_url":"https://example.invalid/notifs","call_audio_backend":"mock"}"#,
         )
         .expect("seed config");
         std::env::set_var("PIKA_DESKTOP_DATA_DIR", data_dir.as_os_str());
@@ -506,6 +504,16 @@ mod tests {
         assert!(
             config.contains("relay.damus.io") && config.contains("nostr-pub.wellorder.net"),
             "default relay lists must be present in rewritten config"
+        );
+        assert!(
+            config.contains("\"disable_network\":true")
+                && config.contains("\"notification_url\":\"https://example.invalid/notifs\"")
+                && config.contains("\"call_audio_backend\":\"mock\""),
+            "non-relay settings must be preserved"
+        );
+        assert!(
+            !config.contains("invalid.local"),
+            "invalid relay values should be replaced by defaults"
         );
 
         std::env::remove_var("PIKA_DESKTOP_DATA_DIR");
