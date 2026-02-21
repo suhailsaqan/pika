@@ -391,7 +391,6 @@ pub(super) struct CallMediaCryptoContext {
 #[derive(Debug)]
 enum AudioBackend {
     Synthetic(SyntheticAudio),
-    #[cfg(any(target_os = "ios", target_os = "android"))]
     Cpal(CpalAudio),
 }
 
@@ -408,16 +407,7 @@ impl AudioBackend {
             .to_ascii_lowercase();
         match normalized.as_str() {
             "synthetic" => Ok(Self::synthetic()),
-            "cpal" => {
-                #[cfg(any(target_os = "ios", target_os = "android"))]
-                {
-                    CpalAudio::new().map(Self::Cpal)
-                }
-                #[cfg(not(any(target_os = "ios", target_os = "android")))]
-                {
-                    Err("cpal backend is currently mobile-only; using synthetic".to_string())
-                }
-            }
+            "cpal" => CpalAudio::new().map(Self::Cpal),
             other => Err(format!(
                 "unknown call audio backend '{other}'; using synthetic"
             )),
@@ -427,7 +417,6 @@ impl AudioBackend {
     fn capture_pcm_frame(&mut self) -> Vec<i16> {
         match self {
             Self::Synthetic(v) => v.capture_pcm_frame(),
-            #[cfg(any(target_os = "ios", target_os = "android"))]
             Self::Cpal(v) => v.capture_pcm_frame(),
         }
     }
@@ -435,21 +424,13 @@ impl AudioBackend {
     fn play_pcm_frame(&mut self, pcm: &[i16]) {
         match self {
             Self::Synthetic(v) => v.play_pcm_frame(pcm),
-            #[cfg(any(target_os = "ios", target_os = "android"))]
             Self::Cpal(v) => v.play_pcm_frame(pcm),
         }
     }
 }
 
 fn default_backend_mode() -> &'static str {
-    #[cfg(any(target_os = "ios", target_os = "android"))]
-    {
-        "cpal"
-    }
-    #[cfg(not(any(target_os = "ios", target_os = "android")))]
-    {
-        "synthetic"
-    }
+    "cpal"
 }
 
 #[derive(Debug)]
@@ -535,7 +516,6 @@ impl SyntheticAudio {
     fn play_pcm_frame(&mut self, _pcm: &[i16]) {}
 }
 
-#[cfg(any(target_os = "ios", target_os = "android"))]
 struct CpalAudio {
     capture: Arc<Mutex<std::collections::VecDeque<i16>>>,
     playback: Arc<Mutex<std::collections::VecDeque<i16>>>,
@@ -543,14 +523,12 @@ struct CpalAudio {
     _output_stream: cpal::Stream,
 }
 
-#[cfg(any(target_os = "ios", target_os = "android"))]
 impl std::fmt::Debug for CpalAudio {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("CpalAudio").finish_non_exhaustive()
     }
 }
 
-#[cfg(any(target_os = "ios", target_os = "android"))]
 impl CpalAudio {
     fn new() -> Result<Self, String> {
         use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
@@ -703,7 +681,6 @@ impl CpalAudio {
     }
 }
 
-#[cfg(any(target_os = "ios", target_os = "android"))]
 fn push_capture_sample(queue: &Arc<Mutex<std::collections::VecDeque<i16>>>, sample: i16) {
     let mut q = queue.lock().expect("capture queue lock poisoned");
     q.push_back(sample);
@@ -712,7 +689,6 @@ fn push_capture_sample(queue: &Arc<Mutex<std::collections::VecDeque<i16>>>, samp
     }
 }
 
-#[cfg(any(target_os = "ios", target_os = "android"))]
 fn push_mono_i16_from_i16(
     data: &[i16],
     channels: usize,
@@ -725,7 +701,6 @@ fn push_mono_i16_from_i16(
     }
 }
 
-#[cfg(any(target_os = "ios", target_os = "android"))]
 fn push_mono_i16_from_u16(
     data: &[u16],
     channels: usize,
@@ -738,7 +713,6 @@ fn push_mono_i16_from_u16(
     }
 }
 
-#[cfg(any(target_os = "ios", target_os = "android"))]
 fn push_mono_i16_from_f32(
     data: &[f32],
     channels: usize,
@@ -752,13 +726,11 @@ fn push_mono_i16_from_f32(
     }
 }
 
-#[cfg(any(target_os = "ios", target_os = "android"))]
 fn pop_playback_sample(queue: &Arc<Mutex<std::collections::VecDeque<i16>>>) -> i16 {
     let mut q = queue.lock().expect("playback queue lock poisoned");
     q.pop_front().unwrap_or(0)
 }
 
-#[cfg(any(target_os = "ios", target_os = "android"))]
 fn pop_playback_to_i16(
     data: &mut [i16],
     channels: usize,
@@ -772,7 +744,6 @@ fn pop_playback_to_i16(
     }
 }
 
-#[cfg(any(target_os = "ios", target_os = "android"))]
 fn pop_playback_to_u16(
     data: &mut [u16],
     channels: usize,
@@ -787,7 +758,6 @@ fn pop_playback_to_u16(
     }
 }
 
-#[cfg(any(target_os = "ios", target_os = "android"))]
 fn pop_playback_to_f32(
     data: &mut [f32],
     channels: usize,

@@ -37,6 +37,7 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "registry"] }
 uniffi = "0.31.0"
 uuid = { version = "1", features = ["v4"] }
+cpal = "0.16"
 
 [target.'cfg(not(target_os = "android"))'.dependencies]
 # SQLCipher without vendored OpenSSL. Apple targets use CommonCrypto; desktop targets can use
@@ -51,7 +52,6 @@ android-native-keyring-store = "0.5.0"
 jni = "0.21"
 ndk-context = "0.1.1"
 paranoid-android = "0.2"
-cpal = "0.16"
 
 [dev-dependencies]
 futures-util = "0.3"
@@ -60,5 +60,4 @@ tokio-tungstenite = "0.27"
 
 [target.'cfg(target_os = "ios")'.dependencies]
 apple-native-keyring-store = { version = "0.2.2", features = ["protected"] }
-cpal = "0.16"
 tracing-oslog = "0.3"
