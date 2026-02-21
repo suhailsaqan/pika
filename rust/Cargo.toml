@@ -23,6 +23,7 @@ mdk-sqlite-storage = { workspace = true }
 mdk-storage-traits = { workspace = true }
 keyring-core = "0.7"
 nostr-sdk = { version = "0.44.1", features = ["nip59"] }
+nostr-connect = "0.44.0"
 nostr-blossom = "0.44.0"
 pika-media = { path = "../crates/pika-media", features = ["network"] }
 pika-tls = { path = "../crates/pika-tls" }
@@ -55,6 +56,7 @@ paranoid-android = "0.2"
 
 [dev-dependencies]
 futures-util = "0.3"
+nostr-connect = "0.44.0"
 tempfile = "3"
 tokio-tungstenite = "0.27"
 

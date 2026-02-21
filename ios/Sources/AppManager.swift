@@ -9,13 +9,91 @@ protocol AppCore: AnyObject, Sendable {
 
 extension FfiApp: AppCore {}
 
-protocol NsecStore: AnyObject {
-    func getNsec() -> String?
-    func setNsec(_ nsec: String)
-    func clearNsec()
+enum StoredAuthMode: Equatable {
+    case localNsec
+    case bunker
 }
 
-extension KeychainNsecStore: NsecStore {}
+struct StoredAuth: Equatable {
+    let mode: StoredAuthMode
+    let nsec: String?
+    let bunkerUri: String?
+    let bunkerClientNsec: String?
+}
+
+protocol AuthStore: AnyObject {
+    func load() -> StoredAuth?
+    func saveLocalNsec(_ nsec: String)
+    func saveBunker(bunkerUri: String, bunkerClientNsec: String)
+    func clear()
+    func getNsec() -> String?
+}
+
+final class KeychainAuthStore: AuthStore {
+    private let localNsecStore = KeychainNsecStore(account: "nsec")
+    private let bunkerClientNsecStore = KeychainNsecStore(account: "bunker_client_nsec")
+    private let defaults = UserDefaults.standard
+    private let modeKey = "pika.auth.mode"
+    private let bunkerUriKey = "pika.auth.bunker_uri"
+
+    func load() -> StoredAuth? {
+        guard let modeRaw = defaults.string(forKey: modeKey) else {
+            if let nsec = localNsecStore.getNsec(), !nsec.isEmpty {
+                return StoredAuth(mode: .localNsec, nsec: nsec, bunkerUri: nil, bunkerClientNsec: nil)
+            }
+            return nil
+        }
+
+        switch modeRaw {
+        case "local_nsec":
+            guard let nsec = localNsecStore.getNsec(), !nsec.isEmpty else { return nil }
+            return StoredAuth(mode: .localNsec, nsec: nsec, bunkerUri: nil, bunkerClientNsec: nil)
+        case "bunker":
+            let bunkerUri = defaults.string(forKey: bunkerUriKey)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            let clientNsec = bunkerClientNsecStore.getNsec()?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            guard !bunkerUri.isEmpty, !clientNsec.isEmpty else { return nil }
+            return StoredAuth(
+                mode: .bunker,
+                nsec: nil,
+                bunkerUri: bunkerUri,
+                bunkerClientNsec: clientNsec
+            )
+        default:
+            return nil
+        }
+    }
+
+    func saveLocalNsec(_ nsec: String) {
+        let trimmed = nsec.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        localNsecStore.setNsec(trimmed)
+        bunkerClientNsecStore.clearNsec()
+        defaults.removeObject(forKey: bunkerUriKey)
+        defaults.set("local_nsec", forKey: modeKey)
+    }
+
+    func saveBunker(bunkerUri: String, bunkerClientNsec: String) {
+        let uri = bunkerUri.trimmingCharacters(in: .whitespacesAndNewlines)
+        let nsec = bunkerClientNsec.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !uri.isEmpty, !nsec.isEmpty else { return }
+        bunkerClientNsecStore.setNsec(nsec)
+        localNsecStore.clearNsec()
+        defaults.set(uri, forKey: bunkerUriKey)
+        defaults.set("bunker", forKey: modeKey)
+    }
+
+    func clear() {
+        localNsecStore.clearNsec()
+        bunkerClientNsecStore.clearNsec()
+        defaults.removeObject(forKey: modeKey)
+        defaults.removeObject(forKey: bunkerUriKey)
+    }
+
+    func getNsec() -> String? {
+        guard let stored = load(), stored.mode == .localNsec else { return nil }
+        return stored.nsec
+    }
+}
 
 @MainActor
 @Observable
@@ -73,7 +151,7 @@ final class AppManager: AppReconciler {
         let env = ProcessInfo.processInfo.environment
         let uiTestReset = env["PIKA_UI_TEST_RESET"] == "1"
         if uiTestReset {
-            nsecStore.clearNsec()
+            authStore.clear()
             try? fm.removeItem(at: dataDirUrl)
         }
         try? fm.createDirectory(at: dataDirUrl, withIntermediateDirectories: true)
@@ -112,9 +190,13 @@ final class AppManager: AppReconciler {
         // Side-effect updates must not be lost: `AccountCreated` carries an `nsec` that isn't in
         // AppState snapshots (by design). Store it even if the update is stale w.r.t. rev.
         if case .accountCreated(_, let nsec, _, _) = update {
-            let existing = nsecStore.getNsec() ?? ""
+            let existing = authStore.load()?.nsec ?? ""
             if existing.isEmpty && !nsec.isEmpty {
-                nsecStore.setNsec(nsec)
+                authStore.saveLocalNsec(nsec)
+            }
+        } else if case .bunkerSessionDescriptor(_, let bunkerUri, let clientNsec) = update {
+            if !bunkerUri.isEmpty, !clientNsec.isEmpty {
+                authStore.saveBunker(bunkerUri: bunkerUri, bunkerClientNsec: clientNsec)
             }
         }
 
@@ -136,11 +218,19 @@ final class AppManager: AppReconciler {
         case .accountCreated(_, let nsec, _, _):
             // Required by spec-v2: native stores nsec; Rust never persists it.
             if !nsec.isEmpty {
-                nsecStore.setNsec(nsec)
+                authStore.saveLocalNsec(nsec)
+            }
+            state.rev = updateRev
+            callAudioSession.apply(activeCall: state.activeCall)
+        case .bunkerSessionDescriptor(_, let bunkerUri, let clientNsec):
+            if !bunkerUri.isEmpty, !clientNsec.isEmpty {
+                authStore.saveBunker(bunkerUri: bunkerUri, bunkerClientNsec: clientNsec)
             }
             state.rev = updateRev
             callAudioSession.apply(activeCall: state.activeCall)
         }
+
+        syncAuthStoreWithAuthState()
     }
 
     func dispatch(_ action: AppAction) {
@@ -149,14 +239,26 @@ final class AppManager: AppReconciler {
 
     func login(nsec: String) {
         if !nsec.isEmpty {
-            nsecStore.setNsec(nsec)
+            authStore.saveLocalNsec(nsec)
         }
         dispatch(.login(nsec: nsec))
         PushNotificationManager.shared.requestPermissionAndRegister()
     }
 
+    func loginWithBunker(bunkerUri: String) {
+        dispatch(.beginBunkerLogin(bunkerUri: bunkerUri))
+    }
+
+    func loginWithNostrConnect() {
+        dispatch(.beginNostrConnectLogin)
+    }
+
+    func resetNostrConnectPairing() {
+        dispatch(.resetNostrConnectPairing)
+    }
+
     func logout() {
-        nsecStore.clearNsec()
+        authStore.clear()
         dispatch(.logout)
     }
 
@@ -176,8 +278,17 @@ final class AppManager: AppReconciler {
     }
 
     func onForeground() {
-        // Foreground is a lifecycle action; Rust owns state changes and side effects.
+        NSLog("[PikaAppManager] onForeground dispatching Foregrounded")
         dispatch(.foregrounded)
+    }
+
+    func onOpenURL(_ url: URL) {
+        guard isExpectedNostrConnectCallback(url) else {
+            NSLog("[PikaAppManager] onOpenURL ignored unexpected URL: \(url.absoluteString)")
+            return
+        }
+        NSLog("[PikaAppManager] onOpenURL dispatching NostrConnectCallback: \(url.absoluteString)")
+        dispatch(.nostrConnectCallback(url: url.absoluteString))
     }
 
     func refreshMyProfile() {
@@ -199,7 +310,7 @@ final class AppManager: AppReconciler {
     }
 
     func getNsec() -> String? {
-        nsecStore.getNsec()
+        authStore.getNsec()
     }
 
     /// Moves existing data from the old app-private Application Support directory
@@ -251,6 +362,34 @@ final class AppManager: AppReconciler {
             fm.createFile(atPath: sentinel.path, contents: nil)
         }
     }
+
+    private func syncAuthStoreWithAuthState() {
+        guard case .loggedIn(_, _, let mode) = state.auth else { return }
+
+        switch mode {
+        case .localNsec:
+            if authStore.load()?.mode != .localNsec {
+                authStore.clear()
+            }
+        case .bunkerSigner(let bunkerUri):
+            let clientNsec = authStore.load()?.bunkerClientNsec ?? ""
+            if !clientNsec.isEmpty {
+                authStore.saveBunker(bunkerUri: bunkerUri, bunkerClientNsec: clientNsec)
+            }
+        case .externalSigner:
+            break
+        }
+    }
+
+    private func isExpectedNostrConnectCallback(_ url: URL) -> Bool {
+        guard url.host?.lowercased() == "nostrconnect-return" else { return false }
+        guard let scheme = url.scheme?.lowercased() else { return false }
+        let expectedScheme =
+            IOSExternalSignerBridge
+                .callbackScheme(forBundleIdentifier: Bundle.main.bundleIdentifier)
+                .lowercased()
+        return scheme == expectedScheme
+    }
 }
 
 private extension AppUpdate {
@@ -258,6 +397,7 @@ private extension AppUpdate {
         switch self {
         case .fullState(let s): return s.rev
         case .accountCreated(let rev, _, _, _): return rev
+        case .bunkerSessionDescriptor(let rev, _, _): return rev
         }
     }
 }
@@ -313,6 +453,12 @@ private func ensureDefaultConfig(
     let resolvedCallBroadcastPrefix = callBroadcastPrefix.isEmpty ? defaultBroadcastPrefix : callBroadcastPrefix
     if isMissingOrBlank("call_broadcast_prefix") {
         obj["call_broadcast_prefix"] = resolvedCallBroadcastPrefix
+        changed = true
+    }
+    // Default external signer support to enabled, matching Android behavior.
+    // If tooling or a user config sets an explicit value, keep it.
+    if obj["enable_external_signer"] == nil {
+        obj["enable_external_signer"] = true
         changed = true
     }
 

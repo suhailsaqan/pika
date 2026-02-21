@@ -5,6 +5,10 @@ enum TestIds {
     static let loginCreateAccount = "login_create_account"
     static let loginNsecInput = "login_nsec_input"
     static let loginSubmit = "login_submit"
+    static let loginBunkerUriInput = "login_bunker_uri_input"
+    static let loginBunkerSubmit = "login_bunker_submit"
+    static let loginNostrConnectSubmit = "login_nostr_connect_submit"
+    static let loginNostrConnectReset = "login_nostr_connect_reset"
 
     // Chat list
     static let chatListLogout = "chatlist_logout"

@@ -14,6 +14,11 @@ pub enum AppUpdate {
         pubkey: String,
         npub: String,
     },
+    BunkerSessionDescriptor {
+        rev: u64,
+        bunker_uri: String,
+        client_nsec: String,
+    },
 }
 
 impl AppUpdate {
@@ -21,6 +26,7 @@ impl AppUpdate {
         match self {
             AppUpdate::FullState(s) => s.rev,
             AppUpdate::AccountCreated { rev, .. } => *rev,
+            AppUpdate::BunkerSessionDescriptor { rev, .. } => *rev,
         }
     }
 }
@@ -109,6 +115,16 @@ pub enum InternalEvent {
     MyProfileError {
         message: String,
         toast: bool,
+    },
+
+    // Async NIP-46 client-initiated login response became available.
+    NostrConnectConnectResponseReady,
+    NostrConnectTimeout {
+        attempt_id: u64,
+    },
+    // Rust integration-test hook: inject a validated connect response without relays.
+    NostrConnectInjectConnectResponseForTests {
+        remote_signer_pubkey: String,
     },
 
     // Follow list (NIP-02 kind 3)

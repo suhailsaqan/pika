@@ -445,7 +445,7 @@ fn alice_sends_bob_receives_over_local_relay() {
     });
 
     let (bob_npub, bob_pubkey_hex) = match bob.state().auth {
-        AuthState::LoggedIn { npub, pubkey } => (npub, pubkey),
+        AuthState::LoggedIn { npub, pubkey, .. } => (npub, pubkey),
         _ => unreachable!(),
     };
 
@@ -1238,7 +1238,7 @@ fn duplicate_group_message_does_not_duplicate_in_ui() {
     });
 
     let (bob_npub, bob_pubkey_hex) = match bob.state().auth {
-        AuthState::LoggedIn { npub, pubkey } => (npub, pubkey),
+        AuthState::LoggedIn { npub, pubkey, .. } => (npub, pubkey),
         _ => unreachable!(),
     };
     let bob_pubkey = PublicKey::parse(&bob_pubkey_hex).expect("pubkey parse");

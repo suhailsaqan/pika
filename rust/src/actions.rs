@@ -7,8 +7,25 @@ pub enum AppAction {
     Login {
         nsec: String,
     },
+    BeginExternalSignerLogin {
+        current_user_hint: Option<String>,
+    },
+    BeginBunkerLogin {
+        bunker_uri: String,
+    },
+    BeginNostrConnectLogin,
+    ResetNostrConnectPairing,
     RestoreSession {
         nsec: String,
+    },
+    RestoreSessionExternalSigner {
+        pubkey: String,
+        signer_package: String,
+        current_user: String,
+    },
+    RestoreSessionBunker {
+        bunker_uri: String,
+        client_nsec: String,
     },
     Logout,
     WipeLocalData,
@@ -103,6 +120,9 @@ pub enum AppAction {
 
     // Lifecycle
     Foregrounded,
+    NostrConnectCallback {
+        url: String,
+    },
     ReloadConfig,
 
     // Peer profile
@@ -134,7 +154,13 @@ impl AppAction {
             // Auth
             AppAction::CreateAccount => "CreateAccount",
             AppAction::Login { .. } => "Login",
+            AppAction::BeginExternalSignerLogin { .. } => "BeginExternalSignerLogin",
+            AppAction::BeginBunkerLogin { .. } => "BeginBunkerLogin",
+            AppAction::BeginNostrConnectLogin => "BeginNostrConnectLogin",
+            AppAction::ResetNostrConnectPairing => "ResetNostrConnectPairing",
             AppAction::RestoreSession { .. } => "RestoreSession",
+            AppAction::RestoreSessionExternalSigner { .. } => "RestoreSessionExternalSigner",
+            AppAction::RestoreSessionBunker { .. } => "RestoreSessionBunker",
             AppAction::Logout => "Logout",
             AppAction::WipeLocalData => "WipeLocalData",
             AppAction::RefreshMyProfile => "RefreshMyProfile",
@@ -174,6 +200,7 @@ impl AppAction {
 
             // Lifecycle
             AppAction::Foregrounded => "Foregrounded",
+            AppAction::NostrConnectCallback { .. } => "NostrConnectCallback",
             AppAction::ReloadConfig => "ReloadConfig",
 
             // Peer profile

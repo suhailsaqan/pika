@@ -36,6 +36,7 @@ fi
 
 IOS_BUNDLE_ID="${PIKA_IOS_BUNDLE_ID:-org.pikachat.pika}"
 IOS_TEAM_ID="${PIKA_IOS_DEVELOPMENT_TEAM:-}"
+IOS_URL_SCHEME="${PIKA_IOS_URL_SCHEME:-}"
 MODE="sim"
 CONSOLE="${PIKA_IOS_CONSOLE:-0}"
 RELEASE=0
@@ -50,6 +51,7 @@ usage: ./tools/run-ios [--sim|--device] [--release] [--console] [--udid <udid>] 
 
 Env:
   PIKA_IOS_BUNDLE_ID        (default: $IOS_BUNDLE_ID)
+  PIKA_IOS_URL_SCHEME       (default: derived from bundle id: pika|pika-dev|pika-test)
   PIKA_IOS_DEVELOPMENT_TEAM (required for --device; put it in .env to avoid typing)
   PIKA_IOS_DEVICE_UDID      (optional, for --device)
   PIKA_IOS_SIM_UDID         (optional, for --sim)
@@ -57,7 +59,21 @@ Env:
   PIKA_IOS_CONSOLE=1        default to --console
   PIKA_RUST_PROFILE         debug|release (default for run-ios: debug)
   PIKA_NO_RELAY_OVERRIDE=1  disable dev-friendly relay defaults
+  PIKA_IOS_DEVICE_ALLOW_LOCAL_OVERRIDES=1  allow localhost relay/MoQ overrides on physical devices
 EOF
+}
+
+callback_scheme_for_bundle_id() {
+  local bundle_id="$1"
+  if [[ "$bundle_id" == *.dev ]]; then
+    echo "pika-dev"
+    return 0
+  fi
+  if [[ "$bundle_id" == *.pikatest ]]; then
+    echo "pika-test"
+    return 0
+  fi
+  echo "pika"
 }
 
 list_connected_iphones() {
@@ -118,6 +134,9 @@ if [ "$RELEASE" = "1" ]; then
 else
   export PIKA_RUST_PROFILE="${PIKA_RUST_PROFILE:-debug}"
 fi
+if [ -z "${IOS_URL_SCHEME:-}" ]; then
+  IOS_URL_SCHEME="$(callback_scheme_for_bundle_id "$IOS_BUNDLE_ID")"
+fi
 echo "rust profile: $PIKA_RUST_PROFILE"
 
 default_relays() {
@@ -138,6 +157,25 @@ effective_kp_relays() {
   local kp_relays="${PIKA_KEY_PACKAGE_RELAY_URLS:-${PIKA_KP_RELAY_URLS:-}}"
   if [ -z "${kp_relays:-}" ]; then kp_relays="$(default_kp_relays)"; fi
   echo "$kp_relays"
+}
+
+contains_localhost_list() {
+  local raw="$1"
+  local item lower
+  IFS=',' read -r -a __items <<<"$raw"
+  for item in "${__items[@]}"; do
+    lower="$(echo "$item" | tr '[:upper:]' '[:lower:]')"
+    if [[ "$lower" == *"127.0.0.1"* || "$lower" == *"localhost"* || "$lower" == *"[::1]"* || "$lower" == *"://::1"* || "$lower" == "::1" ]]; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+is_localhost_url() {
+  local lower
+  lower="$(echo "$1" | tr '[:upper:]' '[:lower:]')"
+  [[ "$lower" == *"127.0.0.1"* || "$lower" == *"localhost"* || "$lower" == *"[::1]"* || "$lower" == *"://::1"* || "$lower" == "::1" ]]
 }
 
 env_json_for_device() {
@@ -341,6 +379,7 @@ if [ -z "${PIKA_IOS_RUST_TARGETS:-}" ]; then
     export PIKA_IOS_RUST_TARGETS="aarch64-apple-ios-sim"
   fi
 fi
+export PIKA_IOS_URL_SCHEME="$IOS_URL_SCHEME"
 
 just ios-build-sim
 

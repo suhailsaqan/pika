@@ -4,13 +4,28 @@ use super::*;
 
 impl AppCore {
     pub(super) fn start_session(&mut self, keys: Keys) -> anyhow::Result<()> {
+        let pubkey = keys.public_key();
+        self.start_session_with_signer(
+            pubkey,
+            Arc::new(keys.clone()),
+            Some(keys),
+            SessionAuthMode::LocalNsec,
+        )
+    }
+
+    pub(super) fn start_session_with_signer(
+        &mut self,
+        pubkey: PublicKey,
+        signer: Arc<dyn NostrSigner>,
+        local_keys: Option<Keys>,
+        auth_mode: SessionAuthMode,
+    ) -> anyhow::Result<()> {
         // Tear down any existing session first.
         self.stop_session();
 
         // Ensure profile pics directory exists (may have been cleared on logout).
         profile_pics::ensure_dir(&self.data_dir);
 
-        let pubkey = keys.public_key();
         let pubkey_hex = pubkey.to_hex();
         let npub = pubkey.to_bech32().unwrap_or(pubkey_hex.clone());
 
@@ -20,7 +35,7 @@ impl AppCore {
         let mdk = open_mdk(&self.data_dir, &pubkey, &self.keychain_group)?;
         tracing::info!("mdk opened");
 
-        let client = Client::new(keys.clone());
+        let client = Client::new(signer);
 
         if self.network_enabled() {
             let relays = self.all_session_relays();
@@ -36,7 +51,8 @@ impl AppCore {
         }
 
         let sess = Session {
-            keys: keys.clone(),
+            pubkey,
+            local_keys,
             mdk,
             client: client.clone(),
             alive: Arc::new(AtomicBool::new(true)),
@@ -50,6 +66,7 @@ impl AppCore {
         self.state.auth = AuthState::LoggedIn {
             npub,
             pubkey: pubkey_hex.clone(),
+            mode: auth_mode.to_state_mode(&pubkey_hex),
         };
 
         // Build own profile from cached data (already loaded from DB in AppCore::new).
@@ -90,7 +107,7 @@ impl AppCore {
         };
         match open_mdk(
             &self.data_dir,
-            &sess.keys.public_key(),
+            &sess.pubkey,
             &self.keychain_group,
         ) {
             Ok(new_mdk) => {
@@ -202,7 +219,7 @@ impl AppCore {
         };
         let (content, tags, _hash_ref) = match sess
             .mdk
-            .create_key_package_for_event(&sess.keys.public_key(), relays_for_tags)
+            .create_key_package_for_event(&sess.pubkey, relays_for_tags)
         {
             Ok(v) => v,
             Err(e) => {
@@ -217,17 +234,23 @@ impl AppCore {
             .filter(|t: &Tag| !matches!(t.kind(), TagKind::Protected))
             .collect();
         let builder = EventBuilder::new(Kind::MlsKeyPackage, content).tags(tags);
-        let event = match builder.sign_with_keys(&sess.keys) {
-            Ok(e) => e,
-            Err(e) => {
-                self.toast(format!("Key package sign failed: {e}"));
-                return;
-            }
-        };
 
         let client = sess.client.clone();
         let tx = self.core_sender.clone();
         self.runtime.spawn(async move {
+            let event = match client.sign_event_builder(builder).await {
+                Ok(e) => e,
+                Err(e) => {
+                    let _ = tx.send(CoreMsg::Internal(Box::new(
+                        InternalEvent::KeyPackagePublished {
+                            ok: false,
+                            error: Some(format!("key package sign failed: {e}")),
+                        },
+                    )));
+                    return;
+                }
+            };
+
             let relay_list: Vec<String> = publish_relays.iter().map(|r| r.to_string()).collect();
             if publish_relays.is_empty() {
                 let _ = tx.send(CoreMsg::Internal(Box::new(
@@ -318,14 +341,17 @@ impl AppCore {
 
         let tags: Vec<Tag> = kp_relays.iter().cloned().map(Tag::relay).collect();
 
-        let builder = EventBuilder::new(Kind::MlsKeyPackageRelays, "").tags(tags);
-        let event = match builder.sign_with_keys(&sess.keys) {
-            Ok(e) => e,
-            Err(_) => return,
-        };
-
         let client = sess.client.clone();
         self.runtime.spawn(async move {
+            let builder = EventBuilder::new(Kind::MlsKeyPackageRelays, "").tags(tags);
+            let event = match client.sign_event_builder(builder).await {
+                Ok(e) => e,
+                Err(e) => {
+                    tracing::warn!(%e, "key package relays sign failed");
+                    return;
+                }
+            };
+
             // Ensure general relays exist.
             for r in general_relays.iter().cloned() {
                 let _ = client.add_relay(r).await;
@@ -372,7 +398,7 @@ impl AppCore {
 
         let client = sess.client.clone();
         let tx = self.core_sender.clone();
-        let my_hex = sess.keys.public_key().to_hex();
+        let my_hex = sess.pubkey.to_hex();
         let prev_giftwrap_sub = sess.giftwrap_sub.clone();
         let prev_group_sub = sess.group_sub.clone();
         let h_values: Vec<String> = sess.groups.keys().cloned().collect();
@@ -494,7 +520,7 @@ impl AppCore {
             return;
         };
 
-        let my_pubkey = sess.keys.public_key();
+        let my_pubkey = sess.pubkey;
         let client = sess.client.clone();
         let tx = self.core_sender.clone();
         let existing_profiles = self.profiles.clone();
@@ -676,15 +702,11 @@ impl AppCore {
         };
 
         // Extract session fields before mutable borrow for optimistic update.
-        let (my_pubkey, client, keys) = {
+        let (my_pubkey, client) = {
             let Some(sess) = self.session.as_ref() else {
                 return;
             };
-            (
-                sess.keys.public_key(),
-                sess.client.clone(),
-                sess.keys.clone(),
-            )
+            (sess.pubkey, sess.client.clone())
         };
 
         // Optimistically update the peer_profile.is_followed flag.
@@ -776,9 +798,9 @@ impl AppCore {
                 );
             }
 
-            let event = match EventBuilder::new(Kind::ContactList, &content)
-                .tags(tags)
-                .sign_with_keys(&keys)
+            let event = match client
+                .sign_event_builder(EventBuilder::new(Kind::ContactList, &content).tags(tags))
+                .await
             {
                 Ok(ev) => ev,
                 Err(e) => {
@@ -820,14 +842,13 @@ impl AppCore {
             return;
         };
         let client = sess.client.clone();
-        let keys = sess.keys.clone();
         let relays = self.default_relays();
         self.runtime.spawn(async move {
             let req = EventDeletionRequest::new()
                 .id(id)
                 .reason("rotated key package");
-            if let Ok(ev) = EventBuilder::delete(req).sign_with_keys(&keys) {
-                let _ = client.send_event_to(relays, &ev).await;
+            if let Ok(ev) = client.sign_event_builder(EventBuilder::delete(req)).await {
+                let _ = client.send_event_to(&relays, &ev).await;
             }
         });
     }

@@ -27,11 +27,7 @@ impl AppCore {
             let Some(sess) = self.session.as_ref() else {
                 return;
             };
-            (
-                sess.client.clone(),
-                sess.keys.public_key(),
-                self.core_sender.clone(),
-            )
+            (sess.client.clone(), sess.pubkey, self.core_sender.clone())
         };
 
         self.runtime.spawn(async move {
@@ -134,15 +130,15 @@ impl AppCore {
         );
         let mime_type = Self::normalized_profile_field(mime_type);
 
-        let (client, keys, tx) = {
+        let (client, local_keys, tx) = {
             let Some(sess) = self.session.as_ref() else {
                 return;
             };
-            (
-                sess.client.clone(),
-                sess.keys.clone(),
-                self.core_sender.clone(),
-            )
+            let Some(local_keys) = sess.local_keys.clone() else {
+                self.toast("Profile image upload requires local key signer");
+                return;
+            };
+            (sess.client.clone(), local_keys, self.core_sender.clone())
         };
 
         self.runtime.spawn(async move {
@@ -159,7 +155,12 @@ impl AppCore {
 
                 let blossom = BlossomClient::new(base_url);
                 let upload = blossom
-                    .upload_blob(image_bytes.clone(), mime_type.clone(), None, Some(&keys))
+                    .upload_blob(
+                        image_bytes.clone(),
+                        mime_type.clone(),
+                        None,
+                        Some(&local_keys),
+                    )
                     .await;
 
                 let descriptor = match upload {
@@ -220,7 +221,7 @@ impl AppCore {
     pub(super) fn apply_my_profile_metadata(&mut self, metadata: Option<Metadata>) {
         // Serialize to JSON and upsert into the shared profile cache —
         // same storage and picture-caching path as every other profile.
-        if let Some(pk) = self.session.as_ref().map(|s| s.keys.public_key().to_hex()) {
+        if let Some(pk) = self.session.as_ref().map(|s| s.pubkey.to_hex()) {
             let metadata_json = metadata.and_then(|m| serde_json::to_string(&m).ok());
             self.upsert_profile(
                 pk,
@@ -241,7 +242,7 @@ impl AppCore {
 
     fn metadata_for_profile_edit(&self, name: String, about: String) -> Metadata {
         // Reconstruct Metadata from the stored JSON, preserving fields we don't edit.
-        let pk = self.session.as_ref().map(|s| s.keys.public_key().to_hex());
+        let pk = self.session.as_ref().map(|s| s.pubkey.to_hex());
         let mut metadata: Metadata = pk
             .and_then(|pk| {
                 // Try in-memory first (set by apply_my_profile_metadata), then fall back to DB.
@@ -263,7 +264,7 @@ impl AppCore {
 
     /// Build current MyProfileState from the shared profile cache.
     pub(super) fn my_profile_state(&self) -> MyProfileState {
-        let pk = self.session.as_ref().map(|s| s.keys.public_key().to_hex());
+        let pk = self.session.as_ref().map(|s| s.pubkey.to_hex());
         let cached = pk.as_ref().and_then(|pk| self.profiles.get(pk));
 
         MyProfileState {

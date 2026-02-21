@@ -21,7 +21,10 @@ struct ContentView: View {
                     LoginView(
                         state: loginState(from: appState),
                         onCreateAccount: { manager.dispatch(.createAccount) },
-                        onLogin: { manager.login(nsec: $0) }
+                        onLogin: { manager.login(nsec: $0) },
+                        onBunkerLogin: { manager.loginWithBunker(bunkerUri: $0) },
+                        onNostrConnectLogin: { manager.loginWithNostrConnect() },
+                        onResetNostrConnectPairing: { manager.resetNostrConnectPairing() }
                     )
                 default:
                     NavigationStack(path: $navPath) {
@@ -174,7 +177,10 @@ private func screenView(
         LoginView(
             state: loginState(from: state),
             onCreateAccount: { manager.dispatch(.createAccount) },
-            onLogin: { manager.login(nsec: $0) }
+            onLogin: { manager.login(nsec: $0) },
+            onBunkerLogin: { manager.loginWithBunker(bunkerUri: $0) },
+            onNostrConnectLogin: { manager.loginWithNostrConnect() },
+            onResetNostrConnectPairing: { manager.resetNostrConnectPairing() }
         )
     case .chatList:
         ChatListView(
@@ -358,7 +364,7 @@ private func clearDeliveredNotifications(forChatId chatId: String) {
 @MainActor
 private func myNpub(from state: AppState) -> String? {
     switch state.auth {
-    case .loggedIn(let npub, _):
+    case .loggedIn(let npub, _, _):
         return npub
     default:
         return nil

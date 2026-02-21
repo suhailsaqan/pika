@@ -1,6 +1,48 @@
 import XCTest
 
 final class PikaUITests: XCTestCase {
+    private func dismissSystemOpenAppAlertIfPresent(timeout: TimeInterval = 5) {
+        let app = XCUIApplication()
+        let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+        let deadline = Date().addingTimeInterval(timeout)
+
+        while Date() < deadline {
+            let appAlert = app.alerts.firstMatch
+            if appAlert.exists {
+                let cancel = appAlert.buttons["Cancel"]
+                if cancel.exists {
+                    cancel.tap()
+                    return
+                }
+                let open = appAlert.buttons["Open"]
+                if open.exists {
+                    open.tap()
+                    return
+                }
+                appAlert.buttons.element(boundBy: 0).tap()
+                return
+            }
+
+            let sbAlert = springboard.alerts.firstMatch
+            if sbAlert.exists {
+                let cancel = sbAlert.buttons["Cancel"]
+                if cancel.exists {
+                    cancel.tap()
+                    return
+                }
+                let open = sbAlert.buttons["Open"]
+                if open.exists {
+                    open.tap()
+                    return
+                }
+                sbAlert.buttons.element(boundBy: 0).tap()
+                return
+            }
+
+            Thread.sleep(forTimeInterval: 0.1)
+        }
+    }
+
     /// Dismiss the non-blocking toast overlay if present. Returns the toast message, or nil.
     private func dismissPikaToastIfPresent(_ app: XCUIApplication, timeout: TimeInterval = 0.5) -> String? {
         // New: non-blocking overlay with accessibility identifier.
@@ -432,5 +474,21 @@ final class PikaUITests: XCTestCase {
 
         // Expect deterministic ack from the bot.
         XCTAssertTrue(app.staticTexts[expect].waitForExistence(timeout: 180))
+    }
+
+    func testInterop_nostrConnectLaunchesPrimal() throws {
+        let app = XCUIApplication()
+        app.launchEnvironment["PIKA_UI_TEST_RESET"] = "1"
+        app.launchEnvironment["PIKA_DISABLE_NETWORK"] = "1"
+        app.launchEnvironment["PIKA_ENABLE_EXTERNAL_SIGNER"] = "1"
+        app.launchEnvironment["PIKA_UI_TEST_CAPTURE_OPEN_URL"] = "1"
+        app.launch()
+
+        let nostrConnectButton = app.buttons.matching(identifier: "login_nostr_connect_submit").firstMatch
+        XCTAssertTrue(nostrConnectButton.waitForExistence(timeout: 10), "Missing Nostr Connect login button")
+        nostrConnectButton.tap()
+        dismissSystemOpenAppAlertIfPresent()
+        // Let async bridge callbacks run; harness verifies URL emission via marker file.
+        Thread.sleep(forTimeInterval: 2.0)
     }
 }
