@@ -293,6 +293,7 @@ struct ChatView: View {
                         .id(bottomAnchorId)
                     }
                 }
+                .scrollDismissesKeyboard(.interactively)
                 .coordinateSpace(name: "chatScroll")
                 .defaultScrollAnchor(.bottom)
                 .simultaneousGesture(
