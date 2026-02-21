@@ -209,6 +209,7 @@ clippy *ARGS:
 pre-merge-pika: fmt
   just clippy --lib --tests
   just test --lib --tests
+  cd android && ./gradlew :app:compileDebugAndroidTestKotlin
   cargo build -p pika-cli
   actionlint
   npx --yes @justinmoon/agent-tools check-docs

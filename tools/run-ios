@@ -137,6 +137,7 @@ fi
 if [ -z "${IOS_URL_SCHEME:-}" ]; then
   IOS_URL_SCHEME="$(callback_scheme_for_bundle_id "$IOS_BUNDLE_ID")"
 fi
+export PIKA_IOS_URL_SCHEME="$IOS_URL_SCHEME"
 echo "rust profile: $PIKA_RUST_PROFILE"
 
 default_relays() {
@@ -244,6 +245,7 @@ if [ "$MODE" = "device" ]; then
   signing_settings+=("CODE_SIGN_STYLE=Automatic")
   signing_settings+=("PIKA_APP_BUNDLE_ID=$IOS_BUNDLE_ID")
   signing_settings+=("PIKA_APP_GROUP=group.$IOS_BUNDLE_ID")
+  signing_settings+=("PIKA_IOS_URL_SCHEME=$IOS_URL_SCHEME")
 
   ./tools/xcode-run xcodebuild \
     -project ios/Pika.xcodeproj \
@@ -379,7 +381,6 @@ if [ -z "${PIKA_IOS_RUST_TARGETS:-}" ]; then
     export PIKA_IOS_RUST_TARGETS="aarch64-apple-ios-sim"
   fi
 fi
-export PIKA_IOS_URL_SCHEME="$IOS_URL_SCHEME"
 
 just ios-build-sim
 

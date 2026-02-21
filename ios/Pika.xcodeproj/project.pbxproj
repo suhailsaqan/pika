@@ -28,6 +28,7 @@
 		817D08E342C132B5784F1ED1 /* CallAudioSessionCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11B93B14504401A3B6D1FE8E /* CallAudioSessionCoordinator.swift */; };
 		826E8A8DEDFDBA10B3DCA5D9 /* pika_nse.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CD610A90B71BBE734EBA0D6 /* pika_nse.swift */; };
 		8687FD10BB9DB24BFD531D08 /* NotificationSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C57F7ACD9AF03FF582FBFD60 /* NotificationSettingsView.swift */; };
+		8884690DABBC3DEE5872A18F /* IOSExternalSignerBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = F135592F5ADF92FE23955DC0 /* IOSExternalSignerBridge.swift */; };
 		8DE9696EA83BB0459D17C997 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 48C80C272FFE8C28F8E0A54E /* Assets.xcassets */; };
 		927360D488AFFAD2428C2CC4 /* ActiveCallPill.swift in Sources */ = {isa = PBXBuildFile; fileRef = BFE2330561174298DC7FCBA4 /* ActiveCallPill.swift */; };
 		940959C521A572B47CCDC852 /* PreviewData.swift in Sources */ = {isa = PBXBuildFile; fileRef = B3996F560F68B8003EFD45AC /* PreviewData.swift */; };
@@ -639,6 +640,7 @@
 				ONLY_ACTIVE_ARCH = YES;
 				PIKA_APP_BUNDLE_ID = org.pikachat.pika;
 				PIKA_APP_GROUP = "group.$(PIKA_APP_BUNDLE_ID)";
+				PIKA_IOS_URL_SCHEME = pika;
 				PRODUCT_BUNDLE_IDENTIFIER = "$(PIKA_APP_BUNDLE_ID)";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
@@ -793,6 +795,7 @@
 				MTL_FAST_MATH = YES;
 				PIKA_APP_BUNDLE_ID = org.pikachat.pika;
 				PIKA_APP_GROUP = "group.$(PIKA_APP_BUNDLE_ID)";
+				PIKA_IOS_URL_SCHEME = pika;
 				PRODUCT_BUNDLE_IDENTIFIER = "$(PIKA_APP_BUNDLE_ID)";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;

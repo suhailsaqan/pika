@@ -3,8 +3,8 @@ package com.pika.app
 import android.content.ClipboardManager
 import android.content.Context
 import android.util.Log
+import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertIsDisplayed
-import androidx.compose.ui.test.assertExists
 import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
@@ -70,7 +70,7 @@ class PikaUiTest {
         runOnMain { AppManager.getInstance(ctx).logout() }
 
         compose.onNodeWithTag(TestTags.LOGIN_NSEC)
-            .assertExists()
+            .assertIsDisplayed()
             .assert(SemanticsMatcher.keyIsDefined(SemanticsProperties.Password))
     }
 

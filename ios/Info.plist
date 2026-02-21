@@ -29,7 +29,7 @@
 			<string>com.justinmoon.pika</string>
 			<key>CFBundleURLSchemes</key>
 			<array>
-				<string>$(PIKA_URL_SCHEME)</string>
+				<string>$(PIKA_IOS_URL_SCHEME)</string>
 			</array>
 		</dict>
 	</array>
