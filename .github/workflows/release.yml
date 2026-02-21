@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Version to release (e.g. 0.2.9)"
+        description: "Version to release (e.g. 0.2.9) — must already be bumped on master"
         required: true
         type: string
 
@@ -32,57 +32,49 @@ jobs:
           esac
       - run: echo "release approved"
 
-  bump-and-tag:
+  tag-release:
     if: github.event_name == 'workflow_dispatch'
     needs: approve-release
     runs-on: ubuntu-latest
     outputs:
       tag: ${{ steps.tag.outputs.tag }}
-      version: ${{ steps.tag.outputs.version }}
     steps:
       - uses: actions/checkout@v4
         with:
           ref: master
-          fetch-depth: 0
 
-      - name: Validate version input
-        run: |
-          set -euo pipefail
-          version="${{ inputs.version }}"
-          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "error: version must be x.y.z (got: $version)"
-            exit 1
-          fi
-          tag="pika/v${version}"
-          if git rev-parse -q --verify "refs/tags/$tag" >/dev/null 2>&1; then
-            echo "error: tag already exists: $tag"
-            exit 1
-          fi
-
-      - name: Bump VERSION file
-        run: |
-          set -euo pipefail
-          echo -n "${{ inputs.version }}" > VERSION
-
-      - name: Commit, tag, and push
+      - name: Validate and tag
         id: tag
         run: |
           set -euo pipefail
           version="${{ inputs.version }}"
           tag="pika/v${version}"
 
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add VERSION
-          git commit -m "release: pika v${version}"
+          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "error: version must be x.y.z (got: $version)"
+            exit 1
+          fi
+
+          # Verify the VERSION file already has the right version
+          current_version="$(./scripts/version-read --name)"
+          if [ "$current_version" != "$version" ]; then
+            echo "error: VERSION file says $current_version but expected $version"
+            echo "hint: bump VERSION first via PR, then run this workflow"
+            exit 1
+          fi
+
+          if git rev-parse -q --verify "refs/tags/$tag" >/dev/null 2>&1; then
+            echo "error: tag already exists: $tag"
+            exit 1
+          fi
+
           git tag "$tag"
-          git push origin master "$tag"
+          git push origin "$tag"
 
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
-          echo "version=$version" >> "$GITHUB_OUTPUT"
 
   resolve-tag:
-    needs: [approve-release, bump-and-tag]
+    needs: [approve-release, tag-release]
     if: always() && needs.approve-release.result == 'success'
     runs-on: ubuntu-latest
     outputs:
@@ -92,7 +84,7 @@ jobs:
         id: resolve
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            echo "tag=${{ needs.bump-and-tag.outputs.tag }}" >> "$GITHUB_OUTPUT"
+            echo "tag=${{ needs.tag-release.outputs.tag }}" >> "$GITHUB_OUTPUT"
           else
             echo "tag=${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
           fi
