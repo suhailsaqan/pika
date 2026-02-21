@@ -27,6 +27,7 @@ pub fn main() -> iced::Result {
         .theme(dark_theme)
         .window_size(Size::new(1024.0, 720.0))
         .font(include_bytes!("../fonts/UbuntuSansMono.ttf").as_slice())
+        .font(include_bytes!("../fonts/NotoColorEmoji.ttf").as_slice())
         .default_font(Font::with_name("Ubuntu Sans Mono"))
         .run()
 }

@@ -1,9 +1,13 @@
 use iced::widget::{button, column, container, mouse_area, row, text, Space};
-use iced::{border, Background, Color, Element, Fill, Theme};
+use iced::{border, Background, Color, Element, Fill, Font, Theme};
 use pika_core::{ChatMessage, MessageDeliveryState};
 
 use crate::theme;
 use crate::Message;
+
+/// Font used for emoji rendering. Falls back through system fonts (Noto Color
+/// Emoji on Linux, Apple Color Emoji on macOS, Segoe UI Emoji on Windows).
+const EMOJI_FONT: Font = Font::with_name("Noto Color Emoji");
 
 /// Common emoji choices for the quick picker.
 const EMOJI_CHOICES: &[&str] = &[
@@ -149,12 +153,8 @@ fn message_action_icons<'a>(
 ) -> Element<'a, Message, Theme> {
     let mid = msg_id.to_string();
 
-    // React icon: smiley → ✕ when picker is open
-    let icon = if picker_open {
-        "\u{2715}" // ✕
-    } else {
-        "\u{263A}" // ☺
-    };
+    // React icon: ✕ when picker is open, + otherwise
+    let icon = if picker_open { "\u{2715}" } else { "+" };
 
     let react_btn = button(text(icon).size(14).center())
         .padding([4, 4])
@@ -199,7 +199,7 @@ fn reaction_chips_row<'a>(
         let mid = msg_id.to_string();
         let reacted = reaction.reacted_by_me;
 
-        let chip = button(text(label).size(13).center())
+        let chip = button(text(label).size(13).font(EMOJI_FONT).center())
             .padding([2, 6])
             .on_press(Message::ReactToMessage {
                 message_id: mid,
@@ -220,7 +220,7 @@ fn emoji_picker_bar<'a>(msg_id: &str) -> Element<'a, Message, Theme> {
     for &emoji in EMOJI_CHOICES {
         let mid = msg_id.to_string();
         let e = emoji.to_string();
-        let emoji_btn = button(text(emoji).size(18).center())
+        let emoji_btn = button(text(emoji).size(18).font(EMOJI_FONT).center())
             .padding([4, 6])
             .on_press(Message::ReactToMessage {
                 message_id: mid,
