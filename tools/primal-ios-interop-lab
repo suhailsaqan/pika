@@ -1,0 +1,485 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$ROOT"
+
+if [ "$(uname -s)" != "Darwin" ]; then
+  echo "error: tools/primal-ios-interop-lab requires macOS" >&2
+  exit 1
+fi
+
+STATE_ROOT="${PIKA_PRIMAL_LAB_STATE_DIR:-$HOME/.pika/primal-ios-lab}"
+LAB_DEVICE_NAME="${PIKA_PRIMAL_LAB_DEVICE_NAME:-Pika Primal Lab}"
+SEED_DEVICE_NAME="${PIKA_PRIMAL_LAB_SEED_NAME:-Pika Primal Lab Seed}"
+LAB_DEVICE_TYPE="${PIKA_PRIMAL_LAB_DEVICE_TYPE:-com.apple.CoreSimulator.SimDeviceType.iPhone-16-Pro}"
+PRIMAL_SRC_DIR="${PIKA_PRIMAL_SRC_DIR:-$HOME/code/primal-ios-app}"
+PRIMAL_BUNDLE_ID="${PIKA_PRIMAL_BUNDLE_ID:-net.primal.iosapp.Primal}"
+PIKA_BUNDLE_ID="${PIKA_IOS_BUNDLE_ID:-com.justinmoon.pika.dev}"
+HOLD="${PIKA_PRIMAL_LAB_HOLD:-1}"
+
+mkdir -p "$STATE_ROOT"
+
+need() {
+  if ! command -v "$1" >/dev/null 2>&1; then
+    echo "error: missing '$1' on PATH" >&2
+    exit 1
+  fi
+}
+
+need xcrun
+need python3
+need sed
+need cargo
+need nostr-rs-relay
+
+usage() {
+  cat >&2 <<EOF
+usage: tools/primal-ios-interop-lab <command>
+
+commands:
+  run            Build/install Primal+Pika on a dedicated simulator, start local relay+tap logs
+  patch-primal   Apply local debug logging patch to Primal signer connect flow
+  seed-capture   Clone current lab simulator into a reusable seed simulator
+  seed-reset     Recreate lab simulator from seed (stable pre-seeded state)
+  dump-debug     Print Pika nostr-connect debug snapshot path/content if available
+EOF
+}
+
+latest_ios_runtime_id() {
+  python3 - <<'PY'
+import json, subprocess, re
+data = json.loads(subprocess.check_output(["xcrun","simctl","list","runtimes","--json"], text=True))
+candidates = []
+for r in data.get("runtimes", []):
+    if not r.get("isAvailable", False):
+        continue
+    ident = r.get("identifier", "")
+    m = re.search(r"iOS-(\d+)-(\d+)$", ident)
+    if not m:
+        continue
+    major, minor = int(m.group(1)), int(m.group(2))
+    candidates.append((major, minor, ident))
+if not candidates:
+    raise SystemExit("error: no available iOS runtime found")
+candidates.sort()
+print(candidates[-1][2])
+PY
+}
+
+udids_for_device_name() {
+  local target_name="$1"
+  python3 - "$target_name" <<'PY'
+import json, subprocess, sys
+target = sys.argv[1]
+data = json.loads(subprocess.check_output(["xcrun","simctl","list","devices","--json"], text=True))
+for runtime, devices in data.get("devices", {}).items():
+    if "iOS" not in runtime:
+        continue
+    for d in devices:
+        if d.get("name") == target and d.get("isAvailable", False):
+            print(d["udid"])
+PY
+}
+
+first_udid_for_device_name() {
+  local target_name="$1"
+  udids_for_device_name "$target_name" | head -n 1
+}
+
+delete_devices_by_name() {
+  local target_name="$1"
+  local udid=""
+  while IFS= read -r udid; do
+    [ -z "$udid" ] && continue
+    xcrun simctl shutdown "$udid" >/dev/null 2>&1 || true
+    xcrun simctl delete "$udid" >/dev/null 2>&1 || true
+  done < <(udids_for_device_name "$target_name")
+}
+
+ensure_lab_udid() {
+  local udid=""
+  udid="$(first_udid_for_device_name "$LAB_DEVICE_NAME")"
+  if [ -n "$udid" ]; then
+    echo "$udid"
+    return
+  fi
+
+  local runtime
+  runtime="$(latest_ios_runtime_id)"
+  udid="$(xcrun simctl create "$LAB_DEVICE_NAME" "$LAB_DEVICE_TYPE" "$runtime" | tr -d '\r' | tail -n 1)"
+  if [ -z "$udid" ]; then
+    echo "error: failed to create simulator '$LAB_DEVICE_NAME'" >&2
+    exit 1
+  fi
+  echo "$udid"
+}
+
+boot_udid() {
+  local udid="$1"
+  xcrun simctl boot "$udid" >/dev/null 2>&1 || true
+  open -a Simulator >/dev/null 2>&1 || true
+}
+
+apply_primal_debug_patch() {
+  local repo="$1"
+  local file="$repo/Primal/Scenes/RemoteSigner/RemoteSignerSignInController.swift"
+  if [ ! -f "$file" ]; then
+    echo "error: expected file not found: $file" >&2
+    return 1
+  fi
+  if rg -n "\\[PikaPrimalDebug\\]" "$file" >/dev/null 2>&1; then
+    echo "primal debug patch already applied: $file"
+    return 0
+  fi
+
+  python3 - "$file" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+src = path.read_text(encoding="utf-8")
+old = """            dismiss(animated: true)
+            Task { @MainActor in
+                guard let connection = try await RemoteSignerManager.instance.initializeConnection(url: self.connection.absoluteString, userPubKey: pubkey, trustLevel: self.selectedTrust.trustLevel) else {
+                    return
+                }
+                
+                if #available(iOS 16.1, *), !RemoteSignerActivityManager.instance.isAudioAllowed {
+                    try await Task.sleep(for: .seconds(3) + .milliseconds(300))
+                    
+                    RootViewController.instance.smartPresent(RemoteSignerRootController(.custom(RemoteSignerDisclosureController(connection: connection) {
+                        if let callback, let deeplinkURL = URL(string: callback) {
+                            UIApplication.shared.open(deeplinkURL)
+                        }
+                    })))
+                } else {
+                    try await Task.sleep(for: .seconds(1))
+                    
+                    if let callback, let deeplinkURL = URL(string: callback) {
+                        await UIApplication.shared.open(deeplinkURL)
+                    }
+                }
+            }
+"""
+new = """            dismiss(animated: true)
+            Task { @MainActor in
+                print("[PikaPrimalDebug] initializeConnection begin url=\\(self.connection.absoluteString)")
+                do {
+                    guard let connection = try await RemoteSignerManager.instance.initializeConnection(url: self.connection.absoluteString, userPubKey: pubkey, trustLevel: self.selectedTrust.trustLevel) else {
+                        print("[PikaPrimalDebug] initializeConnection returned nil")
+                        return
+                    }
+                    print("[PikaPrimalDebug] initializeConnection succeeded")
+                    
+                    if #available(iOS 16.1, *), !RemoteSignerActivityManager.instance.isAudioAllowed {
+                        try await Task.sleep(for: .seconds(3) + .milliseconds(300))
+                        
+                        RootViewController.instance.smartPresent(RemoteSignerRootController(.custom(RemoteSignerDisclosureController(connection: connection) {
+                            if let callback, let deeplinkURL = URL(string: callback) {
+                                print("[PikaPrimalDebug] opening callback after disclosure: \\(callback)")
+                                UIApplication.shared.open(deeplinkURL)
+                            }
+                        })))
+                    } else {
+                        try await Task.sleep(for: .seconds(1))
+                        
+                        if let callback, let deeplinkURL = URL(string: callback) {
+                            print("[PikaPrimalDebug] opening callback: \\(callback)")
+                            await UIApplication.shared.open(deeplinkURL)
+                        }
+                    }
+                } catch {
+                    print("[PikaPrimalDebug] initializeConnection threw: \\(error)")
+                }
+            }
+"""
+if old not in src:
+    raise SystemExit("error: failed to find expected connect block in Primal source")
+path.write_text(src.replace(old, new, 1), encoding="utf-8")
+PY
+
+  echo "applied primal debug patch: $file"
+}
+
+build_install_primal() {
+  local udid="$1"
+  if [ ! -d "$PRIMAL_SRC_DIR/.git" ]; then
+    echo "error: missing Primal repo at $PRIMAL_SRC_DIR" >&2
+    echo "set PIKA_PRIMAL_SRC_DIR or clone Primal locally first" >&2
+    return 1
+  fi
+
+  if [ "${PIKA_PRIMAL_LAB_PATCH_PRIMAL:-1}" = "1" ]; then
+    apply_primal_debug_patch "$PRIMAL_SRC_DIR"
+  fi
+
+  for lib_id in ios-arm64-simulator ios-arm64; do
+    local dsym_dir="$PRIMAL_SRC_DIR/Primal/PrimalShared.xcframework/$lib_id/dSYMs"
+    mkdir -p "$dsym_dir"
+  done
+
+  local derived_dir="$STATE_ROOT/primal-build"
+  local code_signing_allowed="${PIKA_PRIMAL_LAB_CODE_SIGNING_ALLOWED:-YES}"
+  rm -rf "$derived_dir"
+  mkdir -p "$derived_dir"
+
+  echo "building Primal (repo=$PRIMAL_SRC_DIR udid=$udid code_signing_allowed=$code_signing_allowed)"
+  ./tools/xcode-run xcodebuild \
+    -project "$PRIMAL_SRC_DIR/Primal.xcodeproj" \
+    -scheme Primal \
+    -configuration Debug \
+    -sdk iphonesimulator \
+    -destination "id=$udid" \
+    -derivedDataPath "$derived_dir" \
+    build \
+    "CODE_SIGNING_ALLOWED=$code_signing_allowed"
+
+  local app_path
+  app_path="$(find "$derived_dir/Build/Products" -type d -name "Primal.app" | head -n 1)"
+  if [ -z "$app_path" ] || [ ! -d "$app_path" ]; then
+    echo "error: failed to locate Primal.app under $derived_dir/Build/Products" >&2
+    return 1
+  fi
+
+  echo "installing Primal app: $app_path"
+  xcrun simctl install "$udid" "$app_path"
+  xcrun simctl launch "$udid" "$PRIMAL_BUNDLE_ID" >/dev/null 2>&1 || true
+  xcrun simctl terminate "$udid" "$PRIMAL_BUNDLE_ID" >/dev/null 2>&1 || true
+}
+
+pick_open_port() {
+  python3 - <<'PY'
+import socket
+s = socket.socket()
+s.bind(("127.0.0.1", 0))
+print(s.getsockname()[1])
+s.close()
+PY
+}
+
+set_sim_env() {
+  local udid="$1"
+  local key="$2"
+  local value="$3"
+  xcrun simctl spawn "$udid" launchctl setenv "$key" "$value" >/dev/null 2>&1 || true
+}
+
+run_lab() {
+  local udid run_id run_dir relay_port relay_url relay_cfg relay_db relay_log tap_log sim_log
+  udid="$(ensure_lab_udid)"
+  boot_udid "$udid"
+
+  run_id="$(date +%Y%m%d-%H%M%S)"
+  run_dir="$STATE_ROOT/runs/$run_id"
+  mkdir -p "$run_dir"
+
+  relay_port="$(pick_open_port)"
+  relay_url="ws://127.0.0.1:$relay_port"
+  relay_db="$run_dir/relay-db"
+  relay_cfg="$run_dir/relay-config.toml"
+  relay_log="$run_dir/relay.log"
+  tap_log="$run_dir/nostr_connect_tap.log"
+  sim_log="$run_dir/sim.log"
+  mkdir -p "$relay_db"
+
+  sed -E \
+    -e "s|^relay_url = \\\".*\\\"|relay_url = \\\"$relay_url\\\"|g" \
+    -e "s|^port = [0-9]+|port = $relay_port|g" \
+    -e "s|^data_directory = \\\".*\\\"|data_directory = \\\"$relay_db\\\"|g" \
+    "$ROOT/tools/nostr-rs-relay-config.toml" >"$relay_cfg"
+
+  nostr-rs-relay --db "$relay_db" --config "$relay_cfg" >"$relay_log" 2>&1 &
+  RELAY_PID="$!"
+  for _ in $(seq 1 200); do
+    if (echo >"/dev/tcp/127.0.0.1/$relay_port") >/dev/null 2>&1; then
+      break
+    fi
+    sleep 0.05
+  done
+
+  cargo run -q -p pika_core --bin nostr_connect_tap -- \
+    --relay "$relay_url" >"$tap_log" 2>&1 &
+  TAP_PID="$!"
+
+  xcrun simctl spawn "$udid" log stream \
+    --style compact \
+    --predicate 'process == "Pika" OR process == "Primal" OR composedMessage CONTAINS[c] "nostr_connect" OR composedMessage CONTAINS[c] "PikaPrimalDebug" OR composedMessage CONTAINS[c] "PikaAppManager" OR composedMessage CONTAINS[c] "PikaSignerBridge"' \
+    >"$sim_log" 2>&1 &
+  SIMLOG_PID="$!"
+
+  if [ "${PIKA_PRIMAL_LAB_BUILD_PRIMAL:-1}" = "1" ]; then
+    build_install_primal "$udid"
+  fi
+
+  set_sim_env "$udid" "PIKA_ENABLE_EXTERNAL_SIGNER" "1"
+  set_sim_env "$udid" "PIKA_NOSTR_CONNECT_DEBUG_DUMP" "1"
+
+  if [ "${PIKA_PRIMAL_LAB_BUILD_PIKA:-1}" = "1" ]; then
+    PIKA_IOS_SIM_UDID="$udid" \
+      PIKA_IOS_BUNDLE_ID="$PIKA_BUNDLE_ID" \
+      PIKA_RELAY_URLS="$relay_url" \
+      PIKA_KEY_PACKAGE_RELAY_URLS="$relay_url" \
+      ./tools/run-ios --sim
+  fi
+
+  echo "$relay_url" >"$STATE_ROOT/last_relay_url"
+  echo "$udid" >"$STATE_ROOT/last_udid"
+  echo "$run_dir" >"$STATE_ROOT/last_run_dir"
+
+  local data_dir debug_file
+  data_dir="$(xcrun simctl get_app_container "$udid" "$PIKA_BUNDLE_ID" data 2>/dev/null || true)"
+  debug_file=""
+  if [ -n "${data_dir:-}" ]; then
+    debug_file="$data_dir/Library/Application Support/nostr_connect_debug.json"
+  fi
+
+  cat <<EOF
+lab ready
+  udid:              $udid
+  relay_url:         $relay_url
+  run_dir:           $run_dir
+  relay_log:         $relay_log
+  tap_log:           $tap_log
+  sim_log:           $sim_log
+  debug_snapshot:    ${debug_file:-<unavailable>}
+
+manual flow:
+  1) In Pika, tap "Log In with Nostr Connect".
+  2) Approve the connection in Primal.
+  3) Run: tools/primal-ios-interop-lab dump-debug
+EOF
+
+  if [ "$HOLD" = "1" ]; then
+    echo "holding relay/tap/logstream open (Ctrl-C to stop)"
+    while true; do sleep 3600; done
+  fi
+}
+
+seed_capture() {
+  local lab_udid seed_udid
+  lab_udid="$(ensure_lab_udid)"
+  xcrun simctl shutdown "$lab_udid" >/dev/null 2>&1 || true
+  delete_devices_by_name "$SEED_DEVICE_NAME"
+  seed_udid="$(xcrun simctl clone "$lab_udid" "$SEED_DEVICE_NAME" | tr -d '\r' | tail -n 1)"
+  if [ -z "$seed_udid" ]; then
+    echo "error: failed to clone seed simulator" >&2
+    exit 1
+  fi
+  echo "$seed_udid" >"$STATE_ROOT/seed_udid"
+  echo "seed captured: name=$SEED_DEVICE_NAME udid=$seed_udid"
+}
+
+seed_reset() {
+  local seed_udid lab_udid
+  seed_udid="$(cat "$STATE_ROOT/seed_udid" 2>/dev/null || true)"
+  if [ -z "$seed_udid" ]; then
+    seed_udid="$(first_udid_for_device_name "$SEED_DEVICE_NAME")"
+  fi
+  if [ -z "$seed_udid" ]; then
+    echo "error: missing seed simulator; run seed-capture first" >&2
+    exit 1
+  fi
+
+  lab_udid="$(first_udid_for_device_name "$LAB_DEVICE_NAME" || true)"
+  if [ -n "$lab_udid" ]; then
+    xcrun simctl shutdown "$lab_udid" >/dev/null 2>&1 || true
+    xcrun simctl delete "$lab_udid" >/dev/null 2>&1 || true
+  fi
+
+  lab_udid="$(xcrun simctl clone "$seed_udid" "$LAB_DEVICE_NAME" | tr -d '\r' | tail -n 1)"
+  if [ -z "$lab_udid" ]; then
+    echo "error: failed to clone lab simulator from seed" >&2
+    exit 1
+  fi
+  boot_udid "$lab_udid"
+  echo "$lab_udid" >"$STATE_ROOT/last_udid"
+  echo "lab reset from seed: name=$LAB_DEVICE_NAME udid=$lab_udid"
+}
+
+dump_debug() {
+  local udid data_dir debug_file relay_url
+  udid="$(cat "$STATE_ROOT/last_udid" 2>/dev/null || true)"
+  if [ -z "$udid" ]; then
+    udid="$(first_udid_for_device_name "$LAB_DEVICE_NAME" || true)"
+  fi
+  if [ -z "$udid" ]; then
+    udid="$(ensure_lab_udid)"
+  fi
+  boot_udid "$udid"
+
+  data_dir="$(xcrun simctl get_app_container "$udid" "$PIKA_BUNDLE_ID" data 2>/dev/null || true)"
+  if [ -z "$data_dir" ]; then
+    echo "error: app data container not found for $PIKA_BUNDLE_ID on $udid" >&2
+    exit 1
+  fi
+  debug_file="$data_dir/Library/Application Support/nostr_connect_debug.json"
+  if [ ! -f "$debug_file" ]; then
+    echo "debug snapshot not found yet: $debug_file"
+    exit 0
+  fi
+
+  relay_url="$(cat "$STATE_ROOT/last_relay_url" 2>/dev/null || true)"
+  if [ -z "$relay_url" ]; then
+    relay_url="ws://127.0.0.1:7777"
+  fi
+
+  echo "debug snapshot: $debug_file"
+  cat "$debug_file"
+  echo
+  echo "decode helper:"
+  echo "  cargo run -p pika_core --bin nostr_connect_tap -- --relay \"$relay_url\" --client-nsec \"\$(python3 - <<'PY'"
+  echo "import json"
+  echo "print(json.load(open('$debug_file'))['client_nsec'])"
+  echo "PY"
+  echo ")\""
+}
+
+cleanup() {
+  if [ -n "${SIMLOG_PID:-}" ]; then
+    kill "$SIMLOG_PID" >/dev/null 2>&1 || true
+    wait "$SIMLOG_PID" >/dev/null 2>&1 || true
+  fi
+  if [ -n "${TAP_PID:-}" ]; then
+    kill "$TAP_PID" >/dev/null 2>&1 || true
+    wait "$TAP_PID" >/dev/null 2>&1 || true
+  fi
+  if [ -n "${RELAY_PID:-}" ]; then
+    kill "$RELAY_PID" >/dev/null 2>&1 || true
+    wait "$RELAY_PID" >/dev/null 2>&1 || true
+  fi
+}
+trap cleanup EXIT
+
+cmd="${1:-}"
+if [ -z "$cmd" ]; then
+  usage
+  exit 2
+fi
+shift || true
+
+case "$cmd" in
+  run)
+    run_lab "$@"
+    ;;
+  patch-primal)
+    apply_primal_debug_patch "$PRIMAL_SRC_DIR"
+    ;;
+  seed-capture)
+    seed_capture
+    ;;
+  seed-reset)
+    seed_reset
+    ;;
+  dump-debug)
+    dump_debug
+    ;;
+  -h|--help|help)
+    usage
+    ;;
+  *)
+    echo "error: unknown command '$cmd'" >&2
+    usage
+    exit 2
+    ;;
+esac

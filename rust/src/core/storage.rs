@@ -29,7 +29,7 @@ impl AppCore {
             }
         };
 
-        let my_pubkey = sess.keys.public_key();
+        let my_pubkey = sess.pubkey;
         let mut index: HashMap<String, GroupIndexEntry> = HashMap::new();
         let mut list: Vec<ChatSummary> = Vec::new();
         let mut missing_profile_pubkeys: Vec<PublicKey> = Vec::new();
@@ -251,7 +251,7 @@ impl AppCore {
             return;
         };
 
-        let my_pubkey_hex = sess.keys.public_key().to_hex();
+        let my_pubkey_hex = sess.pubkey.to_hex();
 
         // Build a sender pubkey -> display name lookup from member info + profile cache.
         let mut sender_names: HashMap<String, String> = entry
@@ -456,7 +456,7 @@ impl AppCore {
             return;
         };
 
-        let my_pubkey_hex = sess.keys.public_key().to_hex();
+        let my_pubkey_hex = sess.pubkey.to_hex();
 
         let mut sender_names: HashMap<String, String> = entry
             .members

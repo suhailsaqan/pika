@@ -1,5 +1,7 @@
 mod actions;
+mod bunker_signer;
 mod core;
+mod external_signer;
 mod logging;
 mod mdk_support;
 mod route_projection;
@@ -14,9 +16,20 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, RwLock};
 use std::thread;
 
+use crate::bunker_signer::{
+    BunkerSignerConnector as BunkerSignerConnectorTrait,
+    NostrConnectBunkerSignerConnector as NostrConnectBunkerSignerConnectorImpl,
+    SharedBunkerSignerConnector as SharedBunkerSignerConnectorType,
+};
+use crate::external_signer::{
+    ExternalSignerBridge as ExternalSignerBridgeTrait,
+    SharedExternalSignerBridge as SharedExternalSignerBridgeType,
+};
 use flume::{Receiver, Sender};
 
 pub use actions::AppAction;
+pub use bunker_signer::*;
+pub use external_signer::*;
 pub use route_projection::*;
 pub use state::*;
 pub use updates::*;
@@ -57,6 +70,8 @@ pub struct FfiApp {
     update_rx: Receiver<AppUpdate>,
     listening: AtomicBool,
     shared_state: Arc<RwLock<AppState>>,
+    external_signer_bridge: SharedExternalSignerBridgeType,
+    bunker_signer_connector: SharedBunkerSignerConnectorType,
 }
 
 #[uniffi::export]
@@ -71,10 +86,16 @@ impl FfiApp {
         let (update_tx, update_rx) = flume::unbounded();
         let (core_tx, core_rx) = flume::unbounded::<CoreMsg>();
         let shared_state = Arc::new(RwLock::new(AppState::empty()));
+        let external_signer_bridge: SharedExternalSignerBridgeType = Arc::new(RwLock::new(None));
+        let bunker_signer_connector: SharedBunkerSignerConnectorType = Arc::new(RwLock::new(
+            Arc::new(NostrConnectBunkerSignerConnectorImpl::default()),
+        ));
 
         // Actor loop thread (single threaded "app actor").
         let core_tx_for_core = core_tx.clone();
         let shared_for_core = shared_state.clone();
+        let signer_bridge_for_core = external_signer_bridge.clone();
+        let bunker_connector_for_core = bunker_signer_connector.clone();
         thread::spawn(move || {
             let mut core = crate::core::AppCore::new(
                 update_tx,
@@ -82,6 +103,8 @@ impl FfiApp {
                 data_dir,
                 keychain_group,
                 shared_for_core,
+                signer_bridge_for_core,
+                bunker_connector_for_core,
             );
             while let Ok(msg) = core_rx.recv() {
                 core.handle_message(msg);
@@ -93,6 +116,8 @@ impl FfiApp {
             update_rx,
             listening: AtomicBool::new(false),
             shared_state,
+            external_signer_bridge,
+            bunker_signer_connector,
         })
     }
 
@@ -124,5 +149,41 @@ impl FfiApp {
                 reconciler.reconcile(update);
             }
         });
+    }
+
+    pub fn set_external_signer_bridge(&self, bridge: Box<dyn ExternalSignerBridgeTrait>) {
+        let bridge: Arc<dyn ExternalSignerBridgeTrait> = Arc::from(bridge);
+        match self.external_signer_bridge.write() {
+            Ok(mut slot) => {
+                *slot = Some(bridge);
+            }
+            Err(poison) => {
+                *poison.into_inner() = Some(bridge);
+            }
+        }
+    }
+}
+
+impl FfiApp {
+    pub fn set_bunker_signer_connector_for_tests(
+        &self,
+        connector: Arc<dyn BunkerSignerConnectorTrait>,
+    ) {
+        match self.bunker_signer_connector.write() {
+            Ok(mut slot) => {
+                *slot = connector;
+            }
+            Err(poison) => {
+                *poison.into_inner() = connector;
+            }
+        }
+    }
+
+    pub fn inject_nostr_connect_connect_response_for_tests(&self, remote_signer_pubkey: String) {
+        let _ = self.core_tx.send(CoreMsg::Internal(Box::new(
+            InternalEvent::NostrConnectInjectConnectResponseForTests {
+                remote_signer_pubkey,
+            },
+        )));
     }
 }

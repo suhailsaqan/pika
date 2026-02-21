@@ -52,6 +52,10 @@ info:
   @echo "    just rmp run iced"
   @echo "  List devices:"
   @echo "    just rmp devices list"
+  @echo "  Start Android emulator only:"
+  @echo "    just rmp devices start android"
+  @echo "  Start iOS simulator only:"
+  @echo "    just rmp devices start ios"
   @echo "  Generate bindings:"
   @echo "    just rmp bindings all"
 
@@ -59,6 +63,15 @@ info:
 # Run the new Rust `rmp` CLI.
 rmp *ARGS:
   cargo run -p rmp-cli -- {{ARGS}}
+
+# Ensure an Android target is booted and ready (without building/installing app).
+android-device-start *ARGS:
+  just rmp devices start android {{ARGS}}
+
+# Boot Android target and open app with agent-device.
+android-agent-open APP="com.justinmoon.pika.dev" *ARGS:
+  just android-device-start {{ARGS}}
+  ./tools/agent-device --platform android open {{APP}}
 
 # Smoke test `rmp init` output locally (scaffold + doctor + core check).
 rmp-init-smoke NAME="rmp-smoke" ORG="com.example":
@@ -196,6 +209,7 @@ clippy *ARGS:
 pre-merge-pika: fmt
   just clippy --lib --tests
   just test --lib --tests
+  cd android && ./gradlew :app:compileDebugAndroidTestKotlin
   cargo build -p pika-cli
   actionlint
   npx --yes @justinmoon/agent-tools check-docs
@@ -247,6 +261,30 @@ nightly-pika-e2e:
 nightly-marmotd:
   just e2e-local-marmotd
   just openclaw-marmot-scenarios
+
+# Nightly lane: iOS interop smoke (nostrconnect:// route + Pika bridge emission).
+nightly-primal-ios-interop:
+  ./tools/primal-ios-interop-nightly
+
+# Local Primal interop lab: dedicated simulator + local relay + event tap logs.
+primal-ios-lab:
+  ./tools/primal-ios-interop-lab run
+
+# Apply debug logging patch in local Primal checkout (~/code/primal-ios-app by default).
+primal-ios-lab-patch-primal:
+  ./tools/primal-ios-interop-lab patch-primal
+
+# Capture current lab simulator as a reusable seeded snapshot.
+primal-ios-lab-seed-capture:
+  ./tools/primal-ios-interop-lab seed-capture
+
+# Reset the lab simulator from the saved seed snapshot.
+primal-ios-lab-seed-reset:
+  ./tools/primal-ios-interop-lab seed-reset
+
+# Print Pika's latest nostr-connect debug snapshot and a decode helper command.
+primal-ios-lab-dump-debug:
+  ./tools/primal-ios-interop-lab dump-debug
 
 # openclaw-marmot scenario suite (local Nostr relay + marmotd scenarios).
 openclaw-marmot-scenarios:
@@ -391,7 +429,7 @@ android-install: gen-kotlin android-rust android-local-properties
 android-ui-test: gen-kotlin android-rust android-local-properties
   ./tools/android-ensure-debug-installable
   SERIAL="$(./tools/android-pick-serial)"; \
-  ANDROID_SERIAL="$SERIAL" cd android && ./gradlew :app:connectedDebugAndroidTest
+  cd android && ANDROID_SERIAL="$SERIAL" ./gradlew :app:connectedDebugAndroidTest
 
 # Android E2E: local Nostr relay + local Rust bot. Requires emulator.
 android-ui-e2e-local:

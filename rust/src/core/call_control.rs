@@ -262,11 +262,11 @@ impl AppCore {
 
         // "Note to self" DMs have no members besides self. Allow them to participate in
         // call UI/state-machine flows (useful for local/offline tests).
-        self.session.as_ref()?.keys.public_key().to_bech32().ok()
+        self.session.as_ref()?.pubkey.to_bech32().ok()
     }
 
     fn current_pubkey_hex(&self) -> Option<String> {
-        self.session.as_ref().map(|s| s.keys.public_key().to_hex())
+        self.session.as_ref().map(|s| s.pubkey.to_hex())
     }
 
     fn derive_mls_media_crypto_context(
@@ -461,7 +461,7 @@ impl AppCore {
             };
 
             let rumor = UnsignedEvent::new(
-                sess.keys.public_key(),
+                sess.pubkey,
                 Timestamp::from(now_seconds() as u64),
                 super::CALL_SIGNAL_KIND,
                 [],
@@ -991,7 +991,7 @@ impl AppCore {
         sender_pubkey: &PublicKey,
         content: &str,
     ) -> Option<ParsedCallSignal> {
-        let my_pubkey = self.session.as_ref().map(|s| s.keys.public_key());
+        let my_pubkey = self.session.as_ref().map(|s| s.pubkey);
         if my_pubkey.as_ref() == Some(sender_pubkey) {
             return None;
         }

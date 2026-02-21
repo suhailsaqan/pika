@@ -6,6 +6,7 @@ It is NOT meant to run in CI.
 ## Preconditions
 - An Android emulator or device is connected (`adb devices` shows it).
 - App is installed: `just android-install`
+- Optional helper: `just android-agent-open` boots a target and opens Pika via `agent-device`.
 
 ## Recommended agent-device session
 
@@ -33,8 +34,18 @@ It is NOT meant to run in CI.
    - Confirm you return to the Login screen (`Pika` title).
    - Relaunch app and confirm session restore behavior is as expected (if nsec was stored).
 
+## Amber signer check (real external signer)
+1. Open Amber:
+   - `agent-device --platform android open com.greenart7c3.nostrsigner`
+2. Ensure at least one Amber account exists (create/import manually if needed).
+3. Return to Pika:
+   - `agent-device --platform android open com.justinmoon.pika.dev`
+4. Exercise the Amber login/signing entrypoint once available in Pika and confirm:
+   - Pika receives `pubkey` from Amber.
+   - Signing approval in Amber completes and Pika advances.
+   - Reject path in Amber surfaces a clear error in Pika without crashing.
+
 ## Useful agent-device commands
 - `snapshot -i -c` to get clickable elements quickly.
 - `find <text> click` for buttons/labels.
 - `screenshot --out .tmp_android_qa.png` for bug reports.
-

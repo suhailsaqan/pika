@@ -29,6 +29,7 @@ const DEFAULT_CALL_BROADCAST_PREFIX: &str = "pika/calls";
 #[serde(default)]
 pub(super) struct AppConfig {
     pub(super) disable_network: Option<bool>,
+    pub(super) enable_external_signer: Option<bool>,
     pub(super) relay_urls: Option<Vec<String>>,
     pub(super) key_package_relay_urls: Option<Vec<String>>,
     pub(super) call_moq_url: Option<String>,
@@ -133,5 +134,15 @@ impl AppCore {
             set.insert(r);
         }
         set.into_iter().collect()
+    }
+
+    pub(super) fn external_signer_enabled(&self) -> bool {
+        if let Some(enabled) = self.config.enable_external_signer {
+            return enabled;
+        }
+        matches!(
+            std::env::var("PIKA_ENABLE_EXTERNAL_SIGNER").ok().as_deref(),
+            Some("1") | Some("true") | Some("TRUE")
+        )
     }
 }

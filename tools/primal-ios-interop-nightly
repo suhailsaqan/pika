@@ -1,0 +1,137 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$ROOT"
+
+if [ "$(uname -s)" != "Darwin" ]; then
+  echo "SKIP: primal iOS interop runner requires macOS" >&2
+  exit 0
+fi
+
+need() {
+  if ! command -v "$1" >/dev/null 2>&1; then
+    echo "error: missing '$1' on PATH" >&2
+    exit 1
+  fi
+}
+
+need git
+need xcrun
+need find
+
+PRIMAL_REPO_URL="${PIKA_PRIMAL_REPO_URL:-https://github.com/PrimalHQ/primal-ios-app.git}"
+PRIMAL_REF="${PIKA_PRIMAL_REF:-9788ac5bf8ac5746a4eb2ab7e66d4a1f434c005d}"
+PRIMAL_SRC_DIR="${PIKA_PRIMAL_SRC_DIR:-$HOME/code/oss/primal-ios-app-ci}"
+PRIMAL_BUNDLE_ID="${PIKA_PRIMAL_BUNDLE_ID:-net.primal.iosapp.Primal}"
+KEEP="${KEEP:-0}"
+
+mkdir -p "$(dirname "$PRIMAL_SRC_DIR")"
+if [ ! -d "$PRIMAL_SRC_DIR/.git" ]; then
+  echo "cloning primal ios repo: $PRIMAL_REPO_URL -> $PRIMAL_SRC_DIR"
+  git clone "$PRIMAL_REPO_URL" "$PRIMAL_SRC_DIR"
+fi
+
+echo "syncing primal ios repo to ref: $PRIMAL_REF"
+git -C "$PRIMAL_SRC_DIR" fetch origin "$PRIMAL_REF"
+git -C "$PRIMAL_SRC_DIR" checkout --detach FETCH_HEAD
+
+# Some Primal revisions ship an XCFramework Info.plist that declares dSYM folders
+# without checking those folders into git. Create empty placeholders so xcodebuild
+# does not fail fast on missing DebugSymbolsPath entries.
+for lib_id in ios-arm64-simulator ios-arm64; do
+  dsym_dir="$PRIMAL_SRC_DIR/Primal/PrimalShared.xcframework/$lib_id/dSYMs"
+  if [ ! -d "$dsym_dir" ]; then
+    mkdir -p "$dsym_dir"
+  fi
+done
+
+udid="$(./tools/ios-sim-ensure | sed -n 's/^ok: ios simulator ready (udid=\(.*\))$/\1/p')"
+if [ -z "$udid" ]; then
+  echo "error: could not determine simulator udid" >&2
+  exit 1
+fi
+
+echo "using simulator: $udid"
+
+DERIVED_DIR="$(mktemp -d "${TMPDIR:-/tmp}/pika-primal-ios-build.XXXXXX")"
+cleanup() {
+  if [ "$KEEP" = "1" ]; then
+    echo "note: keeping derived data at $DERIVED_DIR" >&2
+    return
+  fi
+  rm -rf "$DERIVED_DIR" >/dev/null 2>&1 || true
+}
+trap cleanup EXIT
+
+echo "building primal"
+./tools/xcode-run xcodebuild \
+  -project "$PRIMAL_SRC_DIR/Primal.xcodeproj" \
+  -scheme Primal \
+  -configuration Debug \
+  -sdk iphonesimulator \
+  -destination "id=$udid" \
+  -derivedDataPath "$DERIVED_DIR" \
+  build \
+  CODE_SIGNING_ALLOWED=NO
+
+PRIMAL_APP_PATH="$(find "$DERIVED_DIR/Build/Products" -type d -name 'Primal.app' | head -n 1)"
+if [ -z "$PRIMAL_APP_PATH" ] || [ ! -d "$PRIMAL_APP_PATH" ]; then
+  echo "error: failed to find built Primal.app under $DERIVED_DIR/Build/Products" >&2
+  exit 1
+fi
+
+echo "installing primal app: $PRIMAL_APP_PATH"
+xcrun simctl install "$udid" "$PRIMAL_APP_PATH"
+# Warm up once so iOS has the app ready for URL handoff in the UITest.
+xcrun simctl launch "$udid" "$PRIMAL_BUNDLE_ID" >/dev/null 2>&1 || true
+xcrun simctl terminate "$udid" "$PRIMAL_BUNDLE_ID" >/dev/null 2>&1 || true
+
+echo "verifying simulator routes nostrconnect:// to Primal"
+PROBE_URL="nostrconnect://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa?name=Pika&url=https%3A%2F%2Fpika.chat&secret=sec-nightly-probe&relay=wss%3A%2F%2Frelay.primal.net"
+xcrun simctl openurl "$udid" "$PROBE_URL"
+
+echo "building pika ios artifacts"
+just ios-xcframework ios-xcodeproj >/dev/null
+
+echo "running pika->primal interop smoke test"
+PIKA_BUNDLE_ID="${PIKA_IOS_BUNDLE_ID:-com.justinmoon.pika.dev}"
+if data_dir="$(xcrun simctl get_app_container "$udid" "$PIKA_BUNDLE_ID" data 2>/dev/null)"; then
+  rm -f "$data_dir/Documents/ui_test_open_url.txt" >/dev/null 2>&1 || true
+fi
+PIKA_PRIMAL_BUNDLE_ID="$PRIMAL_BUNDLE_ID" \
+  ./tools/xcode-run xcodebuild \
+    -project ios/Pika.xcodeproj \
+    -scheme Pika \
+    -derivedDataPath ios/build \
+    -destination "id=$udid" \
+    test \
+    ARCHS=arm64 \
+    ONLY_ACTIVE_ARCH=YES \
+    CODE_SIGNING_ALLOWED=NO \
+    PRODUCT_BUNDLE_IDENTIFIER="$PIKA_BUNDLE_ID" \
+    -only-testing:PikaUITests/PikaUITests/testInterop_nostrConnectLaunchesPrimal
+
+data_dir="$(xcrun simctl get_app_container "$udid" "$PIKA_BUNDLE_ID" data)"
+marker_file="$data_dir/Documents/ui_test_open_url.txt"
+if [ ! -f "$marker_file" ]; then
+  echo "error: missing marker file: $marker_file" >&2
+  exit 1
+fi
+if ! grep -E '^nostrconnect://' "$marker_file" >/dev/null; then
+  echo "error: marker file did not contain nostrconnect URL: $marker_file" >&2
+  cat "$marker_file" >&2 || true
+  exit 1
+fi
+if ! grep -E '(^|[?&])secret=' "$marker_file" >/dev/null; then
+  echo "error: marker file did not include secret query param: $marker_file" >&2
+  cat "$marker_file" >&2 || true
+  exit 1
+fi
+if ! grep -E '(^|[?&])callback=' "$marker_file" >/dev/null; then
+  echo "error: marker file did not include callback query param: $marker_file" >&2
+  cat "$marker_file" >&2 || true
+  exit 1
+fi
+
+echo "ok: primal+pika interop smoke passed"

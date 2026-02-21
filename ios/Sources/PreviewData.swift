@@ -4,7 +4,7 @@ import SwiftUI
 @MainActor
 enum PreviewFactory {
     static func manager(_ state: AppState) -> AppManager {
-        AppManager(core: PreviewCore(state: state), nsecStore: PreviewNsecStore())
+        AppManager(core: PreviewCore(state: state), authStore: PreviewAuthStore())
     }
 }
 
@@ -24,10 +24,12 @@ final class PreviewCore: AppCore, @unchecked Sendable {
     }
 }
 
-final class PreviewNsecStore: NsecStore {
+final class PreviewAuthStore: AuthStore {
+    func load() -> StoredAuth? { nil }
+    func saveLocalNsec(_ nsec: String) {}
+    func saveBunker(bunkerUri: String, bunkerClientNsec: String) {}
+    func clear() {}
     func getNsec() -> String? { nil }
-    func setNsec(_ nsec: String) {}
-    func clearNsec() {}
 }
 
 enum PreviewAppState {
@@ -52,7 +54,7 @@ enum PreviewAppState {
         base(
             rev: 10,
             router: Router(defaultScreen: .chatList, screenStack: []),
-            auth: .loggedIn(npub: sampleNpub, pubkey: samplePubkey),
+            auth: .loggedIn(npub: sampleNpub, pubkey: samplePubkey, mode: .localNsec),
             myProfile: sampleProfile,
             chatList: []
         )
@@ -62,7 +64,7 @@ enum PreviewAppState {
         base(
             rev: 11,
             router: Router(defaultScreen: .chatList, screenStack: []),
-            auth: .loggedIn(npub: sampleNpub, pubkey: samplePubkey),
+            auth: .loggedIn(npub: sampleNpub, pubkey: samplePubkey, mode: .localNsec),
             myProfile: sampleProfile,
             chatList: [
                 chatSummary(
@@ -91,7 +93,7 @@ enum PreviewAppState {
         base(
             rev: 12,
             router: Router(defaultScreen: .chatList, screenStack: []),
-            auth: .loggedIn(npub: sampleNpub, pubkey: samplePubkey),
+            auth: .loggedIn(npub: sampleNpub, pubkey: samplePubkey, mode: .localNsec),
             myProfile: sampleProfile,
             chatList: [
                 chatSummary(
@@ -114,7 +116,7 @@ enum PreviewAppState {
         base(
             rev: 13,
             router: Router(defaultScreen: .newChat, screenStack: [.newChat]),
-            auth: .loggedIn(npub: sampleNpub, pubkey: samplePubkey),
+            auth: .loggedIn(npub: sampleNpub, pubkey: samplePubkey, mode: .localNsec),
             myProfile: sampleProfile,
             busy: BusyState(creatingAccount: false, loggingIn: false, creatingChat: true, fetchingFollowList: false)
         )
@@ -124,7 +126,7 @@ enum PreviewAppState {
         base(
             rev: 14,
             router: Router(defaultScreen: .newChat, screenStack: [.newChat]),
-            auth: .loggedIn(npub: sampleNpub, pubkey: samplePubkey),
+            auth: .loggedIn(npub: sampleNpub, pubkey: samplePubkey, mode: .localNsec),
             myProfile: sampleProfile
         )
     }
@@ -133,7 +135,7 @@ enum PreviewAppState {
         base(
             rev: 30,
             router: Router(defaultScreen: .chat(chatId: "chat-1"), screenStack: [.chat(chatId: "chat-1")]),
-            auth: .loggedIn(npub: sampleNpub, pubkey: samplePubkey),
+            auth: .loggedIn(npub: sampleNpub, pubkey: samplePubkey, mode: .localNsec),
             myProfile: sampleProfile,
             currentChat: chatViewState(id: "chat-1", name: "Justin", failed: false)
         )
@@ -143,7 +145,7 @@ enum PreviewAppState {
         base(
             rev: 31,
             router: Router(defaultScreen: .chat(chatId: "chat-1"), screenStack: [.chat(chatId: "chat-1")]),
-            auth: .loggedIn(npub: sampleNpub, pubkey: samplePubkey),
+            auth: .loggedIn(npub: sampleNpub, pubkey: samplePubkey, mode: .localNsec),
             myProfile: sampleProfile,
             currentChat: chatViewState(id: "chat-1", name: "Justin", failed: true)
         )
@@ -153,7 +155,7 @@ enum PreviewAppState {
         base(
             rev: 32,
             router: Router(defaultScreen: .chat(chatId: "chat-empty"), screenStack: [.chat(chatId: "chat-empty")]),
-            auth: .loggedIn(npub: sampleNpub, pubkey: samplePubkey),
+            auth: .loggedIn(npub: sampleNpub, pubkey: samplePubkey, mode: .localNsec),
             myProfile: sampleProfile,
             currentChat: ChatViewState(
                 chatId: "chat-empty",
@@ -172,7 +174,7 @@ enum PreviewAppState {
         base(
             rev: 33,
             router: Router(defaultScreen: .chat(chatId: "chat-long"), screenStack: [.chat(chatId: "chat-long")]),
-            auth: .loggedIn(npub: sampleNpub, pubkey: samplePubkey),
+            auth: .loggedIn(npub: sampleNpub, pubkey: samplePubkey, mode: .localNsec),
             myProfile: sampleProfile,
             currentChat: chatViewStateLongThread()
         )
@@ -182,7 +184,7 @@ enum PreviewAppState {
         base(
             rev: 34,
             router: Router(defaultScreen: .chat(chatId: "chat-grouped"), screenStack: [.chat(chatId: "chat-grouped")]),
-            auth: .loggedIn(npub: sampleNpub, pubkey: samplePubkey),
+            auth: .loggedIn(npub: sampleNpub, pubkey: samplePubkey, mode: .localNsec),
             myProfile: sampleProfile,
             currentChat: chatViewStateGrouped()
         )
@@ -192,7 +194,7 @@ enum PreviewAppState {
         base(
             rev: 40,
             router: Router(defaultScreen: .chatList, screenStack: []),
-            auth: .loggedIn(npub: sampleNpub, pubkey: samplePubkey),
+            auth: .loggedIn(npub: sampleNpub, pubkey: samplePubkey, mode: .localNsec),
             myProfile: sampleProfile,
             chatList: chatListPopulated.chatList,
             toast: "Network connection lost."

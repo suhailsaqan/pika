@@ -148,7 +148,7 @@ fn alice_sends_bob_over_public_relays() {
     });
 
     let (bob_npub, bob_pubkey_hex) = match bob.state().auth {
-        AuthState::LoggedIn { npub, pubkey } => (npub, pubkey),
+        AuthState::LoggedIn { npub, pubkey, .. } => (npub, pubkey),
         _ => unreachable!(),
     };
     let bob_pubkey = PublicKey::parse(&bob_pubkey_hex).expect("pubkey parse");

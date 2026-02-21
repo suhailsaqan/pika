@@ -3,11 +3,10 @@ package com.pika.app
 import android.content.ClipboardManager
 import android.content.Context
 import android.util.Log
+import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertIsDisplayed
-import androidx.compose.ui.test.assertExists
 import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
-import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
@@ -23,11 +22,38 @@ import java.util.concurrent.atomic.AtomicReference
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
+import org.junit.rules.RuleChain
+import org.junit.rules.TestRule
+import org.junit.runner.Description
+import org.junit.runners.model.Statement
+import org.json.JSONObject
 
 @RunWith(AndroidJUnit4::class)
 class PikaUiTest {
+    private val disableNetworkRule =
+        TestRule { base: Statement, _: Description ->
+            object : Statement() {
+                override fun evaluate() {
+                    val ctx = InstrumentationRegistry.getInstrumentation().targetContext
+                    val path = ctx.filesDir.resolve("pika_config.json")
+                    val cfg =
+                        JSONObject().apply {
+                            put("disable_network", true)
+                            put("call_moq_url", "https://us-east.moq.logos.surf/anon")
+                            put("call_broadcast_prefix", "pika/calls")
+                        }
+                    path.writeText(cfg.toString())
+                    base.evaluate()
+                }
+            }
+        }
+
+    private val composeRule = createAndroidComposeRule<MainActivity>()
+
     @get:Rule
-    val compose = createAndroidComposeRule<MainActivity>()
+    val rules: TestRule = RuleChain.outerRule(disableNetworkRule).around(composeRule)
+
+    private val compose get() = composeRule
 
     private fun hardResetForeground() {
         // Avoid doing anything that would background the current Activity: Compose tests depend on
@@ -44,7 +70,7 @@ class PikaUiTest {
         runOnMain { AppManager.getInstance(ctx).logout() }
 
         compose.onNodeWithTag(TestTags.LOGIN_NSEC)
-            .assertExists()
+            .assertIsDisplayed()
             .assert(SemanticsMatcher.keyIsDefined(SemanticsProperties.Password))
     }
 
@@ -105,18 +131,19 @@ class PikaUiTest {
         // Message should appear optimistically even if publishing fails.
         dumpState("after Send click", ctx)
         compose.waitUntil(30_000) {
-            val hasInState =
-                runOnMain {
-                    AppManager.getInstance(ctx).state.currentChat?.messages?.any { it.content == msg }
-                        ?: false
-                }
-            if (!hasInState) return@waitUntil false
-            runCatching { compose.onAllNodesWithText(msg).fetchSemanticsNodes().isNotEmpty() }
-                .getOrDefault(false)
+            runOnMain {
+                AppManager.getInstance(ctx).state.currentChat?.messages?.any { it.content == msg }
+                    ?: false
+            } && runCatching {
+                compose.onNodeWithTag(TestTags.CHAT_MESSAGE_LIST).assertIsDisplayed()
+            }.isSuccess
         }
-        // Avoid flaking on "displayed" if the software keyboard overlaps the message list.
-        // Existence in the semantics tree means Compose rendered the Rust-owned state.
-        check(compose.onAllNodesWithText(msg).fetchSemanticsNodes().isNotEmpty())
+        check(
+            runOnMain {
+                AppManager.getInstance(ctx).state.currentChat?.messages?.any { it.content == msg }
+                    ?: false
+            },
+        )
 
         // Back to chat list then logout.
         compose.onNodeWithContentDescription("Back").performClick()

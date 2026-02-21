@@ -1,0 +1,84 @@
+package com.pika.app
+
+import android.content.Intent
+import android.net.Uri
+import androidx.test.ext.junit.runners.AndroidJUnit4
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
+import org.junit.Test
+import org.junit.runner.RunWith
+
+@RunWith(AndroidJUnit4::class)
+class NostrConnectIntentTest {
+    @Test
+    fun withNostrConnectCallback_addsCallbackToNostrConnectUrls() {
+        val raw =
+            "nostrconnect://f8d6adf2627c4f3a8f182f95c6ccf5fd2ccf48f9aa94d7f9deaa0a5f88dbf9b6?relay=wss%3A%2F%2Frelay.primal.net&metadata=%7B%22name%22%3A%22Pika%22%7D"
+
+        val out = AppManager.withNostrConnectCallback(raw)
+        val parsed = Uri.parse(out)
+
+        assertEquals("nostrconnect", parsed.scheme)
+        assertEquals(AppManager.NOSTR_CONNECT_CALLBACK_URL, parsed.getQueryParameter("callback"))
+    }
+
+    @Test
+    fun withNostrConnectCallback_isIdempotentWhenCallbackExists() {
+        val raw =
+            "nostrconnect://abc123?relay=wss%3A%2F%2Frelay.example.com&callback=pika%3A%2F%2Fnostrconnect-return"
+
+        val out = AppManager.withNostrConnectCallback(raw)
+
+        assertEquals(raw, out)
+        assertTrue(out.countOccurrences("callback=") == 1)
+    }
+
+    @Test
+    fun withNostrConnectCallback_ignoresNonNostrConnectUrls() {
+        val raw = "nostrsigner://request?type=get_public_key"
+
+        val out = AppManager.withNostrConnectCallback(raw)
+
+        assertEquals(raw, out)
+    }
+
+    @Test
+    fun extractNostrConnectCallback_returnsCallbackUrlForMatchingIntent() {
+        val intent =
+            Intent(Intent.ACTION_VIEW).apply {
+                data = Uri.parse("pika://nostrconnect-return?result=ok")
+            }
+
+        val callback = AppManager.extractNostrConnectCallback(intent)
+
+        assertEquals("pika://nostrconnect-return?result=ok", callback)
+    }
+
+    @Test
+    fun extractNostrConnectCallback_rejectsNonCallbackIntents() {
+        val wrongHost =
+            Intent(Intent.ACTION_VIEW).apply {
+                data = Uri.parse("pika://other-host?result=ok")
+            }
+        val wrongAction =
+            Intent(Intent.ACTION_MAIN).apply {
+                data = Uri.parse("pika://nostrconnect-return?result=ok")
+            }
+
+        assertNull(AppManager.extractNostrConnectCallback(wrongHost))
+        assertNull(AppManager.extractNostrConnectCallback(wrongAction))
+    }
+
+    private fun String.countOccurrences(fragment: String): Int {
+        if (fragment.isEmpty()) return 0
+        var count = 0
+        var index = 0
+        while (true) {
+            val next = indexOf(fragment, index)
+            if (next < 0) return count
+            count += 1
+            index = next + fragment.length
+        }
+    }
+}

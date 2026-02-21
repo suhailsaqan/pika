@@ -9,7 +9,7 @@ private let keychainLog = Logger(subsystem: "com.pika.app", category: "Keychain"
 /// which fail with errSecMissingEntitlement / -34018).
 final class KeychainNsecStore {
     private let service = "com.pika.app"
-    private let account = "nsec"
+    private let account: String
     /// The keychain access group shared between the main app and the NSE.
     /// On simulator, nil (shared groups aren't supported). On device, the full
     /// qualified group: "<TeamID>.<bundle_id>.shared".
@@ -28,7 +28,8 @@ final class KeychainNsecStore {
     /// and fallback is allowed.
     private var useFileFallback: Bool = false
 
-    init(keychainGroup: String? = nil, fileFallbackAllowed: Bool? = nil) {
+    init(account: String = "nsec", keychainGroup: String? = nil, fileFallbackAllowed: Bool? = nil) {
+        self.account = account
         #if targetEnvironment(simulator)
         self.accessGroup = nil
         #else
@@ -127,6 +128,10 @@ final class KeychainNsecStore {
             try? FileManager.default.removeItem(at: url)
             keychainLog.info("clearNsec: removed file fallback")
         }
+        if let legacy = legacyFileFallbackURL(), legacy != fileFallbackURL() {
+            try? FileManager.default.removeItem(at: legacy)
+            keychainLog.info("clearNsec: removed legacy file fallback")
+        }
     }
 
     /// Switch to the file-based fallback. Only allowed when `fileFallbackAllowed` is true
@@ -149,9 +154,24 @@ final class KeychainNsecStore {
         return true
     }
 
-    // MARK: - File fallback (Application Support / .pika_nsec, simulator only)
+    // MARK: - File fallback (Application Support / account-scoped path, simulator only)
 
     private func fileFallbackURL() -> URL? {
+        guard let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else {
+            return nil
+        }
+        let safeAccount = account
+            .map { ch in
+                if ch.isLetter || ch.isNumber || ch == "-" || ch == "_" {
+                    return ch
+                }
+                return "_"
+            }
+        return dir.appendingPathComponent(".pika_nsec_\(String(safeAccount))")
+    }
+
+    private func legacyFileFallbackURL() -> URL? {
+        guard account == "nsec" else { return nil }
         guard let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else {
             return nil
         }
@@ -159,14 +179,17 @@ final class KeychainNsecStore {
     }
 
     private func fileGet() -> String? {
-        guard let url = fileFallbackURL() else { return nil }
-        guard let data = try? Data(contentsOf: url),
-              let nsec = String(data: data, encoding: .utf8), !nsec.isEmpty else {
-            keychainLog.warning("getNsec: no nsec found (file fallback)")
-            return nil
+        guard let primary = fileFallbackURL() else { return nil }
+        let candidates = [primary, legacyFileFallbackURL()].compactMap { $0 }
+        for url in candidates {
+            if let data = try? Data(contentsOf: url),
+               let nsec = String(data: data, encoding: .utf8), !nsec.isEmpty {
+                keychainLog.info("getNsec: found stored nsec (file fallback)")
+                return nsec
+            }
         }
-        keychainLog.info("getNsec: found stored nsec (file fallback)")
-        return nsec
+        keychainLog.warning("getNsec: no nsec found (file fallback)")
+        return nil
     }
 
     private func fileSet(_ nsec: String) {

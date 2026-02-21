@@ -165,10 +165,27 @@ pub enum Screen {
     GroupInfo { chat_id: String },
 }
 
+#[derive(uniffi::Enum, Clone, Debug, PartialEq)]
+pub enum AuthMode {
+    LocalNsec,
+    ExternalSigner {
+        pubkey: String,
+        signer_package: String,
+        current_user: String,
+    },
+    BunkerSigner {
+        bunker_uri: String,
+    },
+}
+
 #[derive(uniffi::Enum, Clone, Debug)]
 pub enum AuthState {
     LoggedOut,
-    LoggedIn { npub: String, pubkey: String },
+    LoggedIn {
+        npub: String,
+        pubkey: String,
+        mode: AuthMode,
+    },
 }
 
 #[derive(uniffi::Record, Clone, Debug, PartialEq, Eq)]
