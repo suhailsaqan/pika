@@ -8,11 +8,6 @@ val appVersionMatch = Regex("""^(\d+)\.(\d+)\.(\d+)$""").matchEntire(appVersionN
     ?: throw GradleException("VERSION must be in x.y.z format (found: $appVersionName)")
 val (major, minor, patch) = appVersionMatch.destructured
 val appVersionCode = major.toInt() * 10000 + minor.toInt() * 100 + patch.toInt()
-val amberFlagRaw =
-    providers.gradleProperty("pika.enableAmberSigner").orNull
-        ?: System.getenv("PIKA_ENABLE_EXTERNAL_SIGNER")
-        ?: "false"
-val enableAmberSigner = amberFlagRaw.trim().lowercase() in setOf("1", "true", "yes")
 
 android {
     namespace = "com.pika.app"
@@ -26,7 +21,6 @@ android {
         versionCode = appVersionCode
         versionName = appVersionName
         testInstrumentationRunner = "com.pika.app.PikaTestRunner"
-        buildConfigField("boolean", "ENABLE_AMBER_SIGNER", enableAmberSigner.toString())
 
         vectorDrawables {
             useSupportLibrary = true

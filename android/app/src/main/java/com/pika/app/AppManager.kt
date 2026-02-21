@@ -104,7 +104,6 @@ class AppManager private constructor(context: Context) : AppReconciler {
             obj.put("call_broadcast_prefix", defaultBroadcastPrefix)
         }
         // Default external signer support to enabled.
-        // Amber transport remains behind build flag, but bunker login is Rust-only.
         // If callers provided an explicit value, respect it.
         if (!obj.has("enable_external_signer")) {
             obj.put("enable_external_signer", true)
@@ -226,7 +225,6 @@ class AppManager private constructor(context: Context) : AppReconciler {
                 }
             }
             StoredAuthMode.EXTERNAL_SIGNER -> {
-                if (!BuildConfig.ENABLE_AMBER_SIGNER) return
                 val pubkey = stored.pubkey?.trim().orEmpty()
                 val signerPackage = stored.signerPackage?.trim().orEmpty()
                 if (pubkey.isBlank() || signerPackage.isBlank()) return
