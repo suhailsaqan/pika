@@ -13,7 +13,7 @@ End-to-end encrypted messaging for iOS and Android, built on [MLS](https://messa
 | Group chats (MLS) | ✅ | ✅ | ✅ |
 | Voice calls (1:1) | ✅ | ✅ | ✅ |
 | Push notifications | ✅ | | |
-| Emoji reactions | ✅ | | |
+| Emoji reactions | ✅ | | ✅ |
 | Typing indicators | ✅ | | ✅ |
 | @mention autocomplete | ✅ | | |
 | Markdown rendering | ✅ | ✅ | |
