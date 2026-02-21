@@ -222,6 +222,9 @@ enum PreviewAppState {
         followList: [FollowListEntry] = [],
         activeCall: CallState? = nil,
         callTimeline: [CallTimelineEvent] = [],
+        myDevices: [DeviceInfo] = [],
+        pendingDevices: [DeviceInfo] = [],
+        autoAddDevices: Bool = true,
         toast: String? = nil
     ) -> AppState {
         AppState(
@@ -236,6 +239,9 @@ enum PreviewAppState {
             peerProfile: nil,
             activeCall: activeCall,
             callTimeline: callTimeline,
+            myDevices: myDevices,
+            pendingDevices: pendingDevices,
+            autoAddDevices: autoAddDevices,
             toast: toast
         )
     }

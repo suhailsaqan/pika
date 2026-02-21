@@ -58,6 +58,7 @@ pub enum InternalEvent {
     KeyPackagePublished {
         ok: bool,
         error: Option<String>,
+        event_id: Option<String>,
     },
     PushSubscriptionsSynced {
         groups: Vec<String>,
@@ -70,7 +71,7 @@ pub enum InternalEvent {
     // Async CreateChat fetch result (1:1)
     PeerKeyPackageFetched {
         peer_pubkey: nostr_sdk::prelude::PublicKey,
-        key_package_event: Option<nostr_sdk::prelude::Event>,
+        key_package_events: Vec<nostr_sdk::prelude::Event>,
         error: Option<String>,
     },
 
@@ -172,5 +173,15 @@ pub enum InternalEvent {
     // Video frame sent from platform (camera capture → H.264 NALUs).
     VideoFrameFromPlatform {
         payload: Vec<u8>,
+    },
+
+    // Multi-device: new key packages for our own pubkey discovered on relays.
+    OtherDeviceKeyPackagesFetched {
+        key_package_events: Vec<nostr_sdk::prelude::Event>,
+    },
+
+    // Multi-device: own key packages fetched from relays for device list display.
+    MyDevicesFetched {
+        devices: Vec<crate::state::DeviceInfo>,
     },
 }

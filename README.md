@@ -11,6 +11,7 @@ End-to-end encrypted messaging for iOS and Android, built on [MLS](https://messa
 |---|:---:|:---:|:---:|
 | 1:1 encrypted messaging | ✅ | ✅ | ✅ |
 | Group chats (MLS) | ✅ | ✅ | ✅ |
+| Multi-device support | ✅ | ✅ | ✅ |
 | Voice calls (1:1) | ✅ | ✅ | ✅ |
 | Video calls (1:1) | ✅ | | ✅ |
 | Push notifications | ✅ | | |

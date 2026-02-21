@@ -106,6 +106,23 @@ pub enum AppAction {
         name: String,
     },
 
+    // Multi-device
+    AddMyDevice {
+        key_package_event_json: String,
+    },
+    FetchMyDevices,
+    SetAutoAddDevices {
+        enabled: bool,
+    },
+    AcceptPendingDevice {
+        fingerprint: String,
+    },
+    RejectPendingDevice {
+        fingerprint: String,
+    },
+    AcceptAllPendingDevices,
+    RejectAllPendingDevices,
+
     // Chat management
     ArchiveChat {
         chat_id: String,
@@ -195,6 +212,15 @@ impl AppAction {
             AppAction::RemoveGroupMembers { .. } => "RemoveGroupMembers",
             AppAction::LeaveGroup { .. } => "LeaveGroup",
             AppAction::RenameGroup { .. } => "RenameGroup",
+
+            // Multi-device
+            AppAction::AddMyDevice { .. } => "AddMyDevice",
+            AppAction::FetchMyDevices => "FetchMyDevices",
+            AppAction::SetAutoAddDevices { .. } => "SetAutoAddDevices",
+            AppAction::AcceptPendingDevice { .. } => "AcceptPendingDevice",
+            AppAction::RejectPendingDevice { .. } => "RejectPendingDevice",
+            AppAction::AcceptAllPendingDevices => "AcceptAllPendingDevices",
+            AppAction::RejectAllPendingDevices => "RejectAllPendingDevices",
 
             // Chat management
             AppAction::ArchiveChat { .. } => "ArchiveChat",
