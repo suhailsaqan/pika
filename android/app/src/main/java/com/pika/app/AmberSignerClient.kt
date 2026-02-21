@@ -200,24 +200,10 @@ class AmberSignerClient(
                 peerPubkey = peerPubkey,
                 returnKind = returnKind,
             )
-        if (providerResult.ok) {
-            return providerResult
-        }
-        if (providerResult.kind != AmberErrorKind.SIGNER_UNAVAILABLE &&
-            providerResult.kind != AmberErrorKind.REJECTED &&
-            providerResult.kind != AmberErrorKind.INVALID_RESPONSE
-        ) {
-            return providerResult
-        }
-
-        val intentResult = requestViaIntent(
-            type = type,
-            payload = payload,
-            packageName = signerPackage,
-            currentUser = currentUser,
-            peerPubkey = peerPubkey,
-        )
-        return intentResult.toAmberResult(returnKind)
+        // Never fall back to intent for post-login operations. Launching Amber's
+        // activity for sign/encrypt/decrypt would disruptively steal focus from Pika.
+        // If the provider rejects or is unavailable, return the error to Rust.
+        return providerResult
     }
 
     private fun queryViaProvider(

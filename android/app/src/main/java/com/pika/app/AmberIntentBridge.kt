@@ -37,6 +37,15 @@ object AmberIntentBridge {
 
     fun complete(resultCode: Int, data: Intent?) {
         val future = pending.getAndSet(null) ?: return
+        // Bring Pika back to the foreground — Amber may leave its own activity
+        // on top of our task stack even after finishing the result handshake.
+        activityRef.get()?.get()?.let { activity ->
+            val bringBack = activity.packageManager.getLaunchIntentForPackage(activity.packageName)
+            if (bringBack != null) {
+                bringBack.addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+                activity.startActivity(bringBack)
+            }
+        }
         future.complete(
             AmberIntentOutcome(
                 ok = resultCode == Activity.RESULT_OK,
