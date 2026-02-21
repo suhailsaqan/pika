@@ -356,7 +356,7 @@ private func groupInfoState(from state: AppState) -> GroupInfoViewState {
 }
 
 /// Remove delivered notifications that belong to the given chat.
-private func clearDeliveredNotifications(forChatId chatId: String) {
+func clearDeliveredNotifications(forChatId chatId: String) {
     let center = UNUserNotificationCenter.current()
     center.getDeliveredNotifications { notifications in
         let ids = notifications

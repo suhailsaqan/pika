@@ -64,6 +64,9 @@ struct PikaApp: App {
                 .onChange(of: scenePhase) { _, phase in
                     if phase == .active {
                         manager.onForeground()
+                        if let chatId = AppDelegate.activeChatId {
+                            clearDeliveredNotifications(forChatId: chatId)
+                        }
                     }
                 }
                 .onOpenURL { url in
