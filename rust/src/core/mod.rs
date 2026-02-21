@@ -995,10 +995,13 @@ impl AppCore {
     }
 
     fn nostr_connect_scoped_keyring_account(&self, account: &str) -> String {
-        let mut hasher = std::collections::hash_map::DefaultHasher::new();
-        std::hash::Hasher::write(&mut hasher, self.data_dir.as_bytes());
-        let digest = std::hash::Hasher::finish(&hasher);
-        format!("{account}.{digest:016x}")
+        let canonical_dir = std::path::Path::new(&self.data_dir)
+            .canonicalize()
+            .unwrap_or_else(|_| std::path::PathBuf::from(&self.data_dir));
+        let digest = <nostr_sdk::hashes::sha256::Hash as nostr_sdk::hashes::Hash>::hash(
+            canonical_dir.to_string_lossy().as_bytes(),
+        );
+        format!("{account}.{digest}")
     }
 
     fn nostr_connect_keyring_entry(&self, account: &str) -> Option<keyring_core::Entry> {
@@ -1020,6 +1023,7 @@ impl AppCore {
         let entry = self.nostr_connect_keyring_entry(account)?;
         match entry.get_password() {
             Ok(v) => Some(v),
+            Err(keyring_core::Error::NoEntry) => None,
             Err(e) => {
                 tracing::warn!(%e, account, "nostr_connect: keyring read failed");
                 None
