@@ -5696,6 +5696,7 @@ dependencies = [
  "mdk-core",
  "mdk-sqlite-storage",
  "mdk-storage-traits",
+ "nostr-blossom",
  "nostr-sdk",
  "rand 0.8.5",
  "serde",

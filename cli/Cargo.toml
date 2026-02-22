@@ -14,6 +14,7 @@ hex = "0.4"
 mdk-core = { workspace = true }
 mdk-sqlite-storage = { workspace = true }
 mdk-storage-traits = { workspace = true }
+nostr-blossom = "0.44.0"
 nostr-sdk = { version = "0.44.1", features = ["nip59"] }
 rand = "0.8"
 serde = { version = "1", features = ["derive"] }
