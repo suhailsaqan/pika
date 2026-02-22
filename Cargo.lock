@@ -5744,6 +5744,7 @@ dependencies = [
  "a2",
  "anyhow",
  "axum",
+ "base64 0.22.1",
  "chrono",
  "diesel",
  "diesel_migrations",

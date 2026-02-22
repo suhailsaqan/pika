@@ -43,23 +43,40 @@ async fn main() -> anyhow::Result<()> {
         .map(|s| s == "true" || s == "1")
         .unwrap_or(false);
     let apns_client = match (
-        std::env::var("APNS_KEY_PATH"),
+        std::env::var("APNS_KEY_PATH")
+            .ok()
+            .filter(|s| !s.is_empty()),
+        std::env::var("APNS_KEY_BASE64")
+            .ok()
+            .filter(|s| !s.is_empty()),
         std::env::var("APNS_KEY_ID"),
         std::env::var("APNS_TEAM_ID"),
     ) {
-        (Ok(path), Ok(key_id), Ok(team_id)) if !path.is_empty() => {
+        (path, base64_key, Ok(key_id), Ok(team_id)) if path.is_some() || base64_key.is_some() => {
             let endpoint = if apns_sandbox {
                 a2::Endpoint::Sandbox
             } else {
                 a2::Endpoint::Production
             };
-            let mut apns_key_file = std::fs::File::open(&path)?;
-            let client = ApnsClient::token(
-                &mut apns_key_file,
-                key_id,
-                team_id,
-                a2::ClientConfig::new(endpoint),
-            )?;
+            let client = if let Some(b64) = base64_key {
+                use base64::Engine;
+                let key_bytes = base64::engine::general_purpose::STANDARD.decode(&b64)?;
+                let mut cursor = std::io::Cursor::new(key_bytes);
+                ApnsClient::token(
+                    &mut cursor,
+                    key_id,
+                    team_id,
+                    a2::ClientConfig::new(endpoint),
+                )?
+            } else {
+                let mut apns_key_file = std::fs::File::open(path.unwrap())?;
+                ApnsClient::token(
+                    &mut apns_key_file,
+                    key_id,
+                    team_id,
+                    a2::ClientConfig::new(endpoint),
+                )?
+            };
             info!(sandbox = apns_sandbox, "APNs client configured");
             Some(Arc::new(client))
         }
