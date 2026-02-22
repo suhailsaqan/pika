@@ -32,9 +32,9 @@ pub fn open_profile_db(data_dir: &str) -> Result<Connection, rusqlite::Error> {
 
 pub fn load_profiles(conn: &Connection) -> HashMap<String, ProfileCache> {
     let mut map = HashMap::new();
-    let mut stmt = match conn
-        .prepare("SELECT pubkey, name, about, picture_url, event_created_at FROM profiles")
-    {
+    let mut stmt = match conn.prepare(
+        "SELECT pubkey, display_name, name, about, picture_url, event_created_at FROM profiles",
+    ) {
         Ok(s) => s,
         Err(e) => {
             tracing::warn!(%e, "failed to prepare profile load query");
@@ -47,7 +47,8 @@ pub fn load_profiles(conn: &Connection) -> HashMap<String, ProfileCache> {
             row.get::<_, Option<String>>(1)?,
             row.get::<_, Option<String>>(2)?,
             row.get::<_, Option<String>>(3)?,
-            row.get::<_, i64>(4)?,
+            row.get::<_, Option<String>>(4)?,
+            row.get::<_, i64>(5)?,
         ))
     }) {
         Ok(r) => r,
@@ -57,12 +58,14 @@ pub fn load_profiles(conn: &Connection) -> HashMap<String, ProfileCache> {
         }
     };
     for row in rows.flatten() {
-        let (pubkey, name, about, picture_url, event_created_at) = row;
+        let (pubkey, display_name, name, about, picture_url, event_created_at) = row;
+
         map.insert(
             pubkey,
             ProfileCache {
                 metadata_json: None,
-                name,
+                name: display_name.or(name.clone()),
+                username: name,
                 about,
                 picture_url,
                 event_created_at,

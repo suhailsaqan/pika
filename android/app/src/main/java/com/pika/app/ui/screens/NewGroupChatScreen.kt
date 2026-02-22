@@ -79,6 +79,7 @@ fun NewGroupChatScreen(manager: AppManager, padding: PaddingValues) {
             val query = searchText.lowercase()
             followList.filter { entry ->
                 entry.name?.lowercase()?.contains(query) == true ||
+                    entry.username?.lowercase()?.contains(query) == true ||
                     entry.npub.lowercase().contains(query) ||
                     entry.pubkey.lowercase().contains(query)
             }

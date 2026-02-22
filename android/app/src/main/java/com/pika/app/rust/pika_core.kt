@@ -2468,6 +2468,8 @@ data class FollowListEntry (
     , 
     var `name`: kotlin.String?
     , 
+    var `username`: kotlin.String?
+    , 
     var `pictureUrl`: kotlin.String?
     
 ){
@@ -2489,6 +2491,7 @@ public object FfiConverterTypeFollowListEntry: FfiConverterRustBuffer<FollowList
             FfiConverterString.read(buf),
             FfiConverterOptionalString.read(buf),
             FfiConverterOptionalString.read(buf),
+            FfiConverterOptionalString.read(buf),
         )
     }
 
@@ -2496,6 +2499,7 @@ public object FfiConverterTypeFollowListEntry: FfiConverterRustBuffer<FollowList
             FfiConverterString.allocationSize(value.`pubkey`) +
             FfiConverterString.allocationSize(value.`npub`) +
             FfiConverterOptionalString.allocationSize(value.`name`) +
+            FfiConverterOptionalString.allocationSize(value.`username`) +
             FfiConverterOptionalString.allocationSize(value.`pictureUrl`)
     )
 
@@ -2503,6 +2507,7 @@ public object FfiConverterTypeFollowListEntry: FfiConverterRustBuffer<FollowList
             FfiConverterString.write(value.`pubkey`, buf)
             FfiConverterString.write(value.`npub`, buf)
             FfiConverterOptionalString.write(value.`name`, buf)
+            FfiConverterOptionalString.write(value.`username`, buf)
             FfiConverterOptionalString.write(value.`pictureUrl`, buf)
     }
 }

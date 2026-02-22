@@ -1025,6 +1025,11 @@ impl DesktopApp {
                 .iter()
                 .filter(|e| {
                     e.name.as_deref().unwrap_or("").to_lowercase().contains(&q)
+                        || e.username
+                            .as_deref()
+                            .unwrap_or("")
+                            .to_lowercase()
+                            .contains(&q)
                         || e.npub.to_lowercase().contains(&q)
                 })
                 .cloned()

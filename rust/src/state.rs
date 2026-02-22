@@ -270,6 +270,7 @@ pub struct FollowListEntry {
     pub pubkey: String,
     pub npub: String,
     pub name: Option<String>,
+    pub username: Option<String>,
     pub picture_url: Option<String>,
 }
 

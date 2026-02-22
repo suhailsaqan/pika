@@ -17,6 +17,7 @@ struct NewGroupChatView: View {
         let query = searchText.lowercased()
         return state.followList.filter { entry in
             if let name = entry.name, name.lowercased().contains(query) { return true }
+            if let username = entry.username, username.lowercased().contains(query) { return true }
             if entry.npub.lowercased().contains(query) { return true }
             if entry.pubkey.lowercased().contains(query) { return true }
             return false

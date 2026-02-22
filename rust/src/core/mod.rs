@@ -49,7 +49,7 @@ pub(crate) fn load_cached_profiles(data_dir: &str) -> Vec<crate::state::FollowLi
     let mut entries: Vec<crate::state::FollowListEntry> = profiles
         .into_iter()
         .map(|(pubkey, cache)| {
-            let npub = nostr_sdk::prelude::PublicKey::from_hex(&pubkey)
+            let npub = PublicKey::from_hex(&pubkey)
                 .ok()
                 .and_then(|pk| pk.to_bech32().ok())
                 .unwrap_or_else(|| pubkey.clone());
@@ -67,6 +67,7 @@ pub(crate) fn load_cached_profiles(data_dir: &str) -> Vec<crate::state::FollowLi
                 pubkey,
                 npub,
                 name: cache.name.filter(|name| !name.trim().is_empty()),
+                username: cache.username.filter(|name| !name.trim().is_empty()),
                 picture_url,
             }
         })
@@ -138,7 +139,8 @@ struct ProfileCache {
     // Full kind:0 event content JSON (preserved for forward compatibility).
     metadata_json: Option<String>,
     // Derived from metadata_json for fast access:
-    name: Option<String>,
+    name: Option<String>,     // pretty name
+    username: Option<String>, // your handle eg @jack
     about: Option<String>,
     picture_url: Option<String>,
     event_created_at: i64,
@@ -160,6 +162,10 @@ impl ProfileCache {
             .as_ref()
             .and_then(|m| m.display_name.clone().or_else(|| m.name.clone()))
             .filter(|s| !s.is_empty());
+        let username = parsed
+            .as_ref()
+            .and_then(|m| m.name.clone())
+            .filter(|s| !s.is_empty());
         let about = parsed
             .as_ref()
             .and_then(|m| m.about.clone())
@@ -172,6 +178,7 @@ impl ProfileCache {
         Self {
             metadata_json,
             name,
+            username,
             about,
             picture_url,
             event_created_at,
@@ -2968,12 +2975,14 @@ impl AppCore {
                             .unwrap_or_else(|| hex_pubkey.clone());
                         let cached = self.profiles.get(&hex_pubkey);
                         let name = cached.and_then(|p| p.name.clone());
+                        let username = cached.and_then(|p| p.username.clone());
                         let picture_url =
                             cached.and_then(|p| p.display_picture_url(&self.data_dir, &hex_pubkey));
                         crate::state::FollowListEntry {
                             pubkey: hex_pubkey,
                             npub,
                             name,
+                            username,
                             picture_url,
                         }
                     })
