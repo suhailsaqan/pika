@@ -1,12 +1,10 @@
 use std::collections::{HashMap, HashSet};
-use std::io::{Read, Write};
-use std::net::{SocketAddr, TcpListener as StdTcpListener, TcpStream};
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::net::SocketAddr;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
-use base64::Engine;
 use futures_util::{SinkExt, StreamExt};
 use nostr_sdk::filter::MatchEventOptions;
 use nostr_sdk::nostr::{Event, EventId, Filter, Kind, PublicKey};
@@ -14,15 +12,14 @@ use nostr_sdk::prelude::{
     Alphabet, Client, EventBuilder, RelayPoolNotification, SingleLetterTag, Tag,
 };
 use pika_core::{AppAction, AppReconciler, AppUpdate, AuthState, CallStatus, FfiApp};
-use sha2::{Digest, Sha256};
 use tempfile::tempdir;
 use tokio::net::TcpListener;
 use tokio::sync::{mpsc, oneshot};
 use tokio_tungstenite::tungstenite::Message;
 
-fn write_config(data_dir: &str, relay_url: &str, blossom_url: Option<&str>) {
+fn write_config(data_dir: &str, relay_url: &str) {
     let path = std::path::Path::new(data_dir).join("pika_config.json");
-    let mut v = serde_json::json!({
+    let v = serde_json::json!({
         "disable_network": false,
         "relay_urls": [relay_url],
         "key_package_relay_urls": [relay_url],
@@ -30,11 +27,6 @@ fn write_config(data_dir: &str, relay_url: &str, blossom_url: Option<&str>) {
         "call_broadcast_prefix": "pika/calls",
         "call_audio_backend": "synthetic",
     });
-    if let Some(url) = blossom_url {
-        v.as_object_mut()
-            .unwrap()
-            .insert("blossom_servers".to_string(), serde_json::json!([url]));
-    }
     std::fs::write(path, serde_json::to_vec(&v).unwrap()).unwrap();
 }
 
@@ -365,199 +357,6 @@ fn handle_client_msg(state: &Arc<Mutex<RelayState>>, conn_id: u64, text: &str) {
     }
 }
 
-#[derive(Clone)]
-struct LocalBlossomHandle {
-    base_url: String,
-    shutdown: Arc<AtomicBool>,
-    state: Arc<Mutex<BlossomState>>,
-}
-
-impl Drop for LocalBlossomHandle {
-    fn drop(&mut self) {
-        self.shutdown.store(true, Ordering::Relaxed);
-        if let Some(authority) = self.base_url.strip_prefix("http://") {
-            let _ = TcpStream::connect(authority);
-        }
-    }
-}
-
-#[derive(Default)]
-struct BlossomState {
-    blobs: HashMap<String, Vec<u8>>,
-    uploads: Vec<String>,
-}
-
-fn start_local_blossom() -> (LocalBlossomHandle, JoinHandle<()>) {
-    let listener = StdTcpListener::bind("127.0.0.1:0").expect("bind blossom");
-    listener
-        .set_nonblocking(true)
-        .expect("set_nonblocking blossom");
-    let addr = listener.local_addr().expect("blossom local addr");
-    let base_url = format!("http://{}", addr);
-
-    let state = Arc::new(Mutex::new(BlossomState::default()));
-    let shutdown = Arc::new(AtomicBool::new(false));
-    let state_for_thread = state.clone();
-    let shutdown_for_thread = shutdown.clone();
-    let base_url_for_thread = base_url.clone();
-
-    let thread = std::thread::spawn(move || {
-        while !shutdown_for_thread.load(Ordering::Relaxed) {
-            match listener.accept() {
-                Ok((mut stream, _)) => {
-                    handle_blossom_connection(&mut stream, &base_url_for_thread, &state_for_thread)
-                }
-                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                    std::thread::sleep(Duration::from_millis(20));
-                }
-                Err(_) => break,
-            }
-        }
-    });
-
-    (
-        LocalBlossomHandle {
-            base_url,
-            shutdown,
-            state,
-        },
-        thread,
-    )
-}
-
-fn handle_blossom_connection(
-    stream: &mut TcpStream,
-    base_url: &str,
-    state: &Arc<Mutex<BlossomState>>,
-) {
-    let Some((method, raw_path, headers, body)) = read_http_request(stream) else {
-        return;
-    };
-    let path = raw_path.split('?').next().unwrap_or(raw_path.as_str());
-
-    if method == "PUT" && path == "/upload" {
-        let digest = Sha256::digest(&body);
-        let sha_hex = hex::encode(digest);
-        let content_type = headers.get("content-type").cloned();
-        let size = body.len() as u32;
-        {
-            let mut st = state.lock().unwrap();
-            st.blobs.insert(sha_hex.clone(), body);
-            st.uploads.push(sha_hex.clone());
-        }
-
-        let uploaded = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs();
-
-        let response = serde_json::json!({
-            "url": format!("{}/{}", base_url, sha_hex),
-            "sha256": sha_hex,
-            "size": size,
-            "type": content_type,
-            "uploaded": uploaded,
-        });
-        write_http_response(
-            stream,
-            200,
-            "application/json",
-            response.to_string().as_bytes(),
-        );
-        return;
-    }
-
-    if method == "GET" {
-        let sha = path.trim_start_matches('/');
-        let blob = { state.lock().unwrap().blobs.get(sha).cloned() };
-        if let Some(data) = blob {
-            write_http_response(stream, 200, "application/octet-stream", &data);
-        } else {
-            write_http_response(stream, 404, "text/plain", b"not found");
-        }
-        return;
-    }
-
-    if method == "HEAD" {
-        let sha = path.trim_start_matches('/');
-        let exists = { state.lock().unwrap().blobs.contains_key(sha) };
-        if exists {
-            write_http_response(stream, 200, "text/plain", b"");
-        } else {
-            write_http_response(stream, 404, "text/plain", b"");
-        }
-        return;
-    }
-
-    write_http_response(stream, 404, "text/plain", b"not found");
-}
-
-fn read_http_request(
-    stream: &mut TcpStream,
-) -> Option<(String, String, HashMap<String, String>, Vec<u8>)> {
-    let mut buf = Vec::<u8>::new();
-    let mut tmp = [0u8; 4096];
-    let mut header_end: Option<usize> = None;
-
-    while header_end.is_none() && buf.len() < 1024 * 1024 {
-        let n = stream.read(&mut tmp).ok()?;
-        if n == 0 {
-            return None;
-        }
-        buf.extend_from_slice(&tmp[..n]);
-        header_end = buf.windows(4).position(|w| w == b"\r\n\r\n");
-    }
-
-    let header_end = header_end?;
-    let head = String::from_utf8_lossy(&buf[..header_end]).to_string();
-    let mut lines = head.split("\r\n");
-    let request_line = lines.next()?.to_string();
-    let mut request_parts = request_line.split_whitespace();
-    let method = request_parts.next()?.to_string();
-    let path = request_parts.next()?.to_string();
-
-    let mut headers = HashMap::<String, String>::new();
-    let mut content_length: usize = 0;
-    for line in lines {
-        let Some((k, v)) = line.split_once(':') else {
-            continue;
-        };
-        let key = k.trim().to_ascii_lowercase();
-        let value = v.trim().to_string();
-        if key == "content-length" {
-            content_length = value.parse::<usize>().unwrap_or(0);
-        }
-        headers.insert(key, value);
-    }
-
-    let mut body = buf[(header_end + 4)..].to_vec();
-    while body.len() < content_length {
-        let n = stream.read(&mut tmp).ok()?;
-        if n == 0 {
-            break;
-        }
-        body.extend_from_slice(&tmp[..n]);
-    }
-    body.truncate(content_length);
-
-    Some((method, path, headers, body))
-}
-
-fn write_http_response(stream: &mut TcpStream, status: u16, content_type: &str, body: &[u8]) {
-    let reason = match status {
-        200 => "OK",
-        404 => "Not Found",
-        _ => "Error",
-    };
-    let head = format!(
-        "HTTP/1.1 {status} {reason}\r\nContent-Length: {}\r\nContent-Type: {content_type}\r\nConnection: close\r\n\r\n",
-        body.len()
-    );
-    let _ = stream.write_all(head.as_bytes());
-    let _ = stream.write_all(body);
-    let _ = stream.flush();
-}
-
 #[test]
 fn local_relay_delivers_events_to_nostr_sdk_notifications() {
     let (relay, relay_thread) = start_local_relay();
@@ -615,8 +414,8 @@ fn alice_sends_bob_receives_over_local_relay() {
 
     let dir_a = tempdir().unwrap();
     let dir_b = tempdir().unwrap();
-    write_config(&dir_a.path().to_string_lossy(), &general_relay.url, None);
-    write_config(&dir_b.path().to_string_lossy(), &general_relay.url, None);
+    write_config(&dir_a.path().to_string_lossy(), &general_relay.url);
+    write_config(&dir_b.path().to_string_lossy(), &general_relay.url);
 
     let alice = FfiApp::new(dir_a.path().to_string_lossy().to_string(), String::new());
     let bob = FfiApp::new(dir_b.path().to_string_lossy().to_string(), String::new());
@@ -938,168 +737,11 @@ fn alice_sends_bob_receives_over_local_relay() {
 }
 
 #[test]
-fn alice_uploads_media_bob_downloads_over_local_blossom() {
-    let (general_relay, general_thread) = start_local_relay();
-    let (blossom, blossom_thread) = start_local_blossom();
-
-    let dir_a = tempdir().unwrap();
-    let dir_b = tempdir().unwrap();
-    write_config(
-        &dir_a.path().to_string_lossy(),
-        &general_relay.url,
-        Some(&blossom.base_url),
-    );
-    write_config(
-        &dir_b.path().to_string_lossy(),
-        &general_relay.url,
-        Some(&blossom.base_url),
-    );
-
-    let alice = FfiApp::new(dir_a.path().to_string_lossy().to_string(), String::new());
-    let bob = FfiApp::new(dir_b.path().to_string_lossy().to_string(), String::new());
-
-    alice.dispatch(AppAction::CreateAccount);
-    bob.dispatch(AppAction::CreateAccount);
-
-    wait_until("alice logged in", Duration::from_secs(10), || {
-        matches!(alice.state().auth, AuthState::LoggedIn { .. })
-    });
-    wait_until("bob logged in", Duration::from_secs(10), || {
-        matches!(bob.state().auth, AuthState::LoggedIn { .. })
-    });
-
-    let bob_npub = match bob.state().auth {
-        AuthState::LoggedIn { npub, .. } => npub,
-        _ => unreachable!(),
-    };
-
-    alice.dispatch(AppAction::CreateChat {
-        peer_npub: bob_npub,
-    });
-    wait_until("alice chat opened", Duration::from_secs(20), || {
-        alice.state().current_chat.is_some()
-    });
-    wait_until("bob has chat", Duration::from_secs(20), || {
-        !bob.state().chat_list.is_empty()
-    });
-
-    let chat_id = alice.state().current_chat.as_ref().unwrap().chat_id.clone();
-    wait_until("bob chat id matches", Duration::from_secs(20), || {
-        bob.state().chat_list.iter().any(|c| c.chat_id == chat_id)
-    });
-
-    let media_bytes = b"pika-media-upload-e2e".to_vec();
-    let media_b64 = base64::engine::general_purpose::STANDARD.encode(&media_bytes);
-
-    alice.dispatch(AppAction::SendChatMedia {
-        chat_id: chat_id.clone(),
-        data_base64: media_b64,
-        mime_type: "application/octet-stream".into(),
-        filename: "sample.bin".into(),
-        caption: String::new(),
-    });
-
-    wait_until(
-        "alice media message is sent",
-        Duration::from_secs(20),
-        || {
-            alice
-                .state()
-                .current_chat
-                .as_ref()
-                .and_then(|c| c.messages.iter().find(|m| !m.media.is_empty()))
-                .map(|m| matches!(m.delivery, pika_core::MessageDeliveryState::Sent))
-                .unwrap_or(false)
-        },
-    );
-
-    wait_until("blossom received upload", Duration::from_secs(10), || {
-        let st = blossom.state.lock().unwrap();
-        !st.uploads.is_empty()
-    });
-
-    bob.dispatch(AppAction::OpenChat {
-        chat_id: chat_id.clone(),
-    });
-    wait_until("bob sees media message", Duration::from_secs(20), || {
-        bob.state()
-            .current_chat
-            .as_ref()
-            .and_then(|c| c.messages.iter().find(|m| !m.media.is_empty()))
-            .is_some()
-    });
-
-    let (message_id, original_hash_hex) = {
-        let st = bob.state();
-        let chat = st.current_chat.unwrap();
-        let msg = chat
-            .messages
-            .iter()
-            .find(|m| !m.media.is_empty())
-            .expect("media message");
-        let media = msg.media.first().expect("media attachment");
-        assert!(
-            media.url.starts_with(&blossom.base_url),
-            "media URL should come from local blossom server"
-        );
-        assert_eq!(media.mime_type, "application/octet-stream");
-        assert_eq!(media.filename, "sample.bin");
-        assert_eq!(media.original_hash_hex.len(), 64);
-        assert_eq!(media.nonce_hex.len(), 24);
-        assert!(!media.scheme_version.is_empty());
-        assert!(
-            media.local_path.is_none(),
-            "receiver should lazy-download media"
-        );
-        (msg.id.clone(), media.original_hash_hex.clone())
-    };
-
-    bob.dispatch(AppAction::DownloadChatMedia {
-        chat_id: chat_id.clone(),
-        message_id,
-        original_hash_hex: original_hash_hex.clone(),
-    });
-
-    let downloaded_path = {
-        let mut path: Option<String> = None;
-        wait_until(
-            "bob media download decrypts",
-            Duration::from_secs(20),
-            || {
-                let st = bob.state();
-                let maybe = st.current_chat.as_ref().and_then(|chat| {
-                    chat.messages
-                        .iter()
-                        .find(|m| !m.media.is_empty())
-                        .and_then(|m| m.media.first())
-                        .and_then(|m| m.local_path.clone())
-                });
-                if let Some(p) = maybe {
-                    path = Some(p);
-                    true
-                } else {
-                    false
-                }
-            },
-        );
-        path.expect("downloaded file path")
-    };
-
-    let disk_bytes = std::fs::read(&downloaded_path).expect("read downloaded media");
-    assert_eq!(disk_bytes, media_bytes);
-
-    drop(blossom);
-    blossom_thread.join().unwrap();
-    drop(general_relay);
-    general_thread.join().unwrap();
-}
-
-#[test]
 fn send_failure_then_retry_succeeds_over_local_relay() {
     let (relay, relay_thread) = start_local_relay();
 
     let dir = tempdir().unwrap();
-    write_config(&dir.path().to_string_lossy(), &relay.url, None);
+    write_config(&dir.path().to_string_lossy(), &relay.url);
 
     let app = FfiApp::new(dir.path().to_string_lossy().to_string(), String::new());
     app.dispatch(AppAction::CreateAccount);
@@ -1160,8 +802,8 @@ fn call_invite_accept_end_flow_over_local_relay() {
 
     let dir_a = tempdir().unwrap();
     let dir_b = tempdir().unwrap();
-    write_config(&dir_a.path().to_string_lossy(), &relay.url, None);
-    write_config(&dir_b.path().to_string_lossy(), &relay.url, None);
+    write_config(&dir_a.path().to_string_lossy(), &relay.url);
+    write_config(&dir_b.path().to_string_lossy(), &relay.url);
 
     let alice = FfiApp::new(dir_a.path().to_string_lossy().to_string(), String::new());
     let bob = FfiApp::new(dir_b.path().to_string_lossy().to_string(), String::new());
@@ -1475,8 +1117,8 @@ fn call_invite_with_invalid_relay_auth_is_rejected() {
 
     let dir_a = tempdir().unwrap();
     let dir_b = tempdir().unwrap();
-    write_config(&dir_a.path().to_string_lossy(), &relay.url, None);
-    write_config(&dir_b.path().to_string_lossy(), &relay.url, None);
+    write_config(&dir_a.path().to_string_lossy(), &relay.url);
+    write_config(&dir_b.path().to_string_lossy(), &relay.url);
 
     let alice = FfiApp::new(dir_a.path().to_string_lossy().to_string(), String::new());
     let bob = FfiApp::new(dir_b.path().to_string_lossy().to_string(), String::new());
@@ -1579,8 +1221,8 @@ fn duplicate_group_message_does_not_duplicate_in_ui() {
 
     let dir_a = tempdir().unwrap();
     let dir_b = tempdir().unwrap();
-    write_config(&dir_a.path().to_string_lossy(), &general_relay.url, None);
-    write_config(&dir_b.path().to_string_lossy(), &general_relay.url, None);
+    write_config(&dir_a.path().to_string_lossy(), &general_relay.url);
+    write_config(&dir_b.path().to_string_lossy(), &general_relay.url);
 
     let alice = FfiApp::new(dir_a.path().to_string_lossy().to_string(), String::new());
     let bob = FfiApp::new(dir_b.path().to_string_lossy().to_string(), String::new());
