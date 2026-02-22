@@ -3322,7 +3322,8 @@ impl AppCore {
 
                             let current =
                                 self.state.current_chat.as_ref().map(|c| c.chat_id.as_str());
-                            if current != Some(chat_id.as_str()) && !is_call_signal {
+                            if current != Some(chat_id.as_str()) && event.kind == Kind::ChatMessage
+                            {
                                 *self.unread_counts.entry(chat_id.clone()).or_insert(0) += 1;
                             } else if is_app_message && !is_call_signal {
                                 self.loaded_count
@@ -3559,19 +3560,13 @@ impl AppCore {
                     "typing",
                 );
 
-                let options = mdk_core::messages::CreateMessageOptions { skip_storage: true };
-
-                let wrapper =
-                    match sess
-                        .mdk
-                        .create_message_with_options(&group.mls_group_id, rumor, options)
-                    {
-                        Ok(ev) => ev,
-                        Err(e) => {
-                            tracing::warn!(err = %e, "typing indicator create_message failed");
-                            return;
-                        }
-                    };
+                let wrapper = match sess.mdk.create_message(&group.mls_group_id, rumor) {
+                    Ok(ev) => ev,
+                    Err(e) => {
+                        tracing::warn!(err = %e, "typing indicator create_message failed");
+                        return;
+                    }
+                };
 
                 let client = sess.client.clone();
                 self.runtime.spawn(async move {

@@ -16,6 +16,6 @@ members = [
 [workspace.dependencies]
 # Pin MDK once for the whole workspace to avoid version skew between members.
 # (MDK is load-bearing for interop: MLS state formats, key package behavior, etc.)
-mdk-core = { git = "https://github.com/marmot-protocol/mdk", rev = "31335bc96dbb7a5135bfd4e3b7fa306f112e49f5", features = ["mip04"] }
-mdk-sqlite-storage = { git = "https://github.com/marmot-protocol/mdk", rev = "31335bc96dbb7a5135bfd4e3b7fa306f112e49f5" }
-mdk-storage-traits = { git = "https://github.com/marmot-protocol/mdk", rev = "31335bc96dbb7a5135bfd4e3b7fa306f112e49f5" }
+mdk-core = { git = "https://github.com/marmot-protocol/mdk", rev = "d9f372743625de17f6fcd81eecd5084917a8ebb1", features = ["mip04"] }
+mdk-sqlite-storage = { git = "https://github.com/marmot-protocol/mdk", rev = "d9f372743625de17f6fcd81eecd5084917a8ebb1" }
+mdk-storage-traits = { git = "https://github.com/marmot-protocol/mdk", rev = "d9f372743625de17f6fcd81eecd5084917a8ebb1" }

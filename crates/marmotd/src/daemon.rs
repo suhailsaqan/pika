@@ -2232,11 +2232,7 @@ pub async fn daemon_main(
                             "typing",
                         );
 
-                        let options = CreateMessageOptions {
-                            skip_storage: true,
-                        };
-
-                        let wrapper = match mdk.create_message_with_options(&mls_group_id, rumor, options) {
+                        let wrapper = match mdk.create_message(&mls_group_id, rumor) {
                             Ok(ev) => ev,
                             Err(e) => {
                                 out_tx.send(out_error(request_id, "mdk_error", format!("{e:#}"))).ok();

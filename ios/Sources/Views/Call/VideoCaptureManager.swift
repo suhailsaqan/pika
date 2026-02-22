@@ -109,6 +109,10 @@ final class VideoCaptureManager: NSObject {
 
     private func setupCaptureSession() {
         captureSession.beginConfiguration()
+        // Prevent AVCaptureSession from reconfiguring the AVAudioSession — the
+        // CallAudioSessionCoordinator already sets .playAndRecord / .voiceChat
+        // for duplex voice and we don't want video capture to override that.
+        captureSession.automaticallyConfiguresApplicationAudioSession = false
         captureSession.sessionPreset = .hd1280x720
 
         // Remove old inputs/outputs

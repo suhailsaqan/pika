@@ -102,7 +102,7 @@ impl AppCore {
                 .mdk
                 .get_messages(&g.mls_group_id, Some(Pagination::new(Some(20), Some(0))))
                 .ok()
-                .and_then(|v| v.into_iter().find(|m| m.kind != CALL_SIGNAL_KIND));
+                .and_then(|v| v.into_iter().find(|m| m.kind == Kind::ChatMessage));
 
             let stored_last_message = newest.as_ref().map(|m| m.content.clone());
             let stored_last_message_at = newest
@@ -286,7 +286,7 @@ impl AppCore {
         let storage_len = messages.len();
         let visible_messages: Vec<_> = messages
             .into_iter()
-            .filter(|m| m.kind != super::CALL_SIGNAL_KIND)
+            .filter(|m| m.kind == Kind::ChatMessage || m.kind == Kind::Reaction)
             .collect();
 
         // Separate reactions (kind 7) from regular messages.
@@ -294,7 +294,7 @@ impl AppCore {
         let mut reaction_map: HashMap<String, Vec<(String, String)>> = HashMap::new();
         let mut regular_messages = Vec::new();
         for m in &visible_messages {
-            if m.kind == nostr_sdk::Kind::Reaction {
+            if m.kind == Kind::Reaction {
                 // Find the target event id from the `e` tag.
                 if let Some(target_id) = first_event_tag_id(&m.tags) {
                     let emoji = if m.content.is_empty() || m.content == "+" {
@@ -499,7 +499,7 @@ impl AppCore {
 
         let mut older: Vec<ChatMessage> = page
             .into_iter()
-            .filter(|m| m.kind != super::CALL_SIGNAL_KIND)
+            .filter(|m| m.kind == Kind::ChatMessage || m.kind == Kind::Reaction)
             .rev()
             .map(|m| {
                 let id = m.id.to_hex();
