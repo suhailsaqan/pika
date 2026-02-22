@@ -40,7 +40,10 @@
           ];
         };
 
-        androidSdk = android-nixpkgs.sdk.${system} (sdkPkgs: with sdkPkgs; [
+        hasAndroidSdk = builtins.hasAttr system android-nixpkgs.sdk;
+        hasMoqRelay = builtins.hasAttr system moq.packages;
+
+        androidSdk = if hasAndroidSdk then android-nixpkgs.sdk.${system} (sdkPkgs: with sdkPkgs; [
           cmdline-tools-latest
           platform-tools
           build-tools-34-0-0
@@ -52,7 +55,7 @@
           (if pkgs.stdenv.isDarwin
            then system-images-android-35-google-apis-arm64-v8a
            else system-images-android-35-google-apis-x86-64)
-        ]);
+        ]) else null;
 
         # `rmp` runner on PATH inside `nix develop` without packaging the full Rust workspace.
         # Wrapper builds the workspace binary then execs it.
@@ -173,8 +176,6 @@
 
           packages = [
             rustToolchain
-            androidSdk
-            pkgs.jdk17_headless
             pkgs.just
             pkgs.nodejs_22
             pkgs.python3
@@ -188,9 +189,6 @@
             pkgs.gnused
             cargoDinghy
             pkgs.nostr-rs-relay
-            moq.packages.${system}.moq-relay
-            pkgs.cargo-ndk
-            pkgs.gradle
             pkgs.age
             pkgs.age-plugin-yubikey
             pkgs.openssl
@@ -209,9 +207,18 @@
             pkgs.xvfb-run
             pkgs.alsa-lib
             pkgs.llvmPackages.libclang
-          ] ++ linuxGuiRuntimeLibraries;
+          ] ++ linuxGuiRuntimeLibraries
+          ++ pkgs.lib.optionals hasAndroidSdk [
+            androidSdk
+            pkgs.jdk17_headless
+            pkgs.cargo-ndk
+            pkgs.gradle
+          ] ++ pkgs.lib.optionals hasMoqRelay [
+            moq.packages.${system}.moq-relay
+          ];
 
           shellHook = ''
+            ${if hasAndroidSdk then ''
             export ANDROID_HOME=${androidSdk}/share/android-sdk
             export ANDROID_SDK_ROOT=${androidSdk}/share/android-sdk
             export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/28.2.13676358"
@@ -221,6 +228,7 @@
             export ANDROID_USER_HOME="''${ANDROID_USER_HOME:-''${XDG_STATE_HOME:-$HOME/.local/state}/android}"
             export JAVA_HOME=${pkgs.jdk17_headless}
             export PATH=$ANDROID_HOME/emulator:$ANDROID_HOME/platform-tools:$ANDROID_HOME/cmdline-tools/latest/bin:$PATH
+            '' else ""}
             export PATH=$PWD/tools:$PATH
 
             if [ "$(uname -s)" = "Linux" ] && [ -n "${linuxGuiRuntimeLibraryPath}" ]; then
@@ -239,6 +247,7 @@
               fi
             fi
 
+            ${if hasAndroidSdk then ''
             # Needed for adb when VPN is running
             export ADB_MDNS_OPENSCREEN=0
 
@@ -256,6 +265,7 @@
                 echo "warning: android-avd-ensure failed; continuing shell startup" >&2
               fi
             fi
+            '' else ""}
 
             if [ "$(uname -s)" = "Darwin" ]; then
               # Nix-provided Rust often links against a Nix Apple SDK that does not include
@@ -299,11 +309,13 @@
               fi
             fi
 
+            ${if hasAndroidSdk then ''
             # Help Gradle find the SDK/NDK without Android Studio.
             mkdir -p android
             cat > android/local.properties <<EOF
             sdk.dir=$ANDROID_HOME
 EOF
+            '' else ""}
 
             # PostgreSQL for pika-notifications
             export PGDATA="$PWD/crates/pika-notifications/.pgdata"
@@ -328,8 +340,10 @@ PGEOF
             echo ""
             echo "Pika dev environment ready"
             echo "  Rust:         $(rustc --version)"
+            ${if hasAndroidSdk then ''
             echo "  Android:      $ANDROID_HOME"
             echo "  NDK:          $ANDROID_NDK_HOME"
+            '' else ""}
             echo "  DATABASE_URL: $DATABASE_URL"
             if [ "$(uname -s)" = "Darwin" ]; then
               echo "  Xcode:        ''${DEVELOPER_DIR:-not found}"
