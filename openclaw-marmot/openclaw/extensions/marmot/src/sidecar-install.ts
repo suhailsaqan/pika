@@ -28,6 +28,28 @@ const VERSION_CHECK_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
 const MAX_KEPT_VERSIONS = 2; // current + one previous
 
 // ---------------------------------------------------------------------------
+// Plugin version (used to constrain auto-updates to patch-level only)
+// ---------------------------------------------------------------------------
+
+let _pluginVersion: string | null = null;
+
+function getPluginVersion(): string {
+  if (_pluginVersion) return _pluginVersion;
+  try {
+    const pkgPath = path.resolve(
+      path.dirname(new URL(import.meta.url).pathname),
+      "..",
+      "package.json",
+    );
+    const pkg = JSON.parse(require("node:fs").readFileSync(pkgPath, "utf-8"));
+    _pluginVersion = typeof pkg.version === "string" ? pkg.version : "0.0.0";
+  } catch {
+    _pluginVersion = "0.0.0";
+  }
+  return _pluginVersion;
+}
+
+// ---------------------------------------------------------------------------
 // Version utilities
 // ---------------------------------------------------------------------------
 
@@ -39,6 +61,12 @@ export function compareVersionsDesc(a: string, b: string): number {
   const [aMaj = 0, aMin = 0, aPat = 0] = parseVer(a);
   const [bMaj = 0, bMin = 0, bPat = 0] = parseVer(b);
   return bMaj - aMaj || bMin - aMin || bPat - aPat;
+}
+
+export function isCompatibleVersion(candidate: string, pluginVersion: string): boolean {
+  const [cMaj = 0, cMin = 0] = parseVer(candidate);
+  const [pMaj = 0, pMin = 0] = parseVer(pluginVersion);
+  return cMaj === pMaj && cMin === pMin;
 }
 
 // ---------------------------------------------------------------------------
@@ -147,10 +175,14 @@ function normalizeRelease(raw: any): GitHubRelease {
 }
 
 // Monorepo: "latest" release might belong to another component (e.g. pika/v*).
-// Scan release pages to find the newest release that has our platform asset.
-async function fetchLatestReleaseWithAsset(params: {
+// Scan release pages to find the newest compatible release that has our platform asset.
+// Only patch-level updates are allowed: the release must share the same major.minor
+// as the plugin version (e.g. plugin 0.5.x only accepts marmotd 0.5.y releases).
+async function fetchLatestCompatibleRelease(params: {
   repo: string;
   assetName: string;
+  pluginVersion: string;
+  log: MarmotLog;
 }): Promise<GitHubRelease> {
   const headers = githubHeaders();
 
@@ -165,13 +197,19 @@ async function fetchLatestReleaseWithAsset(params: {
 
     for (const raw of list) {
       const rel = normalizeRelease(raw);
-      if (rel.assets.some((a) => a.name === params.assetName)) {
+      if (!rel.assets.some((a) => a.name === params.assetName)) continue;
+      if (isCompatibleVersion(rel.tag_name, params.pluginVersion)) {
         return rel;
       }
+      params.log.debug?.(
+        `[marmot] skipping ${rel.tag_name} (incompatible with plugin v${params.pluginVersion}, patch-only updates allowed)`,
+      );
     }
   }
 
-  throw new Error(`no GitHub release found with asset ${params.assetName} in ${params.repo}`);
+  throw new Error(
+    `no compatible GitHub release found for plugin v${params.pluginVersion} with asset ${params.assetName} in ${params.repo}`,
+  );
 }
 
 async function fetchReleaseByTag(params: {
@@ -190,11 +228,15 @@ async function fetchReleaseByTag(params: {
 async function fetchRelease(params: {
   repo: string;
   version: string;
+  log: MarmotLog;
 }): Promise<GitHubRelease> {
   if (!params.version || params.version === "latest") {
-    return await fetchLatestReleaseWithAsset({
+    const pluginVersion = getPluginVersion();
+    return await fetchLatestCompatibleRelease({
       repo: params.repo,
       assetName: resolvePlatformAsset(),
+      pluginVersion,
+      log: params.log,
     });
   }
   return await fetchReleaseByTag(params);
@@ -231,7 +273,7 @@ async function resolveVersion(
   }
 
   log.info?.("[marmot] checking GitHub for latest marmotd release...");
-  const release = await fetchRelease({ repo, version: "latest" });
+  const release = await fetchRelease({ repo, version: "latest", log });
   const version = release.tag_name;
 
   await mkdir(cacheDir, { recursive: true });
@@ -368,7 +410,7 @@ async function ensureInstalledBinary(params: {
   }
 
   const assetName = resolvePlatformAsset();
-  const release = await fetchRelease({ repo, version });
+  const release = await fetchRelease({ repo, version, log });
   const asset = release.assets.find((a) => a.name === assetName);
   if (!asset) {
     throw new Error(`release ${release.tag_name} missing asset ${assetName}`);
