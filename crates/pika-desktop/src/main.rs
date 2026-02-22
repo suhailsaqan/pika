@@ -5,6 +5,7 @@ mod video_shader;
 mod views;
 
 use app_manager::AppManager;
+use iced::widget::operation;
 use iced::widget::{column, container, row, rule, text};
 use iced::{Element, Fill, Font, Size, Subscription, Task, Theme};
 use pika_core::{
@@ -68,6 +69,10 @@ struct DesktopApp {
     filtered_follows: Vec<pika_core::FollowListEntry>,
     message_input: String,
     reply_to_message_id: Option<String>,
+    // Mention autocomplete (group chats)
+    show_mention_picker: bool,
+    mention_query: String,
+    inserted_mentions: Vec<(String, String)>, // (display_tag, npub)
     optimistic_selected_chat_id: Option<String>,
     overlay: UiOverlay,
     // Group creation
@@ -140,6 +145,9 @@ pub enum Message {
     CloseEmojiPicker,
     HoverMessage(String),
     UnhoverMessage,
+    // Mention autocomplete
+    MentionSelected { npub: String, name: String },
+    MentionSelectTop,
     // Device management
     ShowDeviceManagement,
     CloseDeviceManagement,
@@ -196,6 +204,16 @@ impl DesktopApp {
                 iced::time::every(Duration::from_secs(30)).map(|_| Message::RelativeTimeTick);
 
             let mut subs = vec![core_updates, relative_time_ticks];
+
+            if self.show_mention_picker {
+                subs.push(iced::keyboard::listen().filter_map(|event| match event {
+                    iced::keyboard::Event::KeyPressed {
+                        key: iced::keyboard::Key::Named(iced::keyboard::key::Named::Tab),
+                        ..
+                    } => Some(Message::MentionSelectTop),
+                    _ => None,
+                }));
+            }
             let is_active_call = self
                 .state
                 .active_call
@@ -300,6 +318,9 @@ impl DesktopApp {
             Message::OpenChat(chat_id) => {
                 self.optimistic_selected_chat_id = Some(chat_id.clone());
                 self.emoji_picker_message_id = None;
+                self.show_mention_picker = false;
+                self.mention_query.clear();
+                self.inserted_mentions.clear();
                 self.clear_all_overlays();
                 if let Some(manager) = &self.manager {
                     manager.dispatch(AppAction::OpenChat { chat_id });
@@ -315,23 +336,63 @@ impl DesktopApp {
                         }
                     }
                 }
+                let was_showing = self.show_mention_picker;
+                let is_group = self
+                    .state
+                    .current_chat
+                    .as_ref()
+                    .map(|c| c.is_group)
+                    .unwrap_or(false);
+                if is_group {
+                    if let Some(at_pos) = value.rfind('@') {
+                        let prefix = &value[..at_pos];
+                        let is_word_start =
+                            prefix.is_empty() || prefix.ends_with(' ') || prefix.ends_with('\n');
+                        if is_word_start {
+                            let query = &value[at_pos + 1..];
+                            if !query.contains(' ') {
+                                self.show_mention_picker = true;
+                                self.mention_query = query.to_string();
+                            } else {
+                                self.show_mention_picker = false;
+                                self.mention_query.clear();
+                            }
+                        } else if self.show_mention_picker {
+                            self.show_mention_picker = false;
+                            self.mention_query.clear();
+                        }
+                    } else if self.show_mention_picker {
+                        self.show_mention_picker = false;
+                        self.mention_query.clear();
+                    }
+                }
                 self.message_input = value;
+                if was_showing != self.show_mention_picker {
+                    return operation::focus(views::conversation::MESSAGE_INPUT_ID);
+                }
             }
             Message::SendMessage => {
                 let content = self.message_input.trim().to_string();
                 if content.is_empty() {
                     return Task::none();
                 }
+                let mut wire = content;
+                for (display, npub) in &self.inserted_mentions {
+                    wire = wire.replace(display.as_str(), &format!("nostr:{npub}"));
+                }
                 if let Some(chat) = &self.state.current_chat {
                     if let Some(manager) = &self.manager {
                         manager.dispatch(AppAction::SendMessage {
                             chat_id: chat.chat_id.clone(),
-                            content,
+                            content: wire,
                             kind: None,
                             reply_to_message_id: self.reply_to_message_id.clone(),
                         });
                     }
                     self.message_input.clear();
+                    self.inserted_mentions.clear();
+                    self.show_mention_picker = false;
+                    self.mention_query.clear();
                     self.reply_to_message_id = None;
                     self.emoji_picker_message_id = None;
                 }
@@ -580,6 +641,60 @@ impl DesktopApp {
                 self.hovered_message_id = None;
             }
 
+            // ── Mention autocomplete ──────────────────────────────────
+            Message::MentionSelected { npub, name } => {
+                let display_tag = format!("@{name}");
+                if let Some(at_pos) = self.message_input.rfind('@') {
+                    self.message_input.truncate(at_pos);
+                }
+                self.message_input.push_str(&display_tag);
+                self.message_input.push(' ');
+                self.inserted_mentions.push((display_tag, npub));
+                self.show_mention_picker = false;
+                self.mention_query.clear();
+                return operation::focus(views::conversation::MESSAGE_INPUT_ID);
+            }
+            Message::MentionSelectTop => {
+                if !self.show_mention_picker {
+                    return Task::none();
+                }
+                let members = self
+                    .state
+                    .current_chat
+                    .as_ref()
+                    .map(|c| &c.members[..])
+                    .unwrap_or(&[]);
+                let q = self.mention_query.to_lowercase();
+                let top = if q.is_empty() {
+                    members.first()
+                } else {
+                    members.iter().find(|m| {
+                        m.name
+                            .as_deref()
+                            .map(|n| n.to_lowercase().starts_with(&q))
+                            .unwrap_or(false)
+                            || m.npub.to_lowercase().starts_with(&q)
+                    })
+                };
+                if let Some(member) = top {
+                    let name = member
+                        .name
+                        .clone()
+                        .unwrap_or_else(|| member.npub.chars().take(8).collect());
+                    let display_tag = format!("@{name}");
+                    if let Some(at_pos) = self.message_input.rfind('@') {
+                        self.message_input.truncate(at_pos);
+                    }
+                    self.message_input.push_str(&display_tag);
+                    self.message_input.push(' ');
+                    self.inserted_mentions
+                        .push((display_tag, member.npub.clone()));
+                    self.show_mention_picker = false;
+                    self.mention_query.clear();
+                    return operation::focus(views::conversation::MESSAGE_INPUT_ID);
+                }
+            }
+
             // ── Calling ──────────────────────────────────────────────
             Message::StartCall => {
                 if let Some(chat) = &self.state.current_chat {
@@ -818,6 +933,8 @@ impl DesktopApp {
                     self.emoji_picker_message_id.as_deref(),
                     self.hovered_message_id.as_deref(),
                     replying_to,
+                    self.show_mention_picker,
+                    &self.mention_query,
                     cache,
                 )
             } else {
@@ -858,6 +975,9 @@ impl DesktopApp {
             filtered_follows: Vec::new(),
             message_input: String::new(),
             reply_to_message_id: None,
+            show_mention_picker: false,
+            mention_query: String::new(),
+            inserted_mentions: Vec::new(),
             optimistic_selected_chat_id: None,
             overlay: UiOverlay::None,
             group_name_input: String::new(),

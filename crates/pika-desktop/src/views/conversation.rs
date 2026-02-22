@@ -2,7 +2,7 @@ use iced::widget::{
     button, column, container, operation, row, rule, scrollable, text, text_input, Space,
 };
 use iced::{Alignment, Element, Fill, Task, Theme};
-use pika_core::{CallState, CallStatus, ChatMessage, ChatViewState};
+use pika_core::{CallState, CallStatus, ChatMessage, ChatViewState, MemberInfo};
 use std::collections::HashMap;
 
 use crate::theme;
@@ -11,6 +11,7 @@ use crate::views::message_bubble::message_bubble;
 use crate::Message;
 
 const CONVERSATION_SCROLL_ID: &str = "conversation-scroll";
+pub const MESSAGE_INPUT_ID: &str = "message-input";
 
 pub fn jump_to_message_task(chat: &ChatViewState, message_id: &str) -> Task<Message> {
     if chat.messages.is_empty() {
@@ -32,6 +33,7 @@ pub fn jump_to_message_task(chat: &ChatViewState, message_id: &str) -> Task<Mess
 }
 
 /// Center pane: conversation header + message list + input bar.
+#[allow(clippy::too_many_arguments)]
 pub fn conversation_view<'a>(
     chat: &'a ChatViewState,
     message_input: &str,
@@ -39,6 +41,8 @@ pub fn conversation_view<'a>(
     emoji_picker_message_id: Option<&str>,
     hovered_message_id: Option<&str>,
     replying_to: Option<&'a ChatMessage>,
+    show_mention_picker: bool,
+    mention_query: &str,
     avatar_cache: &mut super::avatar::AvatarCache,
 ) -> Element<'a, Message, Theme> {
     // ── Header bar ──────────────────────────────────────────────────
@@ -199,6 +203,7 @@ pub fn conversation_view<'a>(
 
     let composer = row![
         text_input("Message\u{2026}", message_input)
+            .id(MESSAGE_INPUT_ID)
             .on_input(Message::MessageChanged)
             .on_submit(Message::SendMessage)
             .padding(10)
@@ -211,6 +216,13 @@ pub fn conversation_view<'a>(
     .padding([8, 16]);
 
     let mut input_column = column![].spacing(6);
+    if show_mention_picker && chat.is_group {
+        input_column = input_column.push(mention_picker_popup(
+            &chat.members,
+            mention_query,
+            avatar_cache,
+        ));
+    }
     if let Some(replying) = replying_to {
         let sender = if replying.is_mine {
             "You".to_string()
@@ -295,6 +307,96 @@ pub fn conversation_view<'a>(
     }
 
     layout.push(input_bar).into()
+}
+
+fn mention_picker_popup<'a>(
+    members: &'a [MemberInfo],
+    query: &str,
+    avatar_cache: &mut super::avatar::AvatarCache,
+) -> Element<'a, Message, Theme> {
+    let q = query.to_lowercase();
+    let filtered: Vec<&MemberInfo> = if q.is_empty() {
+        members.iter().collect()
+    } else {
+        members
+            .iter()
+            .filter(|m| {
+                m.name
+                    .as_deref()
+                    .map(|n| n.to_lowercase().starts_with(&q))
+                    .unwrap_or(false)
+                    || m.npub.to_lowercase().starts_with(&q)
+            })
+            .collect()
+    };
+
+    if filtered.is_empty() {
+        return container(text("No matches").size(12).color(theme::TEXT_SECONDARY))
+            .padding([8, 16])
+            .into();
+    }
+
+    let max_visible = 5;
+    let items = filtered.into_iter().take(max_visible).enumerate().fold(
+        column![].spacing(0),
+        |col, (idx, member)| {
+            let display_name = member
+                .name
+                .clone()
+                .unwrap_or_else(|| member.npub.chars().take(12).collect());
+            let npub = member.npub.clone();
+            let name_for_msg = member
+                .name
+                .clone()
+                .unwrap_or_else(|| member.npub.chars().take(8).collect());
+            let picture_url = member.picture_url.as_deref();
+            let is_top = idx == 0;
+
+            let item_row = row![
+                avatar_circle(Some(&display_name), picture_url, 24.0, avatar_cache),
+                text(display_name).size(13),
+            ]
+            .spacing(8)
+            .align_y(Alignment::Center)
+            .padding([6, 12]);
+
+            col.push(
+                button(item_row)
+                    .on_press(Message::MentionSelected {
+                        npub,
+                        name: name_for_msg,
+                    })
+                    .width(Fill)
+                    .style(move |_: &Theme, status: button::Status| {
+                        let bg = match status {
+                            button::Status::Hovered => theme::HOVER_BG,
+                            _ if is_top => theme::SELECTION_BG,
+                            _ => theme::RAIL_BG,
+                        };
+                        button::Style {
+                            background: Some(iced::Background::Color(bg)),
+                            text_color: theme::TEXT_PRIMARY,
+                            border: iced::border::rounded(0),
+                            ..Default::default()
+                        }
+                    }),
+            )
+        },
+    );
+
+    container(items)
+        .width(Fill)
+        .style(|_: &Theme| container::Style {
+            background: Some(iced::Background::Color(theme::RAIL_BG)),
+            border: iced::Border {
+                radius: 8.0.into(),
+                width: 1.0,
+                color: theme::INPUT_BORDER,
+            },
+            ..Default::default()
+        })
+        .padding(4)
+        .into()
 }
 
 fn chat_title(chat: &ChatViewState) -> String {

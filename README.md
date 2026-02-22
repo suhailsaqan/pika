@@ -17,7 +17,7 @@ End-to-end encrypted messaging for iOS and Android, built on [MLS](https://messa
 | Push notifications | ✅ | | |
 | Emoji reactions | ✅ | | ✅ |
 | Typing indicators | ✅ | | ✅ |
-| @mention autocomplete | ✅ | | |
+| @mention autocomplete | ✅ | | ✅ |
 | Markdown rendering | ✅ | ✅ | |
 | Polls | ✅ | ✅ | |
 | Interactive widgets (HTML) | ✅ | | |
