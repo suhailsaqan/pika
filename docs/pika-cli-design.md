@@ -183,18 +183,26 @@ Examples:
 
 ---
 
-## Phase 3: `profile` command
+## Phase 3: `profile` and `update-profile` commands
 
-### New command
+### `profile` (read-only)
 
 ```
-pika-cli profile [--name <NAME>] [--picture <FILE_PATH>]
+pika-cli profile
 ```
 
-- **No args**: Fetch and display current profile from relays (kind 0 metadata). Print name, about, picture URL.
+Fetch and display current profile from relays (kind 0 metadata). Prints name, about, picture URL, pubkey, npub.
+
+### `update-profile` (write)
+
+```
+pika-cli update-profile (--name <NAME> | --picture <FILE_PATH> | both)
+```
+
 - **`--name <NAME>`**: Update display name. Publishes a kind-0 metadata event preserving all other fields.
 - **`--picture <FILE_PATH>`**: Upload image to Blossom, then update metadata with the returned URL. Max 8 MB, accepts JPEG/PNG.
 - **Both together**: Update name and picture in a single metadata publish.
+- **At least one flag required.** If neither provided, prints a clear error pointing to `profile` for viewing.
 
 ### Implementation notes
 
@@ -218,15 +226,10 @@ Reuse patterns from `rust/src/core/profile.rs`:
 ### Help text
 
 ```
-View or update your Nostr profile (kind-0 metadata).
-
-Without arguments, fetches and displays your current profile.
-Use --name and/or --picture to update your profile.
-
-Examples:
-  pika-cli profile
-  pika-cli profile --name "Alice"
-  pika-cli profile --picture ./avatar.jpg
+pika-cli profile                                    # view current profile
+pika-cli update-profile --name "Alice"
+pika-cli update-profile --picture ./avatar.jpg
+pika-cli update-profile --name "Alice" --picture ./avatar.jpg
 ```
 
 ---
@@ -242,7 +245,7 @@ Pika CLI — encrypted messaging over Nostr + MLS
 
 Quickstart:
   1. pika-cli init
-  2. pika-cli profile --name "Alice"
+  2. pika-cli update-profile --name "Alice"
   3. pika-cli send --to npub1... --content "hello!"
   4. pika-cli listen
 ```
@@ -282,7 +285,7 @@ Phase 0 should land first since every other phase benefits from it. After that, 
 After all phases land, update `tools/cli-smoke` to also exercise:
 - `init` (both generate and import paths)
 - `send --to` (smart send with auto-invite)
-- `profile --name`
+- `update-profile --name`
 
 The existing smoke test commands (`identity`, `publish-kp`, `invite`, `welcomes`, `accept-welcome`, `send --group`, `messages`) must continue to pass unchanged.
 

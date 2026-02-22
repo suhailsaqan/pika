@@ -30,7 +30,7 @@ const DEFAULT_KP_RELAY_URLS: &[&str] = &[
 #[command(about = "Pika CLI — encrypted messaging over Nostr + MLS")]
 #[command(after_help = "\x1b[1mQuickstart:\x1b[0m
   1. pika-cli init
-  2. pika-cli profile --name \"Alice\"
+  2. pika-cli update-profile --name \"Alice\"
   3. pika-cli send --to npub1... --content \"hello!\"
   4. pika-cli listen")]
 struct Cli {
@@ -147,13 +147,17 @@ If none exists, it automatically creates one and sends your message.")]
         limit: usize,
     },
 
-    /// View or update your Nostr profile (kind-0 metadata)
+    /// View your Nostr profile (kind-0 metadata)
+    #[command(after_help = "Example:
+  pika-cli profile")]
+    Profile,
+
+    /// Update your Nostr profile (kind-0 metadata)
     #[command(after_help = "Examples:
-  pika-cli profile                          # view current profile
-  pika-cli profile --name \"Alice\"
-  pika-cli profile --picture ./avatar.jpg
-  pika-cli profile --name \"Alice\" --picture ./avatar.jpg")]
-    Profile {
+  pika-cli update-profile --name \"Alice\"
+  pika-cli update-profile --picture ./avatar.jpg
+  pika-cli update-profile --name \"Alice\" --picture ./avatar.jpg")]
+    UpdateProfile {
         /// Set display name
         #[arg(long)]
         name: Option<String>,
@@ -207,8 +211,9 @@ async fn main() -> anyhow::Result<()> {
             cmd_send(&cli, group.as_deref(), to.as_deref(), content).await
         }
         Command::Messages { group, limit } => cmd_messages(&cli, group, *limit),
-        Command::Profile { name, picture } => {
-            cmd_profile(&cli, name.as_deref(), picture.as_deref()).await
+        Command::Profile => cmd_profile(&cli).await,
+        Command::UpdateProfile { name, picture } => {
+            cmd_update_profile(&cli, name.as_deref(), picture.as_deref()).await
         }
         Command::Listen { timeout, lookback } => cmd_listen(&cli, *timeout, *lookback).await,
     }
@@ -699,35 +704,52 @@ fn cmd_messages(cli: &Cli, nostr_group_id_hex: &str, limit: usize) -> anyhow::Re
 const DEFAULT_BLOSSOM_SERVER: &str = "https://blossom.yakihonne.com";
 const MAX_PROFILE_IMAGE_BYTES: usize = 8 * 1024 * 1024;
 
-async fn cmd_profile(
+async fn cmd_profile(cli: &Cli) -> anyhow::Result<()> {
+    let (keys, _mdk) = open(cli)?;
+    let client = client(cli, &keys).await?;
+
+    client.wait_for_connection(Duration::from_secs(4)).await;
+    let metadata = client
+        .fetch_metadata(keys.public_key(), Duration::from_secs(8))
+        .await
+        .ok()
+        .flatten()
+        .unwrap_or_default();
+    client.shutdown().await;
+
+    print(json!({
+        "pubkey": keys.public_key().to_hex(),
+        "npub": keys.public_key().to_bech32().unwrap_or_default(),
+        "name": metadata.name,
+        "about": metadata.about,
+        "picture_url": metadata.picture,
+    }));
+    Ok(())
+}
+
+async fn cmd_update_profile(
     cli: &Cli,
     name: Option<&str>,
     picture: Option<&std::path::Path>,
 ) -> anyhow::Result<()> {
+    if name.is_none() && picture.is_none() {
+        anyhow::bail!(
+            "at least one of --name or --picture is required.\n\
+             Use 'pika-cli profile' to view your current profile."
+        );
+    }
+
     let (keys, _mdk) = open(cli)?;
     let client = client(cli, &keys).await?;
 
-    // Fetch current metadata from relays.
+    // Fetch current metadata to preserve fields we don't edit.
     client.wait_for_connection(Duration::from_secs(4)).await;
-    let existing = client
+    let mut metadata = client
         .fetch_metadata(keys.public_key(), Duration::from_secs(8))
         .await
         .ok()
-        .flatten();
-    let mut metadata = existing.unwrap_or_default();
-
-    // If no updates requested, just display current profile.
-    if name.is_none() && picture.is_none() {
-        client.shutdown().await;
-        print(json!({
-            "pubkey": keys.public_key().to_hex(),
-            "npub": keys.public_key().to_bech32().unwrap_or_default(),
-            "name": metadata.name,
-            "about": metadata.about,
-            "picture_url": metadata.picture,
-        }));
-        return Ok(());
-    }
+        .flatten()
+        .unwrap_or_default();
 
     // Apply name update.
     if let Some(n) = name {

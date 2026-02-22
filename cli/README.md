@@ -12,7 +12,7 @@ cargo build -p pika-cli
 pika-cli init
 
 # Set your display name
-pika-cli profile --name "Alice"
+pika-cli update-profile --name "Alice"
 
 # Send a message to someone by npub (creates a DM automatically)
 pika-cli send --to npub1... --content "hello!"
@@ -29,7 +29,8 @@ That's it. No relay flags needed — sensible defaults are built in.
 |---------|-------------|
 | `init` | Create or import identity, publish key package |
 | `identity` | Show current identity (pubkey + npub) |
-| `profile` | View or update your Nostr profile (name, picture) |
+| `profile` | View your Nostr profile |
+| `update-profile` | Update your Nostr profile (name, picture) |
 | `send` | Send a message to a group or peer |
 | `listen` | Stream incoming messages and invitations |
 | `groups` | List groups you belong to |
