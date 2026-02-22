@@ -281,7 +281,8 @@ struct NewGroupChatView: View {
             state: NewGroupChatViewState(
                 isCreatingChat: false,
                 isFetchingFollowList: true,
-                followList: []
+                followList: [],
+                myNpub: nil
             ),
             onCreateGroup: { _, _ in },
             onRefreshFollowList: {}
@@ -295,7 +296,8 @@ struct NewGroupChatView: View {
             state: NewGroupChatViewState(
                 isCreatingChat: false,
                 isFetchingFollowList: false,
-                followList: PreviewAppState.sampleFollowList
+                followList: PreviewAppState.sampleFollowList,
+                myNpub: nil
             ),
             onCreateGroup: { _, _ in },
             onRefreshFollowList: {}
@@ -309,7 +311,8 @@ struct NewGroupChatView: View {
             state: NewGroupChatViewState(
                 isCreatingChat: true,
                 isFetchingFollowList: false,
-                followList: PreviewAppState.sampleFollowList
+                followList: PreviewAppState.sampleFollowList,
+                myNpub: nil
             ),
             onCreateGroup: { _, _ in },
             onRefreshFollowList: {}
