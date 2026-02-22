@@ -60,3 +60,6 @@ secrets/.zapstore-sign-with.*
 # Avoid accidentally staging enormous vendored build output.
 third_party/openclaw-marmot/target/
 AGENTS.private.md
+
+# pika-relay local dev data
+.pika-relay/

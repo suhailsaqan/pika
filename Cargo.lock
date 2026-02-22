@@ -5738,7 +5738,27 @@ dependencies = [
 ]
 
 [[package]]
-name = "pika-notifications"
+name = "pika-nse"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "apple-native-keyring-store",
+ "hex",
+ "keyring-core",
+ "libsqlite3-sys",
+ "mdk-core",
+ "mdk-sqlite-storage",
+ "mdk-storage-traits",
+ "nostr",
+ "pika-tls",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "uniffi",
+]
+
+[[package]]
+name = "pika-server"
 version = "0.1.0"
 dependencies = [
  "a2",
@@ -5758,26 +5778,6 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
-]
-
-[[package]]
-name = "pika-nse"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "apple-native-keyring-store",
- "hex",
- "keyring-core",
- "libsqlite3-sys",
- "mdk-core",
- "mdk-sqlite-storage",
- "mdk-storage-traits",
- "nostr",
- "pika-tls",
- "rusqlite",
- "serde",
- "serde_json",
- "uniffi",
 ]
 
 [[package]]

@@ -1,0 +1,634 @@
+set shell := ["bash", "-eu", "-o", "pipefail", "-c"]
+
+PIKA_BUILD := env_var_or_default("PIKA_BUILD", "justin@65.108.234.158")
+PIKA_BUILD_SSH_KEY := env_var_or_default("PIKA_BUILD_SSH_KEY", env_var("HOME") + "/.ssh/id_ed25519")
+PIKA_BUILD_CACHE := "http://65.108.234.158:5000"
+PIKA_BUILD_CACHE_KEY := "builder-cache:G1k8YbPhD93miUqFsuTqMxLAk2GN17eNKd1dJiC7DKk="
+
+# Flake root is the parent directory (top-level pika repo).
+FLAKE_ROOT := parent_dir(justfile_directory())
+
+default:
+    @just --list
+
+# ── MoQ Relay Fleet ─────────────────────────────────────────────────────
+# relay-moq-ash (us-east.moq.pikachat.org)  → Ashburn, VA      cpx11
+# relay-moq-hil (us-west.moq.pikachat.org)  → Hillsboro, OR    cpx11
+# relay-moq-fsn (eu.moq.pikachat.org)       → Falkenstein, DE   cpx22
+# relay-moq-sin (asia.moq.pikachat.org)     → Singapore         cpx22
+
+# Create active MoQ relay servers (Debian base, ready for nixos-anywhere)
+# NOTE: relay-moq-hil (us-west) and relay-moq-sin (asia) paused until Hetzner limit increase.
+# To re-enable, add: "relay-moq-hil:hil:cpx11" "relay-moq-sin:sin:cpx22"
+relay-create-all:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    for pair in "relay-moq-ash:ash:cpx11" "relay-moq-fsn:nbg1:cpx22"; do
+      IFS=: read -r name loc type <<< "$pair"
+      if hcloud server describe "$name" &>/dev/null; then
+        IP=$(hcloud server ip "$name")
+        echo "* $name already exists ($IP)"
+      else
+        echo "==> Creating $name in $loc ($type)..."
+        hcloud server create \
+          --name "$name" \
+          --type "$type" \
+          --location "$loc" \
+          --image debian-12 \
+          --ssh-key default
+        IP=$(hcloud server ip "$name")
+        echo "* $name created ($IP)"
+      fi
+    done
+    echo ""
+    echo "==> All relay servers created. IPs:"
+    just relay-ips
+
+# Show relay IPs (for DNS setup)
+relay-ips:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "DNS records needed (pikachat.org):"
+    for pair in "relay-moq-ash:us-east.moq.pikachat.org" "relay-moq-hil:us-west.moq.pikachat.org" "relay-moq-fsn:eu.moq.pikachat.org" "relay-moq-sin:asia.moq.pikachat.org"; do
+      name="${pair%%:*}"
+      domain="${pair##*:}"
+      IP=$(hcloud server ip "$name" 2>/dev/null || echo "NOT CREATED")
+      printf "  %-35s A -> %s\n" "$domain" "$IP"
+    done
+
+# Initial deploy NixOS to a relay (wipes server)
+relay-initial-deploy name:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    NAME="{{name}}"
+    IP=$(hcloud server ip "$NAME")
+    echo "==> Installing NixOS on $NAME ($IP) via nixos-anywhere..."
+    echo "    This will WIPE the server and install NixOS from scratch."
+    echo ""
+
+    cd "{{FLAKE_ROOT}}"
+    git add -A
+
+    nix run github:nix-community/nixos-anywhere -- \
+        --flake ".#$NAME" \
+        --target-host "root@$IP" \
+        --build-on remote
+    echo ""
+    echo "==> NixOS installed on $NAME! Server should reboot momentarily."
+    echo "    SSH: ssh root@$IP"
+
+# Initial deploy NixOS to active MoQ relays
+relay-initial-deploy-all:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    for name in relay-moq-ash relay-moq-fsn; do
+      echo ""
+      echo "========================================"
+      echo "  Deploying $name"
+      echo "========================================"
+      just relay-initial-deploy "$name"
+    done
+
+# Deploy config update to a relay (builds on Hetzner dedicated, copies to relay)
+relay-deploy name:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    NAME="{{name}}"
+    IP=$(hcloud server ip "$NAME")
+    BUILDER="{{PIKA_BUILD}}"
+    BUILDER_SSH="-i {{PIKA_BUILD_SSH_KEY}}"
+    REMOTE_DIR="/tmp/pika-infra-user"
+
+    echo "==> Deploying $NAME ($IP)..."
+
+    echo "  [1/4] Syncing config to Hetzner builder..."
+    cd "{{FLAKE_ROOT}}"
+    rsync -a --delete \
+        --exclude='.git/' \
+        --exclude='.git' \
+        --exclude='result/' \
+        --exclude='target/' \
+        --exclude='.pgdata/' \
+        --exclude='crates/pika-server/.pgdata/' \
+        -e "ssh $BUILDER_SSH" \
+        ./ "$BUILDER:$REMOTE_DIR"
+    ssh $BUILDER_SSH "$BUILDER" "rm -rf $REMOTE_DIR/.git $REMOTE_DIR/.pgdata $REMOTE_DIR/crates/pika-server/.pgdata"
+
+    echo "  [2/4] Building on Hetzner (native x86_64-linux)..."
+    SYSTEM=$(ssh $BUILDER_SSH "$BUILDER" \
+        "cd $REMOTE_DIR && nix build .#nixosConfigurations.$NAME.config.system.build.toplevel --no-link --print-out-paths")
+    echo "    Built: $SYSTEM"
+
+    echo "  [3/4] Copying closure to $NAME..."
+    ssh -o StrictHostKeyChecking=accept-new "root@$IP" \
+        "nix copy --from '{{PIKA_BUILD_CACHE}}' \
+            --option trusted-public-keys 'cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY= {{PIKA_BUILD_CACHE_KEY}}' \
+            '$SYSTEM'" || {
+        echo "    Cache copy failed, trying direct nix copy from builder..."
+        ssh $BUILDER_SSH "$BUILDER" \
+            "nix copy --to ssh://root@$IP '$SYSTEM'"
+    }
+
+    echo "  [4/4] Activating..."
+    ssh -o StrictHostKeyChecking=accept-new "root@$IP" \
+        "nix-env -p /nix/var/nix/profiles/system --set '$SYSTEM' && '$SYSTEM'/bin/switch-to-configuration switch"
+
+    echo "==> $NAME deployed!"
+
+# Deploy config update to active MoQ relays
+relay-deploy-all:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    for name in relay-moq-ash relay-moq-fsn; do
+      echo ""
+      echo "========================================"
+      echo "  Deploying $name"
+      echo "========================================"
+      just relay-deploy "$name"
+    done
+
+# SSH into a relay
+relay-ssh name:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    IP=$(hcloud server ip "{{name}}")
+    ssh -o StrictHostKeyChecking=accept-new "root@$IP"
+
+# Show status of all relays
+relay-status:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    for pair in "relay-moq-ash:us-east.moq.pikachat.org" "relay-moq-hil:us-west.moq.pikachat.org" "relay-moq-fsn:eu.moq.pikachat.org" "relay-moq-sin:asia.moq.pikachat.org"; do
+      name="${pair%%:*}"
+      domain="${pair##*:}"
+      IP=$(hcloud server ip "$name" 2>/dev/null || echo "")
+      if [[ -z "$IP" ]]; then
+        echo "x $name ($domain) -- not created"
+        continue
+      fi
+      STATUS=$(ssh -o StrictHostKeyChecking=accept-new -o ConnectTimeout=5 "root@$IP" \
+        "systemctl is-active moq-relay 2>/dev/null" 2>/dev/null || echo "unreachable")
+      echo "* $name ($domain) -- $IP -- moq-relay: $STATUS"
+    done
+
+# Destroy active MoQ relay servers
+relay-destroy-all:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "This will destroy ALL active MoQ relay servers!"
+    read -p "Continue? [y/N] " -n 1 -r
+    echo
+    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+      echo "Aborted."
+      exit 1
+    fi
+    for name in relay-moq-ash relay-moq-fsn; do
+      if hcloud server describe "$name" &>/dev/null; then
+        hcloud server delete "$name"
+        echo "* $name destroyed"
+      else
+        echo "  $name doesn't exist"
+      fi
+    done
+
+# ── pika-server (api.pikachat.org) ────────────────────────────────────
+
+PIKA_SERVER_NAME := "pika-server"
+PIKA_SERVER_TYPE := "cpx21"
+PIKA_SERVER_LOCATION := "ash"
+
+# Create pika-server VPS
+server-create:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    NAME="{{PIKA_SERVER_NAME}}"
+    if hcloud server describe "$NAME" &>/dev/null; then
+      IP=$(hcloud server ip "$NAME")
+      echo "* $NAME already exists ($IP)"
+    else
+      echo "==> Creating $NAME in {{PIKA_SERVER_LOCATION}} ({{PIKA_SERVER_TYPE}})..."
+      hcloud server create \
+        --name "$NAME" \
+        --type "{{PIKA_SERVER_TYPE}}" \
+        --location "{{PIKA_SERVER_LOCATION}}" \
+        --image debian-12 \
+        --ssh-key default
+      IP=$(hcloud server ip "$NAME")
+      echo "* $NAME created ($IP)"
+      echo ""
+      echo "DNS record needed:"
+      printf "  %-35s A -> %s\n" "api.pikachat.org" "$IP"
+    fi
+
+# Initial deploy NixOS to pika-server (wipes server)
+server-initial-deploy:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    NAME="{{PIKA_SERVER_NAME}}"
+    IP=$(hcloud server ip "$NAME")
+    echo "==> Installing NixOS on $NAME ($IP) via nixos-anywhere..."
+    echo "    This will WIPE the server and install NixOS from scratch."
+    echo ""
+
+    cd "{{FLAKE_ROOT}}"
+    git add -A
+
+    nix run github:nix-community/nixos-anywhere -- \
+        --flake ".#$NAME" \
+        --target-host "root@$IP" \
+        --build-on remote
+    echo ""
+    echo "==> NixOS installed on $NAME!"
+    echo "    SSH: ssh root@$IP"
+    echo ""
+    echo "Next: generate age key on the server for sops secrets:"
+    echo "  ssh root@$IP 'mkdir -p /etc/age && chmod 0700 /etc/age && age-keygen -o /etc/age/key.txt && chmod 0400 /etc/age/key.txt && age-keygen -y /etc/age/key.txt'"
+    echo ""
+    echo "Then add that public key to infra/secrets/.sops.yaml, create secrets, and deploy:"
+    echo "  sops infra/secrets/pika-server.yaml"
+    echo "  just server-deploy"
+
+# Deploy config update to pika-server
+server-deploy:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    NAME="{{PIKA_SERVER_NAME}}"
+    IP=$(hcloud server ip "$NAME")
+    BUILDER="{{PIKA_BUILD}}"
+    BUILDER_SSH="-i {{PIKA_BUILD_SSH_KEY}}"
+    REMOTE_DIR="/tmp/pika-infra-user"
+
+    echo "==> Deploying $NAME ($IP)..."
+
+    echo "  [1/4] Syncing config to Hetzner builder..."
+    cd "{{FLAKE_ROOT}}"
+    rsync -a --delete \
+        --exclude='.git/' \
+        --exclude='.git' \
+        --exclude='result/' \
+        --exclude='target/' \
+        --exclude='.pgdata/' \
+        --exclude='crates/pika-server/.pgdata/' \
+        -e "ssh $BUILDER_SSH" \
+        ./ "$BUILDER:$REMOTE_DIR"
+    ssh $BUILDER_SSH "$BUILDER" "rm -rf $REMOTE_DIR/.git $REMOTE_DIR/.pgdata $REMOTE_DIR/crates/pika-server/.pgdata"
+
+    echo "  [2/4] Building on Hetzner (native x86_64-linux)..."
+    SYSTEM=$(ssh $BUILDER_SSH "$BUILDER" \
+        "cd $REMOTE_DIR && nix build .#nixosConfigurations.$NAME.config.system.build.toplevel --no-link --print-out-paths")
+    echo "    Built: $SYSTEM"
+
+    echo "  [3/4] Copying closure to $NAME..."
+    ssh -o StrictHostKeyChecking=accept-new "root@$IP" \
+        "nix copy --from '{{PIKA_BUILD_CACHE}}' \
+            --option trusted-public-keys 'cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY= {{PIKA_BUILD_CACHE_KEY}}' \
+            '$SYSTEM'" || {
+        echo "    Cache copy failed, trying direct nix copy from builder..."
+        ssh $BUILDER_SSH "$BUILDER" \
+            "nix copy --to ssh://root@$IP '$SYSTEM'"
+    }
+
+    echo "  [4/4] Activating..."
+    ssh -o StrictHostKeyChecking=accept-new "root@$IP" \
+        "nix-env -p /nix/var/nix/profiles/system --set '$SYSTEM' && '$SYSTEM'/bin/switch-to-configuration switch"
+
+    echo "==> $NAME deployed!"
+
+# SSH into pika-server
+server-ssh:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    IP=$(hcloud server ip "{{PIKA_SERVER_NAME}}")
+    ssh -o StrictHostKeyChecking=accept-new "root@$IP"
+
+# Show pika-server status
+server-status:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    NAME="{{PIKA_SERVER_NAME}}"
+    IP=$(hcloud server ip "$NAME" 2>/dev/null || echo "")
+    if [[ -z "$IP" ]]; then
+      echo "x $NAME -- not created"
+      exit 0
+    fi
+    echo "* $NAME -- $IP"
+    ssh -o StrictHostKeyChecking=accept-new -o ConnectTimeout=5 "root@$IP" \
+      "systemctl is-active pika-server 2>/dev/null && echo '  pika-server: active' || echo '  pika-server: inactive'" 2>/dev/null || echo "  unreachable"
+    ssh -o StrictHostKeyChecking=accept-new -o ConnectTimeout=5 "root@$IP" \
+      "systemctl is-active postgresql 2>/dev/null && echo '  postgresql: active' || echo '  postgresql: inactive'" 2>/dev/null || true
+
+# Tail pika-server logs
+server-logs:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    IP=$(hcloud server ip "{{PIKA_SERVER_NAME}}")
+    ssh -o StrictHostKeyChecking=accept-new "root@$IP" "journalctl -u pika-server -f"
+
+# Destroy pika-server VPS
+server-destroy:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    NAME="{{PIKA_SERVER_NAME}}"
+    echo "This will destroy $NAME!"
+    read -p "Continue? [y/N] " -n 1 -r
+    echo
+    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+      echo "Aborted."
+      exit 1
+    fi
+    if hcloud server describe "$NAME" &>/dev/null; then
+      hcloud server delete "$NAME"
+      echo "* $NAME destroyed"
+    else
+      echo "  $NAME doesn't exist"
+    fi
+
+# ── pika-relay (Nostr relay + Blossom media server) ──────────────────
+# relay-us-east (us-east.nostr.pikachat.org)  → Ashburn, VA    cpx21
+# relay-eu      (eu.nostr.pikachat.org)       → Falkenstein, DE cpx21
+
+# Create both pika-relay servers
+pika-relay-create-all:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    for pair in "relay-us-east:ash:cpx21" "relay-eu:nbg1:cax11"; do
+      IFS=: read -r name loc type <<< "$pair"
+      if hcloud server describe "$name" &>/dev/null; then
+        IP=$(hcloud server ip "$name")
+        echo "* $name already exists ($IP)"
+      else
+        echo "==> Creating $name in $loc ($type)..."
+        hcloud server create \
+          --name "$name" \
+          --type "$type" \
+          --location "$loc" \
+          --image debian-12 \
+          --ssh-key default
+        IP=$(hcloud server ip "$name")
+        echo "* $name created ($IP)"
+      fi
+    done
+    echo ""
+    echo "==> All pika-relay servers created. IPs:"
+    just pika-relay-ips
+
+# Show pika-relay IPs (for DNS setup)
+pika-relay-ips:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "DNS records needed (pikachat.org):"
+    for pair in "relay-us-east:us-east.nostr.pikachat.org" "relay-eu:eu.nostr.pikachat.org"; do
+      name="${pair%%:*}"
+      domain="${pair##*:}"
+      IP=$(hcloud server ip "$name" 2>/dev/null || echo "NOT CREATED")
+      printf "  %-35s A -> %s\n" "$domain" "$IP"
+    done
+
+# Initial deploy NixOS to a pika-relay (wipes server)
+pika-relay-initial-deploy name:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    NAME="{{name}}"
+    IP=$(hcloud server ip "$NAME")
+    echo "==> Installing NixOS on $NAME ($IP) via nixos-anywhere..."
+    echo "    This will WIPE the server and install NixOS from scratch."
+    echo ""
+
+    cd "{{FLAKE_ROOT}}"
+    git add -A
+
+    nix run github:nix-community/nixos-anywhere -- \
+        --flake ".#$NAME" \
+        --target-host "root@$IP" \
+        --build-on remote
+    echo ""
+    echo "==> NixOS installed on $NAME!"
+    echo "    SSH: ssh root@$IP"
+
+# Initial deploy NixOS to ALL pika-relays
+pika-relay-initial-deploy-all:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    for name in relay-us-east relay-eu; do
+      echo ""
+      echo "========================================"
+      echo "  Deploying $name"
+      echo "========================================"
+      just pika-relay-initial-deploy "$name"
+    done
+
+# Deploy config update to a pika-relay
+pika-relay-deploy name:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    NAME="{{name}}"
+    IP=$(hcloud server ip "$NAME")
+    BUILDER="{{PIKA_BUILD}}"
+    BUILDER_SSH="-i {{PIKA_BUILD_SSH_KEY}}"
+    REMOTE_DIR="/tmp/pika-infra-user"
+    TARGET_REMOTE_DIR="/tmp/pika-infra-target"
+    TARGET_SYSTEM=$(cd "{{FLAKE_ROOT}}" && nix eval --raw ".#nixosConfigurations.$NAME.pkgs.stdenv.hostPlatform.system")
+
+    echo "==> Deploying $NAME ($IP)..."
+
+    cd "{{FLAKE_ROOT}}"
+    if [[ "$TARGET_SYSTEM" == "x86_64-linux" ]]; then
+      echo "  [1/4] Syncing config to Hetzner builder..."
+      rsync -a --delete \
+          --exclude='.git/' \
+          --exclude='.git' \
+          --exclude='result/' \
+          --exclude='target/' \
+          --exclude='.pgdata/' \
+          --exclude='crates/pika-server/.pgdata/' \
+          -e "ssh $BUILDER_SSH" \
+          ./ "$BUILDER:$REMOTE_DIR"
+      ssh $BUILDER_SSH "$BUILDER" "rm -rf $REMOTE_DIR/.git $REMOTE_DIR/.pgdata $REMOTE_DIR/crates/pika-server/.pgdata"
+
+      echo "  [2/4] Building on Hetzner (native x86_64-linux)..."
+      SYSTEM=$(ssh $BUILDER_SSH "$BUILDER" \
+          "cd $REMOTE_DIR && nix build .#nixosConfigurations.$NAME.config.system.build.toplevel --no-link --print-out-paths")
+      echo "    Built: $SYSTEM"
+
+      echo "  [3/4] Copying closure to $NAME..."
+      ssh -o StrictHostKeyChecking=accept-new "root@$IP" \
+          "nix copy --from '{{PIKA_BUILD_CACHE}}' \
+              --option trusted-public-keys 'cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY= {{PIKA_BUILD_CACHE_KEY}}' \
+              '$SYSTEM'" || {
+          echo "    Cache copy failed, trying direct nix copy from builder..."
+          ssh $BUILDER_SSH "$BUILDER" \
+              "nix copy --to ssh://root@$IP '$SYSTEM'"
+      }
+
+      echo "  [4/4] Activating..."
+      ssh -o StrictHostKeyChecking=accept-new "root@$IP" \
+          "nix-env -p /nix/var/nix/profiles/system --set '$SYSTEM' && '$SYSTEM'/bin/switch-to-configuration switch"
+    else
+      echo "  [1/2] Syncing config to $NAME for native $TARGET_SYSTEM build..."
+      rsync -a --delete \
+          --exclude='.git/' \
+          --exclude='.git' \
+          --exclude='result/' \
+          --exclude='target/' \
+          --exclude='.pgdata/' \
+          --exclude='crates/pika-server/.pgdata/' \
+          -e "ssh -o StrictHostKeyChecking=accept-new" \
+          ./ "root@$IP:$TARGET_REMOTE_DIR"
+      ssh -o StrictHostKeyChecking=accept-new "root@$IP" \
+          "rm -rf $TARGET_REMOTE_DIR/.git $TARGET_REMOTE_DIR/.pgdata $TARGET_REMOTE_DIR/crates/pika-server/.pgdata"
+
+      echo "  [2/2] Building + activating on $NAME (native $TARGET_SYSTEM)..."
+      ssh -o StrictHostKeyChecking=accept-new "root@$IP" \
+          "cd $TARGET_REMOTE_DIR && nixos-rebuild switch --flake .#$NAME"
+    fi
+
+    echo "==> $NAME deployed!"
+
+# Deploy config update to ALL pika-relays
+pika-relay-deploy-all:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    for name in relay-us-east relay-eu; do
+      echo ""
+      echo "========================================"
+      echo "  Deploying $name"
+      echo "========================================"
+      just pika-relay-deploy "$name"
+    done
+
+# SSH into a pika-relay
+pika-relay-ssh name:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    IP=$(hcloud server ip "{{name}}")
+    ssh -o StrictHostKeyChecking=accept-new "root@$IP"
+
+# Show status of all pika-relays
+pika-relay-status:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    for pair in "relay-us-east:us-east.nostr.pikachat.org" "relay-eu:eu.nostr.pikachat.org"; do
+      name="${pair%%:*}"
+      domain="${pair##*:}"
+      IP=$(hcloud server ip "$name" 2>/dev/null || echo "")
+      if [[ -z "$IP" ]]; then
+        echo "x $name ($domain) -- not created"
+        continue
+      fi
+      STATUS=$(ssh -o StrictHostKeyChecking=accept-new -o ConnectTimeout=5 "root@$IP" \
+        "systemctl is-active pika-relay 2>/dev/null" 2>/dev/null || echo "unreachable")
+      echo "* $name ($domain) -- $IP -- pika-relay: $STATUS"
+    done
+
+# Tail logs for a pika-relay
+pika-relay-logs name:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    IP=$(hcloud server ip "{{name}}")
+    ssh -o StrictHostKeyChecking=accept-new "root@$IP" "journalctl -u pika-relay -f"
+
+# Destroy all pika-relay servers
+pika-relay-destroy-all:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "This will destroy ALL pika-relay servers!"
+    read -p "Continue? [y/N] " -n 1 -r
+    echo
+    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+      echo "Aborted."
+      exit 1
+    fi
+    for name in relay-us-east relay-eu; do
+      if hcloud server describe "$name" &>/dev/null; then
+        hcloud server delete "$name"
+        echo "* $name destroyed"
+      else
+        echo "  $name doesn't exist"
+      fi
+    done
+
+# ── pika-build (Hetzner dedicated, nix cache + build host) ───────────
+
+PIKA_BUILD_IP := "65.108.234.158"
+
+# Initial deploy NixOS to pika-build via nixos-anywhere (wipes server)
+build-initial-deploy ip=PIKA_BUILD_IP:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    IP="{{ip}}"
+    echo "==> Installing NixOS on pika-build ($IP) via nixos-anywhere..."
+    echo "    This will WIPE the server and install NixOS from scratch."
+    echo ""
+
+    cd "{{FLAKE_ROOT}}"
+    git add -A
+
+    nix run github:nix-community/nixos-anywhere -- \
+        --flake ".#pika-build" \
+        --target-host "root@$IP" \
+        --build-on remote
+    echo ""
+    echo "==> NixOS installed on pika-build!"
+    echo "    SSH: ssh pika-build"
+    echo ""
+    echo "Next steps:"
+    echo "  1. Generate age key on the server for sops secrets:"
+    echo "     ssh pika-build 'mkdir -p /etc/age && chmod 0700 /etc/age && age-keygen -o /etc/age/key.txt && chmod 0400 /etc/age/key.txt && age-keygen -y /etc/age/key.txt'"
+    echo "  2. Add the public key to infra/secrets/.sops.yaml under builder-cache-key.yaml"
+    echo "  3. Create secrets: sops infra/secrets/builder-cache-key.yaml"
+    echo "  4. Deploy again: just build-deploy"
+
+# Deploy config update to pika-build (SSH in, rebuild switch)
+build-deploy:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    IP="{{PIKA_BUILD_IP}}"
+    SSH_KEY="{{PIKA_BUILD_SSH_KEY}}"
+    REMOTE_DIR="/tmp/pika-infra-root"
+
+    echo "==> Deploying pika-build ($IP)..."
+
+    echo "  [1/3] Syncing config to pika-build..."
+    cd "{{FLAKE_ROOT}}"
+    rsync -a --delete \
+        --exclude='.git/' \
+        --exclude='.git' \
+        --exclude='result/' \
+        --exclude='target/' \
+        --exclude='.pgdata/' \
+        --exclude='crates/pika-server/.pgdata/' \
+        -e "ssh -i $SSH_KEY" \
+        ./ "root@$IP:$REMOTE_DIR"
+    ssh -i "$SSH_KEY" "root@$IP" "rm -rf $REMOTE_DIR/.git $REMOTE_DIR/.pgdata $REMOTE_DIR/crates/pika-server/.pgdata"
+
+    echo "  [2/3] Building on pika-build (native x86_64-linux)..."
+    ssh -i "$SSH_KEY" "root@$IP" \
+        "cd $REMOTE_DIR && nixos-rebuild switch --flake .#pika-build"
+
+    echo "  [3/3] Done!"
+    echo "==> pika-build deployed!"
+
+# SSH into pika-build
+build-ssh:
+    ssh pika-build
+
+# ── General ──────────────────────────────────────────────────────────
+
+# First-time setup instructions
+setup:
+    @echo "First-time setup:"
+    @echo ""
+    @echo "1. Get a Hetzner Cloud API token from https://console.hetzner.cloud"
+    @echo "   (Project -> Security -> API Tokens -> Generate)"
+    @echo ""
+    @echo "2. Configure hcloud CLI:"
+    @echo "   hcloud context create pika"
+    @echo "   # paste your API token when prompted"
+    @echo ""
+    @echo "3. Add your SSH key to Hetzner:"
+    @echo "   hcloud ssh-key create --name default --public-key-from-file ~/.ssh/id_ed25519.pub"
+    @echo ""
+    @echo "4. Create servers and deploy:"
+    @echo "   just relay-create-all"
+    @echo "   just relay-initial-deploy-all"
+    @echo "   just relay-deploy-all"

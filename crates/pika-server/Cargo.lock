@@ -1433,7 +1433,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "pika-notifications"
+name = "pika-server"
 version = "0.1.0"
 dependencies = [
  "a2",

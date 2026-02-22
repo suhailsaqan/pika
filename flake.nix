@@ -16,9 +16,80 @@
       url = "github:tadfisher/android-nixpkgs";
       inputs.nixpkgs.follows = "nixpkgs";
     };
+    disko = {
+      url = "github:nix-community/disko";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+    sops-nix = {
+      url = "github:Mic92/sops-nix";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
   };
 
-  outputs = { self, nixpkgs, flake-utils, moq, rust-overlay, android-nixpkgs }:
+  outputs = { self, nixpkgs, flake-utils, moq, rust-overlay, android-nixpkgs, disko, sops-nix }:
+    let
+      mkRelay = hostFile: nixpkgs.lib.nixosSystem {
+        system = "x86_64-linux";
+        specialArgs = { inherit moq; };
+        modules = [
+          disko.nixosModules.disko
+          moq.nixosModules.moq-relay
+          (import hostFile)
+        ];
+      };
+
+      serverPkgs = import nixpkgs { system = "x86_64-linux"; };
+      armPkgs = import nixpkgs { system = "aarch64-linux"; };
+
+      pikaServerPkg = serverPkgs.rustPlatform.buildRustPackage {
+        pname = "pika-server";
+        version = "0.1.0";
+        src = serverPkgs.lib.cleanSourceWith {
+          src = serverPkgs.lib.sourceByRegex ./. [
+            "Cargo\\.toml"
+            "Cargo\\.lock"
+            "crates(/.*)?"
+            "rust(/.*)?"
+            "cli(/.*)?"
+            "uniffi-bindgen(/.*)?"
+          ];
+          filter = path: type: !(serverPkgs.lib.hasInfix ".pgdata" path);
+        };
+        cargoLock = {
+          lockFile = ./Cargo.lock;
+          outputHashes = {
+            "mdk-core-0.6.0" = "sha256-7U9hTItXHOo5VtdvfxwOUo2M22wUnHK4Oi3TlmfjM+4=";
+            "moq-lite-0.14.0" = "sha256-CVoVjbuezyC21gl/pEnU/S/2oRaDlvn2st7WBoUnWo8=";
+          };
+        };
+        cargoBuildFlags = [ "-p" "pika-server" ];
+        doCheck = false;
+        nativeBuildInputs = [ serverPkgs.pkg-config ];
+        buildInputs = [ serverPkgs.openssl serverPkgs.postgresql.lib ];
+      };
+
+      pikaRelayPkg = serverPkgs.buildGoModule {
+        pname = "pika-relay";
+        version = "0.1.0";
+        src = ./cmd/pika-relay;
+        vendorHash = "sha256-MqN7xMaNtUbe/xdzJjQqmlRjighIcP1Ex/VxMM+m/5g=";
+        env.CGO_ENABLED = "1";
+        nativeBuildInputs = [ serverPkgs.pkg-config ];
+        doCheck = false;
+        meta.mainProgram = "pika-relay";
+      };
+
+      pikaRelayPkgArm = armPkgs.buildGoModule {
+        pname = "pika-relay";
+        version = "0.1.0";
+        src = ./cmd/pika-relay;
+        vendorHash = "sha256-MqN7xMaNtUbe/xdzJjQqmlRjighIcP1Ex/VxMM+m/5g=";
+        env.CGO_ENABLED = "1";
+        nativeBuildInputs = [ armPkgs.pkg-config ];
+        doCheck = false;
+        meta.mainProgram = "pika-relay";
+      };
+    in
     flake-utils.lib.eachDefaultSystem (system:
       let
         pkgs = import nixpkgs {
@@ -191,6 +262,7 @@
             pkgs.nostr-rs-relay
             pkgs.age
             pkgs.age-plugin-yubikey
+            pkgs.sops
             pkgs.openssl
             zsp
             pkgs.nak
@@ -317,10 +389,10 @@
 EOF
             '' else ""}
 
-            # PostgreSQL for pika-notifications
-            export PGDATA="$PWD/crates/pika-notifications/.pgdata"
+            # PostgreSQL for pika-server
+            export PGDATA="$PWD/crates/pika-server/.pgdata"
             export PGHOST="$PGDATA"
-            export DATABASE_URL="postgresql:///pika_notifications?host=$PGDATA"
+            export DATABASE_URL="postgresql:///pika_server?host=$PGDATA"
 
             if [ ! -d "$PGDATA" ]; then
               echo "Initializing PostgreSQL database..."
@@ -333,8 +405,8 @@ PGEOF
 
             pg_ctl status -D "$PGDATA" > /dev/null 2>&1 || pg_ctl start -D "$PGDATA" -l "$PGDATA/postgres.log" -o "-k $PGDATA"
 
-            if ! psql -lqt 2>/dev/null | grep -qw pika_notifications; then
-              createdb pika_notifications
+            if ! psql -lqt 2>/dev/null | grep -qw pika_server; then
+              createdb pika_server
             fi
 
             # Point git at the repo's shared hooks directory.
@@ -378,6 +450,70 @@ PGEOF
             echo ""
           '';
         };
+
+        devShells.infra = pkgs.mkShell {
+          packages = with pkgs; [
+            hcloud
+            jq
+            just
+            age
+            age-plugin-yubikey
+            sops
+            openssh
+          ];
+          shellHook = ''
+            echo ""
+            echo "Pika Infra environment"
+            echo "  hcloud: $(hcloud version 2>/dev/null | head -1)"
+            echo "  Commands: cd infra && just --list"
+            echo ""
+          '';
+        };
       }
-    );
+    ) // {
+      nixosConfigurations = {
+        relay-moq-ash = mkRelay ./infra/nix/hosts/relay-moq-ash.nix;
+        relay-moq-hil = mkRelay ./infra/nix/hosts/relay-moq-hil.nix;
+        relay-moq-fsn = mkRelay ./infra/nix/hosts/relay-moq-fsn.nix;
+        relay-moq-sin = mkRelay ./infra/nix/hosts/relay-moq-sin.nix;
+
+        pika-server = nixpkgs.lib.nixosSystem {
+          system = "x86_64-linux";
+          specialArgs = { inherit pikaServerPkg sops-nix; };
+          modules = [
+            disko.nixosModules.disko
+            sops-nix.nixosModules.sops
+            (import ./infra/nix/hosts/pika-server.nix)
+          ];
+        };
+
+        pika-build = nixpkgs.lib.nixosSystem {
+          system = "x86_64-linux";
+          specialArgs = { inherit sops-nix; };
+          modules = [
+            disko.nixosModules.disko
+            sops-nix.nixosModules.sops
+            (import ./infra/nix/hosts/builder.nix)
+          ];
+        };
+
+        relay-us-east = nixpkgs.lib.nixosSystem {
+          system = "x86_64-linux";
+          specialArgs = { inherit pikaRelayPkg; };
+          modules = [
+            disko.nixosModules.disko
+            (import ./infra/nix/hosts/relay-us-east.nix)
+          ];
+        };
+
+        relay-eu = nixpkgs.lib.nixosSystem {
+          system = "aarch64-linux";
+          specialArgs = { pikaRelayPkg = pikaRelayPkgArm; };
+          modules = [
+            disko.nixosModules.disko
+            (import ./infra/nix/hosts/relay-eu.nix)
+          ];
+        };
+      };
+    };
 }

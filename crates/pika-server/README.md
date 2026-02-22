@@ -1,4 +1,4 @@
-# pika-notifications
+# pika-server
 
 Push notification server for Pika. Listens for Nostr kind 445 events filtered by `#h` tags (group IDs) and sends push notifications via APNs (iOS) and FCM (Android).
 

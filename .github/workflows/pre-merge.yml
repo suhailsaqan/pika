@@ -80,6 +80,7 @@ jobs:
               - 'justfile'
               - '.github/workflows/pre-merge.yml'
               - 'crates/pika-notifications/**'
+              - 'crates/pika-server/**'
 
   check-pika:
     needs: [detect-changes]

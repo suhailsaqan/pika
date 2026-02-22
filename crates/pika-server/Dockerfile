@@ -13,7 +13,7 @@ ENV CARGO_NET_GIT_FETCH_WITH_CLI true
 # Will build and cache the binary and dependent crates in release mode
 RUN --mount=type=cache,target=/usr/local/cargo,from=rust:latest,source=/usr/local/cargo \
     --mount=type=cache,target=target \
-    cargo build --target $(cat rust_target) --release && mv ./target/$(cat rust_target)/release/pika-notifications ./pika-notifications
+    cargo build --target $(cat rust_target) --release && mv ./target/$(cat rust_target)/release/pika-server ./pika-server
 
 # Runtime image
 FROM debian:bookworm-slim
@@ -27,11 +27,11 @@ USER app
 WORKDIR /app
 
 # Get compiled binaries from builder's cargo install directory
-COPY --from=builder /usr/src/app/pika-notifications /app/pika-notifications
+COPY --from=builder /usr/src/app/pika-server /app/pika-server
 
 ENV NOTIFICATION_PORT=8080
 ENV RUST_LOG=info
 EXPOSE $NOTIFICATION_PORT
 
 # Run the app
-CMD ["./pika-notifications"]
+CMD ["./pika-server"]

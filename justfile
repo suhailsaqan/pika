@@ -209,7 +209,7 @@ pre-commit: fmt
     just --fmt --check --unstable
     just clippy --lib --tests
     cargo clippy -p marmotd --tests -- -D warnings
-    cargo clippy -p pika-notifications --tests -- -D warnings
+    cargo clippy -p pika-server --tests -- -D warnings
 
 # CI-safe pre-merge for the Pika app lane.
 pre-merge-pika: fmt
@@ -225,8 +225,8 @@ pre-merge-pika: fmt
 
 # CI-safe pre-merge for the notification server lane.
 pre-merge-notifications:
-    cargo clippy -p pika-notifications -- -D warnings
-    cargo test -p pika-notifications -- --test-threads=1
+    cargo clippy -p pika-server -- -D warnings
+    cargo test -p pika-server -- --test-threads=1
     @echo "pre-merge-notifications complete"
 
 # CI-safe pre-merge for the openclaw-marmot (marmotd) lane.
@@ -666,6 +666,27 @@ interop-rust-baseline:
 # Interactive interop test (manual send/receive with local bot).
 interop-rust-manual:
     ./tools/interop-rust-baseline --manual
+
+# ── pika-relay (local Nostr relay + Blossom server) ─────────────────────────
+
+# Run pika-relay locally (relay on :3334, blossom on same port).
+run-relay *ARGS:
+    cd cmd/pika-relay && go run . {{ ARGS }}
+
+# Run pika-relay with custom data/media dirs (persistent local dev).
+run-relay-dev:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    mkdir -p .pika-relay/data .pika-relay/media
+    cd cmd/pika-relay && \
+      DATA_DIR=../../.pika-relay/data \
+      MEDIA_DIR=../../.pika-relay/media \
+      SERVICE_URL=http://localhost:3334 \
+      go run .
+
+# Build pika-relay binary.
+relay-build:
+    cd cmd/pika-relay && go build -o ../../target/pika-relay .
 
 # ── pika-cli (Marmot protocol CLI) ──────────────────────────────────────────
 

@@ -1,0 +1,123 @@
+package main
+
+import (
+	"bytes"
+	"context"
+	"io"
+	"log"
+	"net/http"
+	"net/url"
+	"os"
+	"os/signal"
+	"path/filepath"
+	"syscall"
+
+	"fiatjaf.com/nostr"
+	"fiatjaf.com/nostr/eventstore/lmdb"
+	"fiatjaf.com/nostr/khatru"
+	"fiatjaf.com/nostr/khatru/blossom"
+)
+
+func main() {
+	log.SetFlags(log.Ldate | log.Ltime | log.Lshortfile)
+
+	port := envOr("PORT", "3334")
+	dataDir := envOr("DATA_DIR", "./data")
+	mediaDir := envOr("MEDIA_DIR", "./media")
+	serviceURL := envOr("SERVICE_URL", "http://localhost:"+port)
+
+	os.MkdirAll(dataDir, 0755)
+	os.MkdirAll(mediaDir, 0755)
+
+	relay := khatru.NewRelay()
+
+	relay.Info.Name = envOr("RELAY_NAME", "pika-relay")
+	relay.Info.Description = envOr("RELAY_DESCRIPTION", "Pika relay + Blossom media server")
+	relay.Info.Software = "https://github.com/sledtools/pika"
+	relay.Info.Version = "0.1.0"
+
+	if pubkey := os.Getenv("RELAY_PUBKEY"); pubkey != "" {
+		pk, err := nostr.PubKeyFromHex(pubkey)
+		if err == nil {
+			relay.Info.PubKey = &pk
+		}
+	}
+
+	relay.Negentropy = true
+
+	// Event storage
+	db := &lmdb.LMDBBackend{Path: filepath.Join(dataDir, "relay")}
+	if err := db.Init(); err != nil {
+		log.Fatalf("failed to init relay db: %v", err)
+	}
+	relay.UseEventstore(db, 500)
+
+	// Blossom
+	bdb := &lmdb.LMDBBackend{Path: filepath.Join(dataDir, "blossom")}
+	if err := bdb.Init(); err != nil {
+		log.Fatalf("failed to init blossom db: %v", err)
+	}
+
+	bl := blossom.New(relay, serviceURL)
+	bl.Store = blossom.EventStoreBlobIndexWrapper{Store: bdb, ServiceURL: serviceURL}
+
+	bl.StoreBlob = func(ctx context.Context, sha256 string, ext string, body []byte) error {
+		path := filepath.Join(mediaDir, sha256)
+		return os.WriteFile(path, body, 0644)
+	}
+
+	bl.LoadBlob = func(ctx context.Context, sha256 string, ext string) (io.ReadSeeker, *url.URL, error) {
+		path := filepath.Join(mediaDir, sha256)
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return nil, nil, err
+		}
+		return bytes.NewReader(data), nil, nil
+	}
+
+	bl.DeleteBlob = func(ctx context.Context, sha256 string, ext string) error {
+		return os.Remove(filepath.Join(mediaDir, sha256))
+	}
+
+	bl.RejectUpload = func(ctx context.Context, auth *nostr.Event, size int, ext string) (bool, string, int) {
+		if size > 100*1024*1024 {
+			return true, "file too large (100MB max)", 413
+		}
+		return false, "", 0
+	}
+
+	// Health check
+	mux := relay.Router()
+	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"status":"ok"}`))
+	})
+
+	shutdown := make(chan os.Signal, 1)
+	signal.Notify(shutdown, syscall.SIGINT, syscall.SIGTERM)
+
+	srv := &http.Server{
+		Addr:    ":" + port,
+		Handler: relay,
+	}
+
+	go func() {
+		log.Printf("pika-relay running on :%s (service_url=%s)", port, serviceURL)
+		if err := srv.ListenAndServe(); err != http.ErrServerClosed {
+			log.Fatalf("HTTP server error: %v", err)
+		}
+	}()
+
+	<-shutdown
+	log.Println("shutting down...")
+	srv.Shutdown(context.Background())
+}
+
+func envOr(key, fallback string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return fallback
+}
+
+
