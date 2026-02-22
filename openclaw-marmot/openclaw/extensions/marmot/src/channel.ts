@@ -724,9 +724,15 @@ export const marmotPlugin: ChannelPlugin<ResolvedMarmotAccount> = {
         pinnedVersion: resolved.config.sidecarVersion,
       });
       const relayArgs = (relays.length > 0 ? relays : ["ws://127.0.0.1:18080"]).flatMap((r) => ["--relay", r]);
-      const sidecarArgs =
-        resolveSidecarArgs(resolved.config.sidecarArgs) ??
-        ["daemon", ...relayArgs, "--state-dir", baseStateDir];
+      const configuredSidecarArgs = resolveSidecarArgs(resolved.config.sidecarArgs);
+      let sidecarArgs = configuredSidecarArgs ?? ["daemon", ...relayArgs, "--state-dir", baseStateDir];
+      const sidecarArgsLookLikeDaemon = sidecarArgs.length > 0 && sidecarArgs[0] === "daemon";
+      const sidecarHasAutoAcceptFlag = sidecarArgs.includes("--auto-accept-welcomes");
+      if (resolved.config.autoAcceptWelcomes && sidecarArgsLookLikeDaemon && !sidecarHasAutoAcceptFlag) {
+        sidecarArgs = [...sidecarArgs, "--auto-accept-welcomes"];
+      }
+      const sidecarAutoAcceptWelcomes =
+        sidecarArgsLookLikeDaemon && sidecarArgs.includes("--auto-accept-welcomes");
 
       ctx.log?.info(
         `[${resolved.accountId}] 🦞 MOLTATHON MARMOT v0.2.0 — starting sidecar cmd=${JSON.stringify(sidecarCmd)} args=${JSON.stringify(sidecarArgs)}`,
@@ -833,6 +839,12 @@ export const marmotPlugin: ChannelPlugin<ResolvedMarmotAccount> = {
         );
 
         if (!resolved.config.autoAcceptWelcomes) return;
+        if (sidecarAutoAcceptWelcomes) {
+          ctx.log?.debug(
+            `[${resolved.accountId}] auto-accept welcomes handled by sidecar count=${batch.length}`,
+          );
+          return;
+        }
 
         let accepted = 0;
         let failed = 0;
