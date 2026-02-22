@@ -633,6 +633,8 @@ fn default_backend_mode() -> &'static str {
 #[derive(Debug)]
 struct SyntheticAudio {
     phase: f32,
+    /// Global sample counter for alternating tone/silence every second.
+    sample_counter: u64,
     /// Pre-loaded PCM at 48kHz mono, read sequentially and looped.
     fixture_pcm: Option<Vec<i16>>,
     fixture_pos: usize,
@@ -645,6 +647,7 @@ impl SyntheticAudio {
             .and_then(|path| Self::load_wav_fixture(&path));
         Self {
             phase: 0.0,
+            sample_counter: 0,
             fixture_pcm,
             fixture_pos: 0,
         }
@@ -696,16 +699,25 @@ impl SyntheticAudio {
             }
             return out;
         }
+        // Alternate 1s tone / 1s silence so the bot's silence segmenter
+        // detects speech boundaries quickly instead of hitting the 20s cap.
         let mut out = Vec::with_capacity(FRAME_SAMPLES);
-        let freq = 220.0f32;
+        let freq = 440.0f32;
         let step = (2.0f32 * std::f32::consts::PI * freq) / SAMPLE_RATE as f32;
         for _ in 0..FRAME_SAMPLES {
-            let sample = (self.phase.sin() * (i16::MAX as f32 * 0.15f32)) as i16;
+            let second = (self.sample_counter / SAMPLE_RATE as u64) as u32;
+            let sample = if second.is_multiple_of(2) {
+                let s = (self.phase.sin() * (i16::MAX as f32 * 0.3f32)) as i16;
+                self.phase += step;
+                if self.phase > 2.0f32 * std::f32::consts::PI {
+                    self.phase -= 2.0f32 * std::f32::consts::PI;
+                }
+                s
+            } else {
+                0i16
+            };
             out.push(sample);
-            self.phase += step;
-            if self.phase > 2.0f32 * std::f32::consts::PI {
-                self.phase -= 2.0f32 * std::f32::consts::PI;
-            }
+            self.sample_counter += 1;
         }
         out
     }

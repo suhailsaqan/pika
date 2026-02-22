@@ -1,19 +1,19 @@
-use std::sync::{Arc, Once};
+use std::sync::{Arc, LazyLock};
 
 use rustls::pki_types::pem::PemObject;
 
-static INIT: Once = Once::new();
-
-/// rustls 0.23 selects a process-level CryptoProvider.
+/// Process-wide rustls CryptoProvider, initialized once on first access.
 ///
-/// The repo frequently ends up with both `ring` and `aws-lc-rs` in the dependency
-/// graph (e.g. nostr-sdk + QUIC). We choose one up front to avoid runtime errors.
+/// rustls 0.23 requires an explicit provider choice when both `ring` and
+/// `aws-lc-rs` appear in the dependency graph (common with nostr-sdk + QUIC).
+/// Using `LazyLock` ensures the provider is installed exactly once, even under
+/// heavy parallel test execution.
+static CRYPTO_PROVIDER: LazyLock<()> = LazyLock::new(|| {
+    let _ = rustls::crypto::ring::default_provider().install_default();
+});
+
 pub fn init_rustls_crypto_provider() {
-    INIT.call_once(|| {
-        // Prefer ring for compatibility with nostr-sdk.
-        // If another provider was already installed, ignore the error.
-        let _ = rustls::crypto::ring::default_provider().install_default();
-    });
+    LazyLock::force(&CRYPTO_PROVIDER);
 }
 
 /// Build a TLS client config using `webpki-roots` (Mozilla CA bundle).
