@@ -451,18 +451,52 @@ fn run_marmotd_call_test(relay_url: &str, moq_url: &str) {
         return;
     }
 
-    // When using real AI, feed speech audio instead of a sine wave so Whisper
-    // can produce a real transcript.
-    if std::env::var("OPENAI_API_KEY").is_ok() {
-        let fixture = concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/tests/fixtures/speech_prompt.wav"
-        );
-        if std::path::Path::new(fixture).exists() {
-            std::env::set_var("PIKA_AUDIO_FIXTURE", fixture);
-            eprintln!("[test] audio fixture: {fixture}");
+    // Generate an audio fixture that alternates 1s tone / 1s silence so the
+    // daemon's silence segmenter emits chunks quickly (within a few seconds
+    // rather than hitting the 20s MAX_CHUNK_MS safety cap).
+    let fixture_dir = tempdir().unwrap();
+    let fixture_path = fixture_dir.path().join("alternating.wav");
+    {
+        let sample_rate = 48_000u32;
+        let duration_secs = 10u32;
+        let total_samples = sample_rate * duration_secs;
+        let mut pcm = Vec::with_capacity(total_samples as usize);
+        let freq = 440.0f32;
+        let step = 2.0f32 * std::f32::consts::PI * freq / sample_rate as f32;
+        let samples_per_sec = sample_rate as usize;
+        for i in 0..total_samples as usize {
+            let second = i / samples_per_sec;
+            let sample = if second.is_multiple_of(2) {
+                // Tone: 440Hz sine at 30% amplitude
+                (((i as f32) * step).sin() * (i16::MAX as f32 * 0.3)) as i16
+            } else {
+                // Silence
+                0i16
+            };
+            pcm.push(sample);
         }
+        let data_len = (pcm.len() * 2) as u32;
+        let mut wav = Vec::with_capacity(44 + data_len as usize);
+        wav.extend_from_slice(b"RIFF");
+        wav.extend_from_slice(&(36 + data_len).to_le_bytes());
+        wav.extend_from_slice(b"WAVE");
+        wav.extend_from_slice(b"fmt ");
+        wav.extend_from_slice(&16u32.to_le_bytes());
+        wav.extend_from_slice(&1u16.to_le_bytes()); // PCM
+        wav.extend_from_slice(&1u16.to_le_bytes()); // mono
+        wav.extend_from_slice(&sample_rate.to_le_bytes());
+        wav.extend_from_slice(&(sample_rate * 2).to_le_bytes()); // byte rate
+        wav.extend_from_slice(&2u16.to_le_bytes()); // block align
+        wav.extend_from_slice(&16u16.to_le_bytes()); // bits per sample
+        wav.extend_from_slice(b"data");
+        wav.extend_from_slice(&data_len.to_le_bytes());
+        for s in &pcm {
+            wav.extend_from_slice(&s.to_le_bytes());
+        }
+        std::fs::write(&fixture_path, &wav).unwrap();
     }
+    std::env::set_var("PIKA_AUDIO_FIXTURE", fixture_path.to_str().unwrap());
+    eprintln!("[test] audio fixture: {}", fixture_path.display());
 
     eprintln!("[test] using relay: {relay_url}");
 
