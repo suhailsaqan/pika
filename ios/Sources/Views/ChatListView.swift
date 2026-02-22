@@ -15,6 +15,16 @@ struct ChatListView: View {
     let onEnableDeveloperMode: @MainActor () -> Void
     let onWipeLocalData: @MainActor () -> Void
     let nsecProvider: @MainActor () -> String?
+    let devices: [DeviceInfo]
+    let autoAddDevices: Bool
+    let onToggleAutoAddDevices: @MainActor (_ enabled: Bool) -> Void
+    let onFetchDevices: @MainActor () -> Void
+    let onAddDevice: @MainActor (_ json: String) -> Void
+    let pendingDevices: [DeviceInfo]
+    let onAcceptDevice: @MainActor (_ fingerprint: String) -> Void
+    let onRejectDevice: @MainActor (_ fingerprint: String) -> Void
+    let onAcceptAll: @MainActor () -> Void
+    let onRejectAll: @MainActor () -> Void
     @State private var showMyNpub = false
 
     var body: some View {
@@ -99,7 +109,17 @@ struct ChatListView: View {
                             onLogout: onLogout,
                             isDeveloperModeEnabledProvider: isDeveloperModeEnabledProvider,
                             onEnableDeveloperMode: onEnableDeveloperMode,
-                            onWipeLocalData: onWipeLocalData
+                            onWipeLocalData: onWipeLocalData,
+                            devices: devices,
+                            autoAddDevices: autoAddDevices,
+                            onToggleAutoAddDevices: onToggleAutoAddDevices,
+                            onFetchDevices: onFetchDevices,
+                            onAddDevice: onAddDevice,
+                            pendingDevices: pendingDevices,
+                            onAcceptDevice: onAcceptDevice,
+                            onRejectDevice: onRejectDevice,
+                            onAcceptAll: onAcceptAll,
+                            onRejectAll: onRejectAll
                         )
                     }
                 }
@@ -180,7 +200,17 @@ struct ChatListView: View {
             isDeveloperModeEnabledProvider: { false },
             onEnableDeveloperMode: {},
             onWipeLocalData: {},
-            nsecProvider: { nil }
+            nsecProvider: { nil },
+            devices: [],
+            autoAddDevices: true,
+            onToggleAutoAddDevices: { _ in },
+            onFetchDevices: {},
+            onAddDevice: { _ in },
+            pendingDevices: [],
+            onAcceptDevice: { _ in },
+            onRejectDevice: { _ in },
+            onAcceptAll: {},
+            onRejectAll: {}
         )
     }
 }
@@ -204,7 +234,17 @@ struct ChatListView: View {
             isDeveloperModeEnabledProvider: { false },
             onEnableDeveloperMode: {},
             onWipeLocalData: {},
-            nsecProvider: { nil }
+            nsecProvider: { nil },
+            devices: [],
+            autoAddDevices: true,
+            onToggleAutoAddDevices: { _ in },
+            onFetchDevices: {},
+            onAddDevice: { _ in },
+            pendingDevices: [],
+            onAcceptDevice: { _ in },
+            onRejectDevice: { _ in },
+            onAcceptAll: {},
+            onRejectAll: {}
         )
     }
 }
@@ -228,7 +268,17 @@ struct ChatListView: View {
             isDeveloperModeEnabledProvider: { false },
             onEnableDeveloperMode: {},
             onWipeLocalData: {},
-            nsecProvider: { nil }
+            nsecProvider: { nil },
+            devices: [],
+            autoAddDevices: true,
+            onToggleAutoAddDevices: { _ in },
+            onFetchDevices: {},
+            onAddDevice: { _ in },
+            pendingDevices: [],
+            onAcceptDevice: { _ in },
+            onRejectDevice: { _ in },
+            onAcceptAll: {},
+            onRejectAll: {}
         )
     }
 }
