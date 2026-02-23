@@ -718,13 +718,65 @@ cli-smoke-media:
     ./tools/cli-smoke --with-media
 
 # Run `pikachat agent new` (loads FLY_API_TOKEN + ANTHROPIC_API_KEY from .env).
-agent RELAY_EU="wss://eu.nostr.pikachat.org" RELAY_US="wss://us-east.nostr.pikachat.org":
+agent-fly-moq RELAY_EU="wss://eu.nostr.pikachat.org" RELAY_US="wss://us-east.nostr.pikachat.org" MOQ_US="https://us-east.moq.pikachat.org/anon" MOQ_EU="https://eu.moq.pikachat.org/anon":
     set -euo pipefail; \
     if [ ! -f .env ]; then \
       echo "error: missing .env in repo root"; \
+      echo "hint: add FLY_API_TOKEN and ANTHROPIC_API_KEY to .env"; \
       exit 1; \
     fi; \
     set -a; \
     source .env; \
     set +a; \
+    missing=(); \
+    for key in FLY_API_TOKEN ANTHROPIC_API_KEY; do \
+      if [ -z "${!key:-}" ]; then \
+        missing+=("$key"); \
+      fi; \
+    done; \
+    if [ "${#missing[@]}" -gt 0 ]; then \
+      echo "error: missing required env var(s): ${missing[*]}"; \
+      echo "hint: define them in .env (example: FLY_API_TOKEN=... and ANTHROPIC_API_KEY=...)"; \
+      exit 1; \
+    fi; \
+    cargo build -p pikachat >/dev/null; \
+    app_name="${FLY_BOT_APP_NAME:-pika-bot}"; \
+    if [ "${PIKA_AGENT_USE_PINNED_IMAGE:-0}" = "1" ] && [ -n "${FLY_BOT_IMAGE:-}" ]; then \
+      echo "info: using pinned FLY_BOT_IMAGE=$FLY_BOT_IMAGE"; \
+    else \
+      if [ -n "${FLY_BOT_IMAGE:-}" ]; then \
+        echo "info: ignoring pinned FLY_BOT_IMAGE=$FLY_BOT_IMAGE (set PIKA_AGENT_USE_PINNED_IMAGE=1 to use it)"; \
+      fi; \
+      resolved_image="$(fly machines list -a "$app_name" --json 2>/dev/null | python3 -c 'import json,sys; m=json.load(sys.stdin); n=[x for x in m if not (x.get("name") or "").startswith("agent-")]; c=sorted(n or m, key=lambda x:x.get("updated_at","")); cfg=(c[-1].get("config") if c else {}) or {}; sys.stdout.write(cfg.get("image") or "")')"; \
+      if [ -n "$resolved_image" ]; then \
+        export FLY_BOT_IMAGE="$resolved_image"; \
+        echo "info: resolved FLY_BOT_IMAGE=$FLY_BOT_IMAGE"; \
+      else \
+        echo "error: could not resolve FLY_BOT_IMAGE from app '$app_name'"; \
+        exit 1; \
+      fi; \
+    fi; \
+    export PIKA_AGENT_MARMOTD_BIN="$PWD/target/debug/pikachat"; \
+    export PIKA_AGENT_MOQ_URLS="{{ MOQ_US }},{{ MOQ_EU }}"; \
     cargo run -p pikachat -- --relay {{ RELAY_EU }} --relay {{ RELAY_US }} agent new
+
+# Run `pikachat agent new` over standard Marmot/Nostr transport (no MoQ call transport).
+agent-fly-rpc:
+    set -euo pipefail; \
+    export PIKA_AGENT_UI_MODE=nostr; \
+    if [ -n "${FLY_BOT_APP_NAME_RPC:-}" ]; then export FLY_BOT_APP_NAME="$FLY_BOT_APP_NAME_RPC"; fi; \
+    if [ -n "${FLY_BOT_IMAGE_RPC:-}" ]; then export FLY_BOT_IMAGE="$FLY_BOT_IMAGE_RPC"; export PIKA_AGENT_USE_PINNED_IMAGE=1; fi; \
+    just agent-fly-moq wss://eu.nostr.pikachat.org wss://us-east.nostr.pikachat.org
+
+# Deterministic PTY replay smoke test over Fly + MoQ (non-interactive).
+agent-replay-test RELAY_EU="wss://eu.nostr.pikachat.org" RELAY_US="wss://us-east.nostr.pikachat.org" MOQ_US="https://us-east.moq.pikachat.org/anon" MOQ_EU="https://eu.moq.pikachat.org/anon":
+    set -euo pipefail; \
+    mkdir -p .tmp; \
+    export PI_BRIDGE_REPLAY_FILE="/app/fixtures/pty/replay-ui-smoke.json"; \
+    export PIKA_AGENT_TEST_MODE=1; \
+    export PIKA_AGENT_TEST_TIMEOUT_SEC=45; \
+    export PIKA_AGENT_MAX_PREFIX_DROP_BYTES=0; \
+    export PIKA_AGENT_MAX_SUFFIX_DROP_BYTES=0; \
+    export PIKA_AGENT_CAPTURE_STDOUT_PATH="$PWD/.tmp/agent-replay-capture.bin"; \
+    export PIKA_AGENT_EXPECT_REPLAY_FILE="$PWD/tools/agent-pty/fixtures/replay-ui-smoke.json"; \
+    just agent-fly-moq "{{ RELAY_EU }}" "{{ RELAY_US }}" "{{ MOQ_US }}" "{{ MOQ_EU }}"
