@@ -306,7 +306,7 @@ struct AgentNewArgs {
     spawner_url: String,
 
     /// vm-spawner variant (microvm only)
-    #[arg(long, value_enum, default_value_t = SpawnVariantArg::Prebuilt)]
+    #[arg(long, value_enum, default_value_t = SpawnVariantArg::PrebuiltCow)]
     spawn_variant: SpawnVariantArg,
 
     /// Flake ref used in the guest (microvm only)
@@ -1465,7 +1465,7 @@ async fn wait_for_ssh_with_ip_refresh(
             anyhow::bail!("timed out waiting for SSH on {user}@{current_ip}:{port}");
         }
         let remaining = deadline.saturating_duration_since(now);
-        let refresh_budget = remaining.min(Duration::from_secs(2));
+        let refresh_budget = remaining.min(Duration::from_millis(500));
 
         if refresh_budget > Duration::ZERO {
             if let Ok(Ok(vm)) = tokio::time::timeout(refresh_budget, client.get_vm(vm_id)).await {
@@ -1483,7 +1483,7 @@ async fn wait_for_ssh_with_ip_refresh(
         }
         let sleep_for = deadline
             .saturating_duration_since(now)
-            .min(Duration::from_secs(1));
+            .min(Duration::from_millis(250));
         tokio::time::sleep(sleep_for).await;
     }
 }
@@ -1506,7 +1506,7 @@ async fn check_ssh_ready(
         .arg("-o")
         .arg("UserKnownHostsFile=/dev/null")
         .arg("-o")
-        .arg("ConnectTimeout=3");
+        .arg("ConnectTimeout=2");
     if let Some(jump_host) = jump_host {
         command.arg("-o").arg(format!(
             "ProxyCommand=ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null {jump_host} -W %h:%p"

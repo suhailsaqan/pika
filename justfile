@@ -731,7 +731,7 @@ agent-fly-moq RELAY_EU="wss://eu.nostr.pikachat.org" RELAY_US="wss://us-east.nos
     cargo run -p pika-cli -- --relay {{ RELAY_EU }} --relay {{ RELAY_US }} agent new
 
 # Run `pika-cli agent new` against local vm-spawner (loads ANTHROPIC_API_KEY from .env).
-agent-microvm RELAY_EU="wss://eu.nostr.pikachat.org" RELAY_US="wss://us-east.nostr.pikachat.org" SPAWNER_URL="http://127.0.0.1:8080" SPAWN_VARIANT="prebuilt":
+agent-microvm RELAY_EU="wss://eu.nostr.pikachat.org" RELAY_US="wss://us-east.nostr.pikachat.org" SPAWNER_URL="http://127.0.0.1:8080" SPAWN_VARIANT="prebuilt-cow":
     set -euo pipefail; \
     spawner_url="{{ SPAWNER_URL }}"; \
     tunnel_socket="${TMPDIR:-/tmp}/pika-build-vmspawner.sock"; \

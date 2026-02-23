@@ -5,7 +5,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
 SPAWNER_URL="${SPAWNER_URL:-http://127.0.0.1:8080}"
-SPAWN_VARIANT="${SPAWN_VARIANT:-prebuilt}"
+SPAWN_VARIANT="${SPAWN_VARIANT:-prebuilt-cow}"
 FLAKE_REF="${FLAKE_REF:-github:sledtools/pika}"
 DEV_SHELL="${DEV_SHELL:-default}"
 CPU="${CPU:-1}"

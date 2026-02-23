@@ -29,6 +29,7 @@ pub struct VmManager {
 struct ManagerState {
     vms: HashMap<String, PersistedVm>,
     runner_cache: HashMap<String, PathBuf>,
+    warmed_devshells: HashSet<String>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -94,6 +95,7 @@ impl VmManager {
             inner: Arc::new(Mutex::new(ManagerState {
                 vms: HashMap::new(),
                 runner_cache: HashMap::new(),
+                warmed_devshells: HashSet::new(),
             })),
         };
 
@@ -237,16 +239,12 @@ impl VmManager {
             timings.insert("ssh_keygen_ms".into(), to_ms(phase_start.elapsed()));
             phase_start = Instant::now();
 
-            run_command(
-                Command::new(&self.cfg.nix_cmd)
-                    .arg("build")
-                    .arg(format!("{flake_ref}#devShells.x86_64-linux.{dev_shell}"))
-                    .arg("--no-link")
-                    .arg("--accept-flake-config"),
-                "nix build devShell",
-            )
-            .await?;
+            let did_prewarm = self.ensure_devshell_warmed(&flake_ref, &dev_shell).await?;
             timings.insert("devshell_prewarm_ms".into(), to_ms(phase_start.elapsed()));
+            timings.insert(
+                "devshell_prewarm_cache_hit".into(),
+                if did_prewarm { 0 } else { 1 },
+            );
             phase_start = Instant::now();
 
             match variant {
@@ -486,6 +484,34 @@ impl VmManager {
         let mut guard = self.inner.lock().await;
         guard.runner_cache.insert(key, runner_path.clone());
         Ok(runner_path)
+    }
+
+    async fn ensure_devshell_warmed(
+        &self,
+        flake_ref: &str,
+        dev_shell: &str,
+    ) -> anyhow::Result<bool> {
+        let key = format!("{flake_ref}#{dev_shell}");
+        {
+            let guard = self.inner.lock().await;
+            if guard.warmed_devshells.contains(&key) {
+                return Ok(false);
+            }
+        }
+
+        run_command(
+            Command::new(&self.cfg.nix_cmd)
+                .arg("build")
+                .arg(format!("{flake_ref}#devShells.x86_64-linux.{dev_shell}"))
+                .arg("--no-link")
+                .arg("--accept-flake-config"),
+            "nix build devShell",
+        )
+        .await?;
+
+        let mut guard = self.inner.lock().await;
+        guard.warmed_devshells.insert(key);
+        Ok(true)
     }
 
     async fn ensure_workspace_template(&self) -> anyhow::Result<()> {
@@ -850,18 +876,41 @@ fn shell_quote(value: &str) -> String {
 }
 
 fn packaged_marmotd_path() -> anyhow::Result<PathBuf> {
+    if let Ok(override_path) = std::env::var("VM_MARMOTD_BIN") {
+        let path = PathBuf::from(override_path);
+        if path.exists() {
+            return Ok(path);
+        }
+    }
+
     let exe = std::env::current_exe().context("resolve vm-spawner binary path")?;
     let bin_dir = exe
         .parent()
         .ok_or_else(|| anyhow!("vm-spawner binary has no parent directory"))?;
     let marmotd = bin_dir.join("marmotd");
-    if !marmotd.exists() {
-        anyhow::bail!(
-            "packaged marmotd binary missing at {} (ensure vm-spawner package builds -p marmotd)",
-            marmotd.display()
-        );
+    if marmotd.exists() {
+        return Ok(marmotd);
     }
-    Ok(marmotd)
+
+    if let Some(path) = find_in_path("marmotd") {
+        return Ok(path);
+    }
+
+    anyhow::bail!(
+        "packaged marmotd binary missing at {} (set VM_MARMOTD_BIN or ensure marmotd is on PATH)",
+        marmotd.display()
+    );
+}
+
+fn find_in_path(bin_name: &str) -> Option<PathBuf> {
+    let path = std::env::var_os("PATH")?;
+    for dir in std::env::split_paths(&path) {
+        let candidate = dir.join(bin_name);
+        if candidate.exists() {
+            return Some(candidate);
+        }
+    }
+    None
 }
 
 fn write_runtime_metadata(
