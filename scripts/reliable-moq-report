@@ -1,0 +1,242 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+TS="$(date -u +%Y%m%dT%H%M%SZ)"
+BENCH_CMD='cargo test -p pika_core --test perf_reliable_moq -- --ignored --nocapture'
+
+OUT_DIR="${ROOT_DIR}/artifacts/reliable-moq"
+if [[ "${1:-}" == "--from-log" ]]; then
+  if [[ -z "${2:-}" ]]; then
+    echo "usage: $0 [OUT_DIR] | --from-log <benchmark.log> [OUT_DIR]" >&2
+    exit 2
+  fi
+  LOG_PATH="$2"
+  if [[ ! -f "$LOG_PATH" ]]; then
+    echo "[reliable-moq-report] error: log file not found: $LOG_PATH" >&2
+    exit 1
+  fi
+  OUT_DIR="${3:-$(dirname "$LOG_PATH")}"
+  echo "[reliable-moq-report] parsing existing log: $LOG_PATH"
+else
+  OUT_DIR="${1:-$OUT_DIR}"
+  mkdir -p "$OUT_DIR"
+  LOG_PATH="$OUT_DIR/benchmark-$TS.log"
+  echo "[reliable-moq-report] running benchmark"
+  echo "[reliable-moq-report] command: $BENCH_CMD"
+  echo "[reliable-moq-report] log: $LOG_PATH"
+  (
+    cd "$ROOT_DIR"
+    eval "$BENCH_CMD"
+  ) | tee "$LOG_PATH"
+fi
+
+mkdir -p "$OUT_DIR"
+RESULTS_PATH="$OUT_DIR/results-$TS.tsv"
+PAIRS_PATH="$OUT_DIR/pairs-$TS.tsv"
+REPORT_PATH="$OUT_DIR/report-$TS.md"
+
+if ! grep -q '^RESULT|' "$LOG_PATH"; then
+  echo "[reliable-moq-report] error: no RESULT lines found in benchmark output" >&2
+  exit 1
+fi
+
+{
+  echo -e "transport\tname\tmedian_ms\tmean_ms\tp95_ms\tmin_ms\trecv_pct"
+  grep '^RESULT|' "$LOG_PATH" | awk -F'|' '
+    {
+      transport=$2; name=$3;
+      if ($4 == "FAIL") {
+        print transport "\t" name "\tFAIL\tFAIL\tFAIL\tFAIL\t0";
+      } else {
+        print transport "\t" name "\t" $4 "\t" $5 "\t" $6 "\t" $7 "\t" $8;
+      }
+    }
+  '
+} > "$RESULTS_PATH"
+
+{
+  echo -e "label\tlhs_kind\tlhs_name\trhs_kind\trhs_name\tn\tlhs_mean_median_ms\trhs_mean_median_ms\tdelta_ms\tci_low_ms\tci_high_ms\trhs_win_pct\tlhs_reliable_pct\trhs_reliable_pct"
+  (grep '^PAIR|' "$LOG_PATH" || true) | awk -F'|' '
+    {
+      print $2 "\t" $3 "\t" $4 "\t" $5 "\t" $6 "\t" $7 "\t" $8 "\t" $9 "\t" $10 "\t" $11 "\t" $12 "\t" $13 "\t" $14 "\t" $15;
+    }
+  '
+} > "$PAIRS_PATH"
+
+best_name() {
+  local transport="$1"
+  local name_filter="${2:-}"
+  awk -F'\t' -v t="$transport" -v f="$name_filter" '
+    NR == 1 { next }
+    $1 != t { next }
+    f != "" && $2 !~ f { next }
+    $3 == "" { next }
+    ($7 + 0) < 95 { next }
+    best == "" || ($3 + 0) < best { best = $3 + 0; name = $2 }
+    END { if (name != "") print name }
+  ' "$RESULTS_PATH"
+}
+
+best_median() {
+  local transport="$1"
+  local name_filter="${2:-}"
+  awk -F'\t' -v t="$transport" -v f="$name_filter" '
+    NR == 1 { next }
+    $1 != t { next }
+    f != "" && $2 !~ f { next }
+    $3 == "" { next }
+    ($7 + 0) < 95 { next }
+    best == "" || ($3 + 0) < best { best = $3 + 0 }
+    END { if (best != "") printf "%.1f", best }
+  ' "$RESULTS_PATH"
+}
+
+avg_reliable_median() {
+  local transport="$1"
+  awk -F'\t' -v t="$transport" '
+    NR == 1 { next }
+    $1 == t && $3 != "" && ($7 + 0) >= 95 { sum = sum + ($3 + 0); n = n + 1 }
+    END { if (n > 0) printf "%.1f", sum / n }
+  ' "$RESULTS_PATH"
+}
+
+reliable_ratio() {
+  local transport="$1"
+  awk -F'\t' -v t="$transport" '
+    BEGIN { total = 0; ok = 0 }
+    NR == 1 { next }
+    $1 != t { next }
+    {
+      total = total + 1
+      if (($7 + 0) >= 95) ok = ok + 1
+    }
+    END { printf "%d/%d", ok, total }
+  ' "$RESULTS_PATH"
+}
+
+unreliable_list() {
+  local transport="$1"
+  awk -F'\t' -v t="$transport" '
+    NR == 1 { next }
+    $1 == t && (($7 + 0) < 95) {
+      if (out != "") out = out ", "
+      out = out $2 " (" sprintf("%.0f", $7 + 0) "%)"
+    }
+    END { print out }
+  ' "$RESULTS_PATH"
+}
+
+BEST_NOSTR_NAME="$(best_name nostr)"
+BEST_NOSTR_MEDIAN="$(best_median nostr)"
+BEST_MCR_NAME="$(best_name 'mcr+moq')"
+BEST_MCR_MEDIAN="$(best_median 'mcr+moq')"
+
+BEST_PIKA_NOSTR_NAME="$(best_name nostr 'pikachat\\.org$')"
+BEST_PIKA_NOSTR_MEDIAN="$(best_median nostr 'pikachat\\.org$')"
+BEST_PIKA_MCR_NAME="$(best_name 'mcr+moq' 'pikachat\\.org$')"
+BEST_PIKA_MCR_MEDIAN="$(best_median 'mcr+moq' 'pikachat\\.org$')"
+
+AVG_NOSTR_MEDIAN="$(avg_reliable_median nostr)"
+AVG_MCR_MEDIAN="$(avg_reliable_median 'mcr+moq')"
+
+NOSTR_RELIABLE_RATIO="$(reliable_ratio nostr)"
+MCR_RELIABLE_RATIO="$(reliable_ratio 'mcr+moq')"
+NOSTR_UNRELIABLE="$(unreliable_list nostr)"
+MCR_UNRELIABLE="$(unreliable_list 'mcr+moq')"
+
+FASTEST_DELTA_MS=""
+FASTEST_DELTA_PCT=""
+FASTEST_X=""
+if [[ -n "$BEST_NOSTR_MEDIAN" && -n "$BEST_MCR_MEDIAN" ]]; then
+  FASTEST_DELTA_MS="$(awk -v a="$BEST_NOSTR_MEDIAN" -v b="$BEST_MCR_MEDIAN" 'BEGIN { printf "%.1f", a - b }')"
+  FASTEST_DELTA_PCT="$(awk -v a="$BEST_NOSTR_MEDIAN" -v b="$BEST_MCR_MEDIAN" 'BEGIN { if (a > 0) printf "%.1f", ((a - b) / a) * 100; else printf "0.0" }')"
+  FASTEST_X="$(awk -v a="$BEST_NOSTR_MEDIAN" -v b="$BEST_MCR_MEDIAN" 'BEGIN { if (b > 0) printf "%.2f", a / b; else printf "0.00" }')"
+fi
+
+PIKA_DELTA_MS=""
+PIKA_DELTA_PCT=""
+PIKA_X=""
+if [[ -n "$BEST_PIKA_NOSTR_MEDIAN" && -n "$BEST_PIKA_MCR_MEDIAN" ]]; then
+  PIKA_DELTA_MS="$(awk -v a="$BEST_PIKA_NOSTR_MEDIAN" -v b="$BEST_PIKA_MCR_MEDIAN" 'BEGIN { printf "%.1f", a - b }')"
+  PIKA_DELTA_PCT="$(awk -v a="$BEST_PIKA_NOSTR_MEDIAN" -v b="$BEST_PIKA_MCR_MEDIAN" 'BEGIN { if (a > 0) printf "%.1f", ((a - b) / a) * 100; else printf "0.0" }')"
+  PIKA_X="$(awk -v a="$BEST_PIKA_NOSTR_MEDIAN" -v b="$BEST_PIKA_MCR_MEDIAN" 'BEGIN { if (b > 0) printf "%.2f", a / b; else printf "0.00" }')"
+fi
+
+PAIR_ROWS="$(awk -F'\t' 'NR > 1 { n += 1 } END { printf "%d", n }' "$PAIRS_PATH")"
+PAIR_RHS_FASTER="$(awk -F'\t' 'NR > 1 && $7 != "FAIL" && ($10 + 0) > 0 { n += 1 } END { printf "%d", n }' "$PAIRS_PATH")"
+PAIR_LHS_FASTER="$(awk -F'\t' 'NR > 1 && $7 != "FAIL" && ($11 + 0) < 0 { n += 1 } END { printf "%d", n }' "$PAIRS_PATH")"
+PAIR_INCONCLUSIVE="$(awk -F'\t' 'NR > 1 && $7 != "FAIL" && ($10 + 0) <= 0 && ($11 + 0) >= 0 { n += 1 } END { printf "%d", n }' "$PAIRS_PATH")"
+
+{
+  echo "# Reliable MoQ Benchmark Report"
+  echo
+  echo "- Generated: $(date -u +'%Y-%m-%d %H:%M:%SZ')"
+  echo "- Benchmark command: \`$BENCH_CMD\`"
+  echo "- Benchmark log: \`$LOG_PATH\`"
+  echo "- Parsed results: \`$RESULTS_PATH\`"
+  echo "- Parsed pairs: \`$PAIRS_PATH\`"
+  echo
+  echo "## Results"
+  echo
+  echo "| Transport | Relay | Median (ms) | Mean (ms) | P95 (ms) | Min (ms) | Recv % |"
+  echo "|---|---|---:|---:|---:|---:|---:|"
+  tail -n +2 "$RESULTS_PATH" | while IFS=$'\t' read -r transport name median mean p95 min recv; do
+    if [[ "$median" == "FAIL" ]]; then
+      echo "| $transport | $name | FAIL | FAIL | FAIL | FAIL | 0 |"
+    else
+      echo "| $transport | $name | $median | $mean | $p95 | $min | $recv |"
+    fi
+  done
+  echo
+  if [[ "$PAIR_ROWS" -gt 0 ]]; then
+    echo "## Paired A/B (Interleaved)"
+    echo
+    echo "| Pair | LHS (baseline) | RHS (candidate) | Samples | LHS mean median (ms) | RHS mean median (ms) | Delta LHS-RHS (ms) | 95% CI (ms) | RHS win % | Verdict |"
+    echo "|---|---|---|---:|---:|---:|---:|---:|---:|---|"
+    tail -n +2 "$PAIRS_PATH" | while IFS=$'\t' read -r label lhs_kind lhs_name rhs_kind rhs_name n lhs_med rhs_med delta ci_low ci_high rhs_win lhs_rel rhs_rel; do
+      if [[ "$lhs_med" == "FAIL" || "$n" == "0" ]]; then
+        echo "| $label | $lhs_name ($lhs_kind) | $rhs_name ($rhs_kind) | 0 | FAIL | FAIL | FAIL | FAIL | 0 | unavailable |"
+      else
+        verdict="$(awk -v lo="$ci_low" -v hi="$ci_high" 'BEGIN { if (lo > 0) print "rhs faster"; else if (hi < 0) print "lhs faster"; else print "inconclusive" }')"
+        echo "| $label | $lhs_name ($lhs_kind) | $rhs_name ($rhs_kind) | $n | $lhs_med | $rhs_med | $delta | [$ci_low, $ci_high] | $rhs_win | $verdict |"
+      fi
+    done
+    echo
+  fi
+
+  echo "## Conclusions"
+  echo
+  if [[ -n "$BEST_NOSTR_NAME" ]]; then
+    echo "- Best reliable Nostr relay in this run: \`$BEST_NOSTR_NAME\` at **$BEST_NOSTR_MEDIAN ms median** (recv >=95%)."
+  fi
+  if [[ -n "$BEST_MCR_NAME" ]]; then
+    echo "- Best reliable MCR+MoQ relay in this run: \`$BEST_MCR_NAME\` at **$BEST_MCR_MEDIAN ms median** (recv >=95%)."
+  fi
+  if [[ -n "$FASTEST_X" ]]; then
+    echo "- Fastest reliable MCR+MoQ was **${FASTEST_X}x** faster than fastest reliable Nostr ($FASTEST_DELTA_MS ms lower median, $FASTEST_DELTA_PCT% improvement)."
+  fi
+  if [[ -n "$AVG_NOSTR_MEDIAN" && -n "$AVG_MCR_MEDIAN" ]]; then
+    echo "- Average median across reliable relays: Nostr **$AVG_NOSTR_MEDIAN ms** vs MCR+MoQ **$AVG_MCR_MEDIAN ms**."
+  fi
+  echo "- Reliable relay count (recv >=95%): Nostr **$NOSTR_RELIABLE_RATIO**, MCR+MoQ **$MCR_RELIABLE_RATIO**."
+  if [[ -n "$NOSTR_UNRELIABLE" ]]; then
+    echo "- Nostr relays below 95% receive in this run: $NOSTR_UNRELIABLE."
+  fi
+  if [[ -n "$MCR_UNRELIABLE" ]]; then
+    echo "- MCR+MoQ relays below 95% receive in this run: $MCR_UNRELIABLE."
+  fi
+  if [[ -n "$BEST_PIKA_NOSTR_NAME" && -n "$BEST_PIKA_MCR_NAME" ]]; then
+    echo "- Within the \`*.pikachat.org\` fleet, best Nostr was \`$BEST_PIKA_NOSTR_NAME\` (**$BEST_PIKA_NOSTR_MEDIAN ms**) and best MCR+MoQ was \`$BEST_PIKA_MCR_NAME\` (**$BEST_PIKA_MCR_MEDIAN ms**)."
+  fi
+  if [[ -n "$PIKA_X" ]]; then
+    echo "- On \`*.pikachat.org\` specifically, best MCR+MoQ was **${PIKA_X}x** faster than best Nostr ($PIKA_DELTA_MS ms lower median, $PIKA_DELTA_PCT% improvement)."
+  fi
+  if [[ "$PAIR_ROWS" -gt 0 ]]; then
+    echo "- Paired interleaved A/B outcomes: rhs faster **$PAIR_RHS_FASTER**, lhs faster **$PAIR_LHS_FASTER**, inconclusive **$PAIR_INCONCLUSIVE**."
+    echo "- Use paired verdicts as the apples-to-apples signal; relay matrix averages remain useful for fleet-level health and region coverage."
+  fi
+  echo "- This is a single benchmark pass over public internet paths; rerun multiple times before making final production SLO commitments."
+} > "$REPORT_PATH"
+
+echo "[reliable-moq-report] wrote report: $REPORT_PATH"

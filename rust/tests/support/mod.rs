@@ -1,5 +1,7 @@
 #![allow(dead_code)]
 
+pub mod reliable_moq;
+
 use std::io::{BufRead, BufReader};
 use std::net::UdpSocket;
 use std::path::PathBuf;

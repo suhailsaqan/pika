@@ -1,181 +1,62 @@
-# Pika
+# Reliable MoQ Experiment (Demo Branch)
 
-End-to-end encrypted messaging for iOS and Android, built on [MLS](https://messaginglayersecurity.rocks/) over [Nostr](https://nostr.com/).
+This branch exists to evaluate whether a Reliable-MoQ chat path is materially faster than Nostr relays for foreground typing indicators and chat message delivery.
 
-> [!WARNING]
-> Alpha software. This project was largely vibe-coded and likely contains privacy and security flaws. Do not use it for sensitive or production workloads.
+## Decision
 
-## Features
+We are **not pursuing Reliable-MoQ chat transport** at this time.
 
-| Feature | iOS | Android | Desktop |
-|---|:---:|:---:|:---:|
-| 1:1 encrypted messaging | ✅ | ✅ | ✅ |
-| Group chats (MLS) | ✅ | ✅ | ✅ |
-| Voice calls (1:1) | ✅ | ✅ | ✅ |
-| Video calls (1:1) | ✅ | | ✅ |
-| Push notifications | ✅ | | |
-| Emoji reactions | ✅ | | ✅ |
-| Typing indicators | ✅ | | ✅ |
-| @mention autocomplete | ✅ | | ✅ |
-| Markdown rendering | ✅ | ✅ | |
-| Polls | ✅ | ✅ | |
-| Interactive widgets (HTML) | ✅ | | |
-| QR code scan / display | ✅ | ✅ | |
-| Encrypted media upload/download | ✅ | | |
-| Profile photo upload | ✅ | ✅ | |
-| Follow / unfollow contacts | ✅ | ✅ | ✅ |
+Reason: in apples-to-apples paired A/B runs on deployed `*.pikachat.org` east/eu relays, the measured differences were small and statistically inconclusive, far below the target bar of `2-3x` improvement.
 
-## How it works
+## What was implemented
 
-Pika uses the [Marmot protocol](https://github.com/marmot-protocol/mdk) to layer MLS group encryption on top of Nostr relays. Messages are encrypted client-side using MLS, then published as Nostr events. Nostr relays handle transport and delivery without ever seeing plaintext.
-
-```
-┌─────────┐       UniFFI / JNI       ┌────────────┐       Nostr events       ┌───────────┐
-│ iOS /   │  ───  actions  ────────▶  │  Rust core │  ──  encrypted msgs ──▶  │   Nostr   │
-│ Android │  ◀──  state snapshots ──  │  (pika_core)│  ◀─  encrypted msgs ──  │   relays  │
-└─────────┘                           └────────────┘                          └───────────┘
-                                            │
-                                            ▼
-                                     ┌────────────┐
-                                     │    MDK     │
-                                     │ (MLS lib)  │
-                                     └────────────┘
-```
-
-- **Rust core** owns all business logic: MLS state, message encryption/decryption, Nostr transport, and app state
-- **iOS** (SwiftUI) and **Android** (Kotlin) are thin UI layers that render state snapshots from Rust and dispatch user actions back
-- **MDK** (Marmot Development Kit) provides the MLS implementation
-- **nostr-sdk** handles relay connections and event publishing/subscribing
-
-## Project structure
-
-```
-pika/
-├── rust/              Rust core library (pika_core) — MLS, Nostr, app state
-├── ios/               iOS app (SwiftUI, XcodeGen)
-├── android/           Android app (Kotlin, Gradle)
-├── cli/               pika-cli — command-line tool for testing and automation
-├── crates/
-│   ├── marmotd/       Marmot daemon (standalone MLS bot runtime)
-│   ├── pika-media/    Media handling (audio, etc.)
-│   ├── pika-tls/      TLS / certificate utilities
-│   └── rmp-cli/       RMP scaffolding CLI
-├── uniffi-bindgen/    UniFFI binding generator
-├── docs/              Architecture and design docs
-├── tools/             Build and run tooling (pika-run, etc.)
-├── scripts/           Developer scripts
-└── justfile           Task runner recipes
-```
-
-## Prerequisites
-
-- **Rust** (stable toolchain with cross-compilation targets)
-- **Nix** (optional) — `nix develop` provides a complete dev environment
-- **iOS**: Xcode, XcodeGen
-- **Android**: Android SDK, NDK
-
-The Nix flake (`flake.nix`) pins all dependencies including Rust toolchains and Android SDK components. This is the recommended way to get a reproducible environment.
-
-## Getting started
-
-### Build the Rust core
-
-```sh
-just rust-build-host
-```
-
-### iOS
-
-```sh
-just ios-rust              # Cross-compile Rust for iOS targets
-just ios-xcframework       # Build PikaCore.xcframework
-just ios-xcodeproj         # Generate Xcode project
-just ios-build-sim         # Build for simulator
-just run-ios               # Build, install, and launch on simulator
-```
-
-### Android
-
-```sh
-just android-local-properties   # Write local.properties with SDK path
-just android-rust               # Cross-compile Rust for Android targets
-just gen-kotlin                 # Generate Kotlin bindings via UniFFI
-just android-assemble           # Build debug APK
-just run-android                # Build, install, and launch on device/emulator
-```
-
-### pika-cli
-
-A command-line interface for testing the Marmot protocol directly:
-
-```sh
-just cli-build
-cargo run -p pika-cli -- --relay ws://127.0.0.1:7777 identity
-cargo run -p pika-cli -- --relay ws://127.0.0.1:7777 groups
-```
-
-## Development
-
-```sh
-just fmt          # Format Rust code
-just clippy       # Lint
-just test         # Run pika_core tests
-just qa           # Full QA: fmt + clippy + test + platform builds
-just pre-merge    # CI entrypoint for the whole repo
-```
-
-See all available recipes with `just --list`.
-
-## Testing
-
-```sh
-just test                    # Unit tests
-just cli-smoke               # CLI smoke test (requires local Nostr relay)
-just e2e-local-relay         # Deterministic E2E with local relay + local bot
-just e2e-public              # E2E against public relays (nondeterministic)
-just ios-ui-test             # iOS UI tests on simulator
-just android-ui-test         # Android instrumentation tests
-```
-
-## Reliable MoQ experiment (Feb 23, 2026)
-
-We prototyped a "Reliable MoQ" chat path (HTTP persist + MoQ live fanout) and benchmarked it against Nostr relay delivery.
-
-How we measured:
-
-- Matrix benchmark across public and project relays
-- Interleaved paired A/B runs for apples-to-apples comparisons (alternating order per run)
-- Commands:
+- Reliable-MoQ prototype relay/client test harness:
+  - `rust/tests/support/reliable_moq.rs`
+- Deterministic profile tests (gap repair, dedupe, reconnect, error codes):
+  - `rust/tests/reliable_moq_profile.rs`
+- Network benchmark and interleaved paired A/B mode:
+  - `rust/tests/perf_reliable_moq.rs`
+- Report generator:
+  - `scripts/reliable-moq-report`
+- Recipes:
   - `just perf-reliable-moq`
   - `just report-reliable-moq`
 
-Result:
+## Latest measured evidence
 
-- This did **not** show a meaningful latency improvement for Pika chat/typing delivery.
-- In paired `*.pikachat.org` comparisons, all 95% confidence intervals crossed zero (inconclusive):
-  - us-east: nostr vs moq delta `-8.7ms`, 95% CI `[-18.6, 1.1]`
-  - eu: nostr vs moq delta `8.8ms`, 95% CI `[-18.4, 35.9]`
-- MoQ us-east `logos.surf` vs MoQ us-east `pikachat` was also inconclusive:
-  - delta `-4.4ms`, 95% CI `[-13.3, 4.5]`
+From report `artifacts/reliable-moq/report-20260223T061250Z.md`:
 
-Conclusion:
+- Paired A/B `pikachat us-east` (nostr vs mcr+moq):
+  - delta (nostr - moq): `-8.7ms`
+  - 95% CI: `[-18.6, 1.1]`
+  - verdict: **inconclusive**
+- Paired A/B `pikachat eu` (nostr vs mcr+moq):
+  - delta (nostr - moq): `8.8ms`
+  - 95% CI: `[-18.4, 35.9]`
+  - verdict: **inconclusive**
+- Paired A/B `moq us-east` (logos vs pikachat):
+  - delta (logos - pikachat): `-4.4ms`
+  - 95% CI: `[-13.3, 4.5]`
+  - verdict: **inconclusive**
 
-- For this codebase and relay topology, Reliable MoQ chat transport did **not** provide the expected step-function gain (for example `2-3x` faster), so we are **not pursuing it** as a mainline chat delivery path at this time.
-- Nostr remains the primary chat transport path.
+## How to rerun
 
-## Architecture
+Run full matrix + paired benchmark and generate report:
 
-Pika follows a **unidirectional data flow** pattern:
+```sh
+just report-reliable-moq
+```
 
-1. UI dispatches an `AppAction` to Rust (fire-and-forget, never blocks)
-2. Rust mutates state in a single-threaded actor (`AppCore`)
-3. Rust emits an `AppUpdate` with a monotonic revision number
-4. iOS/Android applies the update on the main thread and re-renders
+Useful env knobs:
 
-State is transferred as full snapshots over UniFFI (Swift) and JNI (Kotlin). This keeps the system simple and eliminates partial-state consistency bugs.
+- `PIKA_BENCH_MSG_COUNT` (default `20`)
+- `PIKA_BENCH_RUNS` (default `3`)
+- `PIKA_BENCH_PAIR_RUNS` (default `8`)
+- `PIKA_BENCH_SKIP_MATRIX=1` (paired-only)
+- `PIKA_BENCH_SKIP_PAIRS=1` (matrix-only)
 
-See [`docs/architecture.md`](docs/architecture.md) for the full design.
+Parse an existing benchmark log into a new report:
 
-## License
-
-[MIT](LICENSE)
+```sh
+./scripts/reliable-moq-report --from-log <path-to-benchmark.log>
+```

@@ -322,6 +322,14 @@ e2e-public:
 e2e-real-moq:
     cargo test -p pika_core --test e2e_real_moq_relay -- --ignored --nocapture
 
+# Benchmark Reliable MoQ prototype (MCR-00 semantics) vs Nostr relay latency.
+perf-reliable-moq:
+    cargo test -p pika_core --test perf_reliable_moq -- --ignored --nocapture
+
+# Run benchmark and generate markdown report under artifacts/reliable-moq/.
+report-reliable-moq:
+    ./scripts/reliable-moq-report
+
 # Local E2E: local Nostr relay + local marmotd daemon.
 
 # Builds marmotd from the workspace crate (`crates/marmotd`) so no external repos are required.
