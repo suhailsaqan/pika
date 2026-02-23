@@ -1,12 +1,12 @@
 target/
 
-# Openclaw-marmot harness artifacts
-openclaw-marmot/.state/
-openclaw-marmot/node_modules/
-openclaw-marmot/**/node_modules/
-openclaw-marmot/**/package-lock.json
-openclaw-marmot/.env
-openclaw-marmot/.env.*
+# pikachat-openclaw harness artifacts
+pikachat-openclaw/.state/
+pikachat-openclaw/node_modules/
+pikachat-openclaw/**/node_modules/
+pikachat-openclaw/**/package-lock.json
+pikachat-openclaw/.env
+pikachat-openclaw/.env.*
 
 # Android
 android/.gradle/
@@ -44,21 +44,21 @@ emulator.log
 worktrees
 
 # Local dev artifacts
-.pika-cli-test-nsec
+.pikachat-test-nsec
 .env
 .env.local
 .cargo/config.toml
-.pika-cli-test
+.pikachat-test
 ios/UITests/env.test
 .DS_Store
 secrets/zapstore-signing.env
 secrets/.age-key*.tmp
 secrets/.zapstore-sign-with.*
-.pika-cli/
+.pikachat/
 .pgdata/
 
 # Avoid accidentally staging enormous vendored build output.
-third_party/openclaw-marmot/target/
+third_party/pikachat-openclaw/target/
 AGENTS.private.md
 
 # pika-relay local dev data

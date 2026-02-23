@@ -44,7 +44,7 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 
-STATE_DIR="$(mktemp -d /tmp/pika-cli-smoke.XXXXXX)"
+STATE_DIR="$(mktemp -d /tmp/pikachat-smoke.XXXXXX)"
 
 cleanup() {
   if [ -n "${RELAY_PID:-}" ]; then
@@ -89,7 +89,7 @@ fi
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
-CLI="cargo run -q -p pika-cli --"
+CLI="cargo run -q -p pikachat --"
 
 json_get() {
   local expr="$1"

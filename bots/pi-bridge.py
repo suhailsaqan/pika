@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Bridge between marmotd JSONL (stdin/stdout) and pi coding agent RPC mode."""
+"""Bridge between pikachat daemon JSONL (stdin/stdout) and pi coding agent RPC mode."""
 import json
 import os
 import subprocess
@@ -61,7 +61,7 @@ def collect_pi_response(pi_proc):
     return "".join(text_parts)
 
 
-def send_to_marmotd(cmd):
+def send_to_pikachat(cmd):
     print(json.dumps(cmd), flush=True)
 
 
@@ -83,8 +83,8 @@ def main():
 
         if msg_type == "ready":
             my_pubkey = msg.get("pubkey")
-            log(f"marmotd ready, pubkey={my_pubkey}")
-            send_to_marmotd({"cmd": "publish_keypackage"})
+            log(f"pikachat ready, pubkey={my_pubkey}")
+            send_to_pikachat({"cmd": "publish_keypackage"})
 
         elif msg_type == "message_received":
             if msg.get("from_pubkey") == my_pubkey:
@@ -94,7 +94,7 @@ def main():
             send_to_pi(pi_proc, {"type": "prompt", "message": content})
             response = collect_pi_response(pi_proc)
             if response.strip():
-                send_to_marmotd({
+                send_to_pikachat({
                     "cmd": "send_message",
                     "nostr_group_id": group_id,
                     "content": response,

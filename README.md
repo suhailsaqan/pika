@@ -54,9 +54,9 @@ pika/
 ├── rust/              Rust core library (pika_core) — MLS, Nostr, app state
 ├── ios/               iOS app (SwiftUI, XcodeGen)
 ├── android/           Android app (Kotlin, Gradle)
-├── cli/               pika-cli — command-line tool for testing and automation
+├── cli/               pikachat — command-line tool for testing and automation
 ├── crates/
-│   ├── marmotd/       Marmot daemon (standalone MLS bot runtime)
+│   ├── pikachat-sidecar/ Pikachat daemon engine (shared library)
 │   ├── pika-media/    Media handling (audio, etc.)
 │   ├── pika-tls/      TLS / certificate utilities
 │   └── rmp-cli/       RMP scaffolding CLI
@@ -104,14 +104,14 @@ just android-assemble           # Build debug APK
 just run-android                # Build, install, and launch on device/emulator
 ```
 
-### pika-cli
+### pikachat
 
 A command-line interface for testing the Marmot protocol directly:
 
 ```sh
 just cli-build
-cargo run -p pika-cli -- --relay ws://127.0.0.1:7777 identity
-cargo run -p pika-cli -- --relay ws://127.0.0.1:7777 groups
+cargo run -p pikachat -- --relay ws://127.0.0.1:7777 identity
+cargo run -p pikachat -- --relay ws://127.0.0.1:7777 groups
 ```
 
 ## Development

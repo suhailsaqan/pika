@@ -27,9 +27,9 @@ fi
 
 # --- CLI help ---
 
-titles+=("pika-cli help")
-cmds+=("cargo run -q -p pika-cli -- --help")
-descs+=("Marmot protocol CLI for testing and agent automation.")
+titles+=("pikachat help")
+cmds+=("cargo run -q -p pikachat -- --help")
+descs+=("Agent-native CLI for Pika messaging (one-shot + daemon mode).")
 
 # --- Canonical run CLI ---
 

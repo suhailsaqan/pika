@@ -114,8 +114,8 @@ pika_fixture_client_nsec() {
     return 0
   fi
 
-  if [ -f "${root}/.pika-cli-test-nsec" ]; then
-    tr -d '\n\r' < "${root}/.pika-cli-test-nsec"
+  if [ -f "${root}/.pikachat-test-nsec" ]; then
+    tr -d '\n\r' < "${root}/.pikachat-test-nsec"
     return 0
   fi
 

@@ -10,7 +10,7 @@ if [ -n "${NOSTR_SECRET_KEY:-}" ]; then
 IDENTITY
 fi
 
-exec /app/marmotd daemon \
+exec /app/pikachat daemon \
   --relay wss://us-east.nostr.pikachat.org \
   --relay wss://eu.nostr.pikachat.org \
   --state-dir "$STATE_DIR" \

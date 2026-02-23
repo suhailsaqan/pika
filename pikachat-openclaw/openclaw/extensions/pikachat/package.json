@@ -1,0 +1,35 @@
+{
+  "name": "pikachat-openclaw",
+  "version": "0.5.2",
+  "description": "OpenClaw Pikachat channel plugin (Rust sidecar)",
+  "type": "module",
+  "publishConfig": {
+    "access": "public"
+  },
+  "dependencies": {
+    "bech32": "^2.0.0"
+  },
+  "peerDependencies": {
+    "openclaw": ">=2026.1.0"
+  },
+  "openclaw": {
+    "extensions": [
+      "./index.ts"
+    ],
+    "channel": {
+      "id": "pikachat",
+      "label": "Pikachat",
+      "selectionLabel": "Pikachat (Rust)",
+      "docsPath": "/channels/pikachat",
+      "docsLabel": "pikachat",
+      "blurb": "MLS E2EE groups over Nostr (Rust sidecar).",
+      "order": 56,
+      "quickstartAllowFrom": true
+    },
+    "install": {
+      "npmSpec": "pikachat-openclaw",
+      "localPath": "extensions/pikachat",
+      "defaultChoice": "path"
+    }
+  }
+}

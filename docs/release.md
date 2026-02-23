@@ -1,7 +1,7 @@
 ---
-summary: Release process for Pika app artifacts (Android + macOS) and marmotd
+summary: Release process for Pika app artifacts (Android + macOS) and pikachat
 read_when:
-  - preparing an Android, macOS, or marmotd release
+  - preparing an Android, macOS, or pikachat release
   - rotating Android signing keys or CI release secrets
   - changing release automation in justfile, Gradle, or GitHub Actions
 ---
@@ -15,7 +15,7 @@ This repo has two independent release tag families:
 | Pika app release | `pika/v*` (e.g. `pika/v0.2.2`) | `release.yml` | Signed Android APK + macOS universal DMG + SHA256SUMS on GitHub Releases |
 | Zapstore publish | `pika/v*` (e.g. `pika/v0.2.2`) | `release.yml` (`publish-zapstore` job) | NIP-82 app/release/asset events on Zapstore relays |
 | Nostr announcement | `pika/v*` (e.g. `pika/v0.2.2`) | `release.yml` (`announce-release` job) | Kind-1 release announcement note |
-| marmotd (OpenClaw extension) | `marmotd-v*` (e.g. `marmotd-v0.3.2`) | `marmotd-release.yml` | Linux + macOS binaries on GitHub Releases, npm package |
+| pikachat (OpenClaw extension) | `pikachat-v*` (e.g. `pikachat-v0.5.2`) | `pikachat-release.yml` | Linux + macOS binaries on GitHub Releases, npm package |
 
 **Important:** All release tags must be created from the `master` branch. Tags on
 feature branches break GitHub's auto-generated release notes (it diffs between
@@ -137,18 +137,18 @@ cleanup), and passes it to `zsp` only for the publish command.
 
 ---
 
-## marmotd (OpenClaw extension)
+## pikachat (OpenClaw extension)
 
-marmotd is the Marmot sidecar binary used by the OpenClaw bot. It is released as
+pikachat is the sidecar binary used by the OpenClaw bot. It is released as
 native binaries (Linux x86_64/aarch64, macOS x86_64/aarch64) on GitHub Releases
 and as an npm package.
 
 ### Version source of truth
 
-- Rust version: `crates/marmotd/Cargo.toml`
-- npm version: `openclaw-marmot/openclaw/extensions/marmot/package.json`
+- Rust version: `cli/Cargo.toml`
+- npm version: `pikachat-openclaw/openclaw/extensions/pikachat/package.json`
 
-Both must match. The `bump-marmotd.sh` script keeps them in sync.
+Both must match. The `bump-pikachat.sh` script keeps them in sync.
 
 ### Runbook
 
@@ -158,23 +158,23 @@ git checkout master
 git pull origin master
 
 # 2. Bump version, commit, and tag (all done by the script)
-./scripts/bump-marmotd.sh 0.4.0
+./scripts/bump-pikachat.sh 0.5.2
 
 # 3. Push commit and tag (this triggers the CI release)
-git push origin master marmotd-v0.4.0
+git push origin master pikachat-v0.5.2
 
 # 4. Monitor the release workflow
 gh run list --limit 1
 gh run watch <run-id>
 
 # 5. Verify
-gh release view marmotd-v0.4.0
-npm view @openclaw/marmot version
+gh release view pikachat-v0.5.2
+npm view pikachat-openclaw version
 ```
 
 ### CI workflow
 
-`/.github/workflows/marmotd-release.yml` runs on `push.tags: ["marmotd-v*"]`.
+`/.github/workflows/pikachat-release.yml` runs on `push.tags: ["pikachat-v*"]`.
 
 Jobs:
 

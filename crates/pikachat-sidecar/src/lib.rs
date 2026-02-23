@@ -1,0 +1,15 @@
+use anyhow::Context;
+
+mod call_audio;
+mod call_tts;
+pub mod daemon;
+mod mdk_state;
+mod relay;
+
+pub use mdk_state::{IdentityFile, PikaMdk, load_or_create_keys, new_mdk, open_mdk};
+pub use relay::{check_relay_ready, connect_client, subscribe_group_msgs};
+
+fn ensure_dir(dir: &std::path::Path) -> anyhow::Result<()> {
+    std::fs::create_dir_all(dir).with_context(|| format!("mkdir {}", dir.display()))?;
+    Ok(())
+}

@@ -208,7 +208,8 @@ clippy *ARGS:
 pre-commit: fmt
     just --fmt --check --unstable
     just clippy --lib --tests
-    cargo clippy -p marmotd --tests -- -D warnings
+    cargo clippy -p pikachat --tests -- -D warnings
+    cargo clippy -p pikachat-sidecar --tests -- -D warnings
     cargo clippy -p pika-server --tests -- -D warnings
 
 # CI-safe pre-merge for the Pika app lane.
@@ -216,7 +217,7 @@ pre-merge-pika: fmt
     just clippy --lib --tests
     just test --lib --tests
     cd android && ./gradlew :app:compileDebugAndroidTestKotlin
-    cargo build -p pika-cli
+    cargo build -p pikachat
     just desktop-check
     actionlint
     npx --yes @justinmoon/agent-tools check-docs
@@ -229,11 +230,13 @@ pre-merge-notifications:
     cargo test -p pika-server -- --test-threads=1
     @echo "pre-merge-notifications complete"
 
-# CI-safe pre-merge for the openclaw-marmot (marmotd) lane.
-pre-merge-marmotd:
-    cargo clippy -p marmotd -- -D warnings
-    cargo test -p marmotd
-    @echo "pre-merge-marmotd complete"
+# CI-safe pre-merge for the pikachat lane (CLI + daemon sidecar).
+pre-merge-pikachat:
+    cargo clippy -p pikachat -- -D warnings
+    cargo clippy -p pikachat-sidecar -- -D warnings
+    cargo test -p pikachat
+    cargo test -p pikachat-sidecar
+    @echo "pre-merge-pikachat complete"
 
 # CI-safe pre-merge for the RMP tooling lane.
 pre-merge-rmp:
@@ -244,7 +247,7 @@ pre-merge-rmp:
 pre-merge:
     just pre-merge-pika
     just pre-merge-notifications
-    just pre-merge-marmotd
+    just pre-merge-pikachat
     just pre-merge-rmp
     @echo "pre-merge complete"
 
@@ -252,7 +255,7 @@ pre-merge:
 nightly:
     just pre-merge
     just nightly-pika-e2e
-    just nightly-marmotd
+    just nightly-pikachat
     @echo "nightly complete"
 
 # Nightly E2E (Rust): run all `#[ignore]` tests (intended for long/flaky network suites).
@@ -264,10 +267,10 @@ nightly-pika-e2e:
     # Keep nightly meaningful but avoid the explicitly disabled flaky local-relay call test.
     cargo test -p pika_core --tests -- --ignored --skip call_invite_accept_end_flow_over_local_relay --nocapture
 
-# Nightly lane: build marmotd + run the marmotd E2E suite (local Nostr relay + local MoQ relay).
-nightly-marmotd:
-    just e2e-local-marmotd
-    just openclaw-marmot-scenarios
+# Nightly lane: build pikachat + run the pikachat E2E suite (local Nostr relay + local MoQ relay).
+nightly-pikachat:
+    just e2e-local-pikachat-daemon
+    just openclaw-pikachat-scenarios
 
 # Nightly lane: iOS interop smoke (nostrconnect:// route + Pika bridge emission).
 nightly-primal-ios-interop:
@@ -293,13 +296,13 @@ primal-ios-lab-seed-reset:
 primal-ios-lab-dump-debug:
     ./tools/primal-ios-interop-lab dump-debug
 
-# openclaw-marmot scenario suite (local Nostr relay + marmotd scenarios).
-openclaw-marmot-scenarios:
-    ./openclaw-marmot/scripts/phase1.sh
-    ./openclaw-marmot/scripts/phase2.sh
-    ./openclaw-marmot/scripts/phase3.sh
-    ./openclaw-marmot/scripts/phase3_audio.sh
-    MARMOT_TTS_FIXTURE=1 cargo test -p marmotd daemon::tests::tts_pcm_publish_reaches_subscriber -- --nocapture
+# openclaw pikachat scenario suite (local Nostr relay + pikachat scenarios).
+openclaw-pikachat-scenarios:
+    ./pikachat-openclaw/scripts/phase1.sh
+    ./pikachat-openclaw/scripts/phase2.sh
+    ./pikachat-openclaw/scripts/phase3.sh
+    ./pikachat-openclaw/scripts/phase3_audio.sh
+    PIKACHAT_TTS_FIXTURE=1 cargo test -p pikachat-sidecar daemon::tests::tts_pcm_publish_reaches_subscriber -- --nocapture
 
 # Full QA: fmt, clippy, test, android build, iOS sim build.
 qa: fmt clippy test android-assemble ios-build-sim
@@ -322,15 +325,15 @@ e2e-public:
 e2e-real-moq:
     cargo test -p pika_core --test e2e_real_moq_relay -- --ignored --nocapture
 
-# Local E2E: local Nostr relay + local marmotd daemon.
+# Local E2E: local Nostr relay + local pikachat daemon.
 
-# Builds marmotd from the workspace crate (`crates/marmotd`) so no external repos are required.
-e2e-local-marmotd:
+# Builds pikachat from the workspace crate (`cli/`) so no external repos are required.
+e2e-local-pikachat-daemon:
     set -euo pipefail; \
-    cargo build -p marmotd; \
-    MARMOTD_BIN="$PWD/target/debug/marmotd" \
+    cargo build -p pikachat; \
+    PIKACHAT_BIN="$PWD/target/debug/pikachat" \
       PIKA_E2E_LOCAL=1 \
-      cargo test -p pika_core --test e2e_local_marmotd_call -- --ignored --nocapture
+      cargo test -p pika_core --test e2e_local_pikachat_daemon_call -- --ignored --nocapture
 
 # Build Rust core + NSE for the host platform.
 rust-build-host:
@@ -688,20 +691,19 @@ run-relay-dev:
 relay-build:
     cd cmd/pika-relay && go build -o ../../target/pika-relay .
 
-# ── pika-cli (Marmot protocol CLI) ──────────────────────────────────────────
-# Run the cli
+# ── pikachat (Pika messaging CLI) ───────────────────────────────────────────
 
-# Build pika-cli (debug).
+# Build pikachat (debug).
 cli-build:
-    cargo build -p pika-cli
+    cargo build -p pikachat
 
-# Build pika-cli (release).
+# Build pikachat (release).
 cli-release:
-    cargo build -p pika-cli --release
+    cargo build -p pikachat --release
 
 # Show (or create) an identity in the given state dir.
-cli-identity STATE_DIR=".pika-cli" RELAY="ws://127.0.0.1:7777":
-    cargo run -p pika-cli -- --state-dir {{ STATE_DIR }} --relay {{ RELAY }} identity
+cli-identity STATE_DIR=".pikachat" RELAY="ws://127.0.0.1:7777":
+    cargo run -p pikachat -- --state-dir {{ STATE_DIR }} --relay {{ RELAY }} identity
 
 # Quick smoke test: two users, local relay, send+receive.
 
@@ -715,7 +717,7 @@ cli-smoke:
 cli-smoke-media:
     ./tools/cli-smoke --with-media
 
-# Run `pika-cli agent new` (loads FLY_API_TOKEN + ANTHROPIC_API_KEY from .env).
+# Run `pikachat agent new` (loads FLY_API_TOKEN + ANTHROPIC_API_KEY from .env).
 agent RELAY_EU="wss://eu.nostr.pikachat.org" RELAY_US="wss://us-east.nostr.pikachat.org":
     set -euo pipefail; \
     if [ ! -f .env ]; then \
@@ -725,4 +727,4 @@ agent RELAY_EU="wss://eu.nostr.pikachat.org" RELAY_US="wss://us-east.nostr.pikac
     set -a; \
     source .env; \
     set +a; \
-    cargo run -p pika-cli -- --relay {{ RELAY_EU }} --relay {{ RELAY_US }} agent new
+    cargo run -p pikachat -- --relay {{ RELAY_EU }} --relay {{ RELAY_US }} agent new

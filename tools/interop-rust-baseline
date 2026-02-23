@@ -38,10 +38,10 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 
-RUST_INTEROP_DIR="${MARMOT_INTEROP_RUST_DIR:-$HOME/code/marmot-interop-lab-rust}"
+RUST_INTEROP_DIR="${PIKACHAT_INTEROP_RUST_DIR:-$HOME/code/marmot-interop-lab-rust}"
 if [ ! -d "$RUST_INTEROP_DIR" ]; then
   echo "error: missing rust interop repo at: $RUST_INTEROP_DIR" >&2
-  echo "hint: set MARMOT_INTEROP_RUST_DIR to the correct path" >&2
+  echo "hint: set PIKACHAT_INTEROP_RUST_DIR to the correct path" >&2
   exit 1
 fi
 MDK_DIR="${MDK_DIR:-$HOME/code/mdk}"

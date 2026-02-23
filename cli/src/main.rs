@@ -1,4 +1,5 @@
 mod fly_machines;
+mod harness;
 mod mdk_util;
 mod relay_util;
 
@@ -7,7 +8,7 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use anyhow::{anyhow, Context};
+use anyhow::{Context, anyhow};
 use clap::{Parser, Subcommand};
 use mdk_core::encrypted_media::types::{MediaProcessingOptions, MediaReference};
 use mdk_core::prelude::*;
@@ -32,25 +33,44 @@ const DEFAULT_KP_RELAY_URLS: &[&str] = &[
     "wss://nostr-02.yakihonne.com",
 ];
 
+fn default_state_dir() -> PathBuf {
+    if let Ok(dir) = std::env::var("XDG_STATE_HOME") {
+        let dir = dir.trim();
+        if !dir.is_empty() {
+            return PathBuf::from(dir).join("pikachat");
+        }
+    }
+    if let Ok(home) = std::env::var("HOME") {
+        let home = home.trim();
+        if !home.is_empty() {
+            return PathBuf::from(home)
+                .join(".local")
+                .join("state")
+                .join("pikachat");
+        }
+    }
+    PathBuf::from(".pikachat")
+}
+
 #[derive(Debug, Parser)]
-#[command(name = "pika-cli")]
-#[command(about = "Pika CLI — encrypted messaging over Nostr + MLS")]
+#[command(name = "pikachat")]
+#[command(about = "Pikachat — encrypted messaging over Nostr + MLS")]
 #[command(after_help = "\x1b[1mQuickstart:\x1b[0m
-  1. pika-cli init
-  2. pika-cli update-profile --name \"Alice\"
-  3. pika-cli send --to npub1... --content \"hello!\"
-  4. pika-cli listen")]
+  1. pikachat init
+  2. pikachat update-profile --name \"Alice\"
+  3. pikachat send --to npub1... --content \"hello!\"
+  4. pikachat listen")]
 struct Cli {
     /// State directory (identity + MLS database persist here between runs)
-    #[arg(long, default_value = ".pika-cli")]
+    #[arg(long, global = true, default_value_os_t = default_state_dir())]
     state_dir: PathBuf,
 
     /// Relay websocket URLs (default: relay.damus.io, relay.primal.net, nos.lol)
-    #[arg(long)]
+    #[arg(long, global = true)]
     relay: Vec<String>,
 
     /// Key-package relay URLs (default: wellorder.net, yakihonne x2)
-    #[arg(long)]
+    #[arg(long, global = true)]
     kp_relay: Vec<String>,
 
     #[command(subcommand)]
@@ -59,11 +79,35 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Command {
+    /// Interop lab scenarios (ported from the legacy daemon harness)
+    Scenario {
+        #[command(subcommand)]
+        scenario: harness::ScenarioCommand,
+    },
+
+    /// Deterministic bot process that behaves like an OpenClaw-side fixture, but implemented in Rust
+    Bot {
+        /// Only accept welcomes and application prompts from this inviter pubkey (hex).
+        ///
+        /// If omitted, the bot will accept the first welcome it can decrypt and then treat that
+        /// welcome sender as the inviter for the rest of the session.
+        #[arg(long)]
+        inviter_pubkey: Option<String>,
+
+        /// Total timeout for each wait (welcome, prompt)
+        #[arg(long, default_value_t = 120)]
+        timeout_sec: u64,
+
+        /// Giftwrap lookback window (NIP-59 backdates timestamps; use hours/days, not seconds)
+        #[arg(long, default_value_t = 60 * 60 * 24 * 3)]
+        giftwrap_lookback_sec: u64,
+    },
+
     /// Initialize your identity and publish a key package so peers can invite you
     #[command(after_help = "Examples:
-  pika-cli init
-  pika-cli init --nsec nsec1abc...
-  pika-cli init --nsec <64-char-hex>")]
+  pikachat init
+  pikachat init --nsec nsec1abc...
+  pikachat init --nsec <64-char-hex>")]
     Init {
         /// Nostr secret key to import (nsec1... or hex). Omit to generate a fresh keypair.
         #[arg(long)]
@@ -72,23 +116,23 @@ enum Command {
 
     /// Show (or create) identity for this state dir
     #[command(after_help = "Example:
-  pika-cli identity")]
+  pikachat identity")]
     Identity,
 
     /// Publish a key package (kind 443) so peers can invite you
     #[command(after_help = "Example:
-  pika-cli publish-kp
+  pikachat publish-kp
 
-Note: 'pika-cli init' publishes a key package automatically.
+Note: 'pikachat init' publishes a key package automatically.
 You only need this command to refresh an expired key package.")]
     PublishKp,
 
     /// Create a group with a peer and send them a welcome
     #[command(after_help = "Examples:
-  pika-cli invite --peer npub1xyz...
-  pika-cli invite --peer <hex-pubkey> --name \"Book Club\"
+  pikachat invite --peer npub1xyz...
+  pikachat invite --peer <hex-pubkey> --name \"Book Club\"
 
-Tip: 'pika-cli send --to npub1...' does this automatically for 1:1 DMs.")]
+Tip: 'pikachat send --to npub1...' does this automatically for 1:1 DMs.")]
     Invite {
         /// Peer public key (hex or npub)
         #[arg(long)]
@@ -101,13 +145,13 @@ Tip: 'pika-cli send --to npub1...' does this automatically for 1:1 DMs.")]
 
     /// List pending welcome invitations
     #[command(after_help = "Example:
-  pika-cli welcomes")]
+  pikachat welcomes")]
     Welcomes,
 
     /// Accept a pending welcome and join the group
     #[command(after_help = "Example:
-  pika-cli welcomes   # find the wrapper_event_id
-  pika-cli accept-welcome --wrapper-event-id abc123...")]
+  pikachat welcomes   # find the wrapper_event_id
+  pikachat accept-welcome --wrapper-event-id abc123...")]
     AcceptWelcome {
         /// Wrapper event ID (hex) from the welcomes list
         #[arg(long)]
@@ -116,18 +160,18 @@ Tip: 'pika-cli send --to npub1...' does this automatically for 1:1 DMs.")]
 
     /// List groups you are a member of
     #[command(after_help = "Example:
-  pika-cli groups")]
+  pikachat groups")]
     Groups,
 
     /// Send a message (with optional media) to a group or a peer
     #[command(after_help = "Examples:
-  pika-cli send --to npub1xyz... --content \"hey!\"
-  pika-cli send --group <hex-group-id> --content \"hello\"
-  pika-cli send --to npub1xyz... --media photo.jpg
-  pika-cli send --group <hex-group-id> --media doc.pdf --mime-type application/pdf
-  pika-cli send --group <hex-group-id> --media pic.png --content \"check this out\"
+  pikachat send --to npub1xyz... --content \"hey!\"
+  pikachat send --group <hex-group-id> --content \"hello\"
+  pikachat send --to npub1xyz... --media photo.jpg
+  pikachat send --group <hex-group-id> --media doc.pdf --mime-type application/pdf
+  pikachat send --group <hex-group-id> --media pic.png --content \"check this out\"
 
-When using --to, pika-cli searches your groups for an existing 1:1 DM.
+When using --to, pikachat searches your groups for an existing 1:1 DM.
 If none exists, it automatically creates one and sends your message.
 
 When --media is provided, the file is encrypted and uploaded to a Blossom
@@ -164,10 +208,10 @@ server, and --content becomes the caption (optional).")]
 
     /// Download and decrypt a media attachment from a message
     #[command(after_help = "Examples:
-  pika-cli download-media <message-id>
-  pika-cli download-media <message-id> --output photo.jpg
+  pikachat download-media <message-id>
+  pikachat download-media <message-id> --output photo.jpg
 
-The message ID is shown in `pika-cli messages` output.
+The message ID is shown in `pikachat messages` output.
 If --output is omitted, the original filename from the sender is used.")]
     DownloadMedia {
         /// Message ID (hex) containing the media attachment
@@ -180,8 +224,8 @@ If --output is omitted, the original filename from the sender is used.")]
 
     /// Fetch and decrypt recent messages from a group
     #[command(after_help = "Example:
-  pika-cli messages --group <hex-group-id>
-  pika-cli messages --group <hex-group-id> --limit 10")]
+  pikachat messages --group <hex-group-id>
+  pikachat messages --group <hex-group-id> --limit 10")]
     Messages {
         /// Nostr group ID (hex)
         #[arg(long)]
@@ -194,14 +238,14 @@ If --output is omitted, the original filename from the sender is used.")]
 
     /// View your Nostr profile (kind-0 metadata)
     #[command(after_help = "Example:
-  pika-cli profile")]
+  pikachat profile")]
     Profile,
 
     /// Update your Nostr profile (kind-0 metadata)
     #[command(after_help = "Examples:
-  pika-cli update-profile --name \"Alice\"
-  pika-cli update-profile --picture ./avatar.jpg
-  pika-cli update-profile --name \"Alice\" --picture ./avatar.jpg")]
+  pikachat update-profile --name \"Alice\"
+  pikachat update-profile --picture ./avatar.jpg
+  pikachat update-profile --name \"Alice\" --picture ./avatar.jpg")]
     UpdateProfile {
         /// Set display name
         #[arg(long)]
@@ -214,9 +258,9 @@ If --output is omitted, the original filename from the sender is used.")]
 
     /// Listen for incoming messages (runs until interrupted or --timeout)
     #[command(after_help = "Examples:
-  pika-cli listen                    # listen for 60 seconds
-  pika-cli listen --timeout 0        # listen forever (ctrl-c to stop)
-  pika-cli listen --timeout 300      # listen for 5 minutes")]
+  pikachat listen                    # listen for 60 seconds
+  pikachat listen --timeout 0        # listen forever (ctrl-c to stop)
+  pikachat listen --timeout 300      # listen for 5 minutes")]
     Listen {
         /// Timeout in seconds (0 = run forever)
         #[arg(long, default_value_t = 60)]
@@ -225,6 +269,29 @@ If --output is omitted, the original filename from the sender is used.")]
         /// Giftwrap lookback in seconds
         #[arg(long, default_value_t = 86400)]
         lookback: u64,
+    },
+
+    /// Long-running JSONL sidecar daemon intended to be embedded/invoked by OpenClaw
+    Daemon {
+        /// Giftwrap lookback window (NIP-59 backdates timestamps; use hours/days, not seconds)
+        #[arg(long, default_value_t = 60 * 60 * 24 * 3)]
+        giftwrap_lookback_sec: u64,
+
+        /// Only accept welcomes and messages from these pubkeys (hex). Repeatable.
+        /// If empty, all pubkeys are allowed (open mode).
+        #[arg(long)]
+        allow_pubkey: Vec<String>,
+
+        /// Automatically accept incoming MLS welcomes (group invitations).
+        #[arg(long, default_value_t = false)]
+        auto_accept_welcomes: bool,
+
+        /// Spawn a child process and bridge its stdio to the pikachat JSONL protocol.
+        /// pikachat OutMsg lines are written to the child's stdin; the child's stdout
+        /// lines are parsed as pikachat InCmd and executed. This turns pikachat into a
+        /// self-contained bot runtime.
+        #[arg(long)]
+        exec: Option<String>,
     },
 
     /// Manage AI agents on Fly.io
@@ -246,21 +313,49 @@ enum AgentCommand {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    // Both `ring` and `aws-lc-rs` are in the dep tree (nostr-sdk uses ring,
+    // quinn/moq-native uses aws-lc-rs). Rustls cannot auto-select when both
+    // are present, so we explicitly install ring as the default provider.
+    rustls::crypto::ring::default_provider()
+        .install_default()
+        .expect("install rustls CryptoProvider");
+
+    let cli = Cli::parse();
+
+    let default_filter = match &cli.cmd {
+        Command::Daemon { .. }
+        | Command::Scenario { .. }
+        | Command::Bot { .. }
+        | Command::Agent { .. } => "info",
+        _ => "warn",
+    };
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("warn")),
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new(default_filter)),
         )
         .with_target(false)
         .without_time()
         .with_writer(std::io::stderr)
         .init();
-
-    let cli = Cli::parse();
     std::fs::create_dir_all(&cli.state_dir)
         .with_context(|| format!("create state dir {}", cli.state_dir.display()))?;
 
     match &cli.cmd {
+        Command::Scenario { scenario } => harness::cmd_scenario(&cli, scenario).await,
+        Command::Bot {
+            inviter_pubkey,
+            timeout_sec,
+            giftwrap_lookback_sec,
+        } => {
+            harness::cmd_bot(
+                &cli,
+                inviter_pubkey.as_deref(),
+                *timeout_sec,
+                *giftwrap_lookback_sec,
+            )
+            .await
+        }
         Command::Init { nsec } => cmd_init(&cli, nsec.as_deref()).await,
         Command::Identity => cmd_identity(&cli),
         Command::PublishKp => cmd_publish_kp(&cli).await,
@@ -298,6 +393,21 @@ async fn main() -> anyhow::Result<()> {
             cmd_update_profile(&cli, name.as_deref(), picture.as_deref()).await
         }
         Command::Listen { timeout, lookback } => cmd_listen(&cli, *timeout, *lookback).await,
+        Command::Daemon {
+            giftwrap_lookback_sec,
+            allow_pubkey,
+            auto_accept_welcomes,
+            exec,
+        } => {
+            cmd_daemon(
+                &cli,
+                *giftwrap_lookback_sec,
+                allow_pubkey,
+                *auto_accept_welcomes,
+                exec.as_deref(),
+            )
+            .await
+        }
         Command::Agent { cmd } => match cmd {
             AgentCommand::New { name } => cmd_agent_new(&cli, name.as_deref()).await,
         },
@@ -366,7 +476,7 @@ fn find_group(
         .find(|g| g.nostr_group_id.as_slice() == gid_bytes.as_slice())
         .ok_or_else(|| {
             anyhow!(
-                "no group with ID {nostr_group_id_hex}. Run 'pika-cli groups' to list your groups."
+                "no group with ID {nostr_group_id_hex}. Run 'pikachat groups' to list your groups."
             )
         })
 }
@@ -501,7 +611,7 @@ async fn cmd_init(cli: &Cli, nsec: Option<&str>) -> anyhow::Result<()> {
             serde_json::from_str(&raw).context("parse existing identity.json")?;
 
         if existing.public_key_hex == new_pubkey {
-            eprintln!("[pika-cli] identity.json already matches this pubkey — no changes needed.");
+            eprintln!("[pikachat] identity.json already matches this pubkey — no changes needed.");
             // Still publish key package (idempotent).
         } else {
             warnings.push(format!(
@@ -522,9 +632,9 @@ async fn cmd_init(cli: &Cli, nsec: Option<&str>) -> anyhow::Result<()> {
     // Prompt for confirmation if there are warnings.
     if !warnings.is_empty() {
         for w in &warnings {
-            eprintln!("[pika-cli] WARNING: {w}");
+            eprintln!("[pikachat] WARNING: {w}");
         }
-        eprint!("[pika-cli] Continue anyway? (yes/abort): ");
+        eprint!("[pikachat] Continue anyway? (yes/abort): ");
         let mut answer = String::new();
         std::io::stdin()
             .read_line(&mut answer)
@@ -846,6 +956,7 @@ async fn upload_media(
     Ok((imeta_tag, media_json))
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn cmd_send(
     cli: &Cli,
     group_hex: Option<&str>,
@@ -922,7 +1033,7 @@ async fn cmd_send(
                     Duration::from_secs(10),
                 )
                 .await
-                .context("fetch peer key package — has the peer run `pika-cli init`?")?;
+                .context("fetch peer key package — has the peer run `pikachat init`?")?;
 
                 let config = NostrGroupConfigData::new(
                     "DM".to_string(),
@@ -1069,11 +1180,11 @@ async fn cmd_download_media(
         None => PathBuf::from(default_name),
     };
 
-    if let Some(parent) = resolved_output.parent() {
-        if !parent.as_os_str().is_empty() {
-            std::fs::create_dir_all(parent)
-                .with_context(|| format!("create output dir {}", parent.display()))?;
-        }
+    if let Some(parent) = resolved_output.parent()
+        && !parent.as_os_str().is_empty()
+    {
+        std::fs::create_dir_all(parent)
+            .with_context(|| format!("create output dir {}", parent.display()))?;
     }
     std::fs::write(&resolved_output, &decrypted)
         .with_context(|| format!("write decrypted media to {}", resolved_output.display()))?;
@@ -1234,14 +1345,13 @@ async fn cmd_agent_new(cli: &Cli, name: Option<&str>) -> anyhow::Result<()> {
                 }
                 if let Ok(MessageProcessingResult::ApplicationMessage(msg)) =
                     mdk.process_message(&event)
+                    && msg.pubkey == bot_pubkey
                 {
-                    if msg.pubkey == bot_pubkey {
-                        eprint!("\r");
-                        println!("pi> {}", msg.content);
-                        println!();
-                        eprint!("you> ");
-                        std::io::stderr().flush().ok();
-                    }
+                    eprint!("\r");
+                    println!("pi> {}", msg.content);
+                    println!();
+                    eprint!("you> ");
+                    std::io::stderr().flush().ok();
                 }
             }
             _ = tokio::signal::ctrl_c() => {
@@ -1322,7 +1432,7 @@ async fn cmd_update_profile(
     if name.is_none() && picture.is_none() {
         anyhow::bail!(
             "at least one of --name or --picture is required.\n\
-             Use 'pika-cli profile' to view your current profile."
+             Use 'pikachat profile' to view your current profile."
         );
     }
 
@@ -1518,28 +1628,48 @@ async fn cmd_listen(cli: &Cli, timeout_sec: u64, lookback_sec: u64) -> anyhow::R
         }
 
         // Group message.
-        if event.kind == Kind::MlsGroupMessage && group_subs.contains_key(&subscription_id) {
-            if let Ok(MessageProcessingResult::ApplicationMessage(msg)) =
+        if event.kind == Kind::MlsGroupMessage
+            && group_subs.contains_key(&subscription_id)
+            && let Ok(MessageProcessingResult::ApplicationMessage(msg)) =
                 mdk.process_message(&event)
-            {
-                let Some((ngid, mls_group_id)) = group_subs.get(&subscription_id).cloned() else {
-                    continue;
-                };
-                let line = json!({
-                    "type": "message",
-                    "nostr_group_id": ngid,
-                    "from_pubkey": msg.pubkey.to_hex(),
-                    "content": msg.content,
-                    "created_at": msg.created_at.as_secs(),
-                    "message_id": msg.id.to_hex(),
-                    "media": message_media_refs(&mdk, &mls_group_id, &msg.tags),
-                });
-                println!("{}", serde_json::to_string(&line).unwrap());
-            }
+        {
+            let Some((ngid, mls_group_id)) = group_subs.get(&subscription_id).cloned() else {
+                continue;
+            };
+            let line = json!({
+                "type": "message",
+                "nostr_group_id": ngid,
+                "from_pubkey": msg.pubkey.to_hex(),
+                "content": msg.content,
+                "created_at": msg.created_at.as_secs(),
+                "message_id": msg.id.to_hex(),
+                "media": message_media_refs(&mdk, &mls_group_id, &msg.tags),
+            });
+            println!("{}", serde_json::to_string(&line).unwrap());
         }
     }
 
     client.unsubscribe_all().await;
     client.shutdown().await;
     Ok(())
+}
+
+async fn cmd_daemon(
+    cli: &Cli,
+    giftwrap_lookback_sec: u64,
+    allow_pubkey: &[String],
+    auto_accept_welcomes: bool,
+    exec_cmd: Option<&str>,
+) -> anyhow::Result<()> {
+    let relay_urls = resolve_relays(cli);
+    pikachat_sidecar::daemon::daemon_main(
+        &relay_urls,
+        &cli.state_dir,
+        giftwrap_lookback_sec,
+        allow_pubkey,
+        auto_accept_welcomes,
+        exec_cmd,
+    )
+    .await
+    .context("pikachat daemon failed")
 }

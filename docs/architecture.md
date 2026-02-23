@@ -15,7 +15,7 @@ Pika is an MLS-encrypted messaging app for iOS and Android, built on the Marmot 
 - **Call control (Rust core)** — call signaling state machine over MLS app messages (`pika.call` namespace)
 - **iOS app** (`ios/`) — Swift UI, uses PikaCore.xcframework
 - **Android app** (`android/`) — Kotlin, uses JNI bindings via cargo-ndk
-- **pika-cli** (`cli/`) — Command-line interface for testing and agent automation
+- **pikachat** (`cli/`) — Command-line interface for testing and agent automation
 - **MDK** (external, `https://github.com/marmot-protocol/mdk`) — Marmot Development Kit, the MLS library
 
 ## Data flow
