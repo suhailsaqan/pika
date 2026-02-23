@@ -17,18 +17,18 @@
       "./index.ts"
     ],
     "channel": {
-      "id": "pikachat",
+      "id": "pikachat-openclaw",
       "label": "Pikachat",
       "selectionLabel": "Pikachat (Rust)",
-      "docsPath": "/channels/pikachat",
-      "docsLabel": "pikachat",
+      "docsPath": "/channels/pikachat-openclaw",
+      "docsLabel": "pikachat-openclaw",
       "blurb": "MLS E2EE groups over Nostr (Rust sidecar).",
       "order": 56,
       "quickstartAllowFrom": true
     },
     "install": {
       "npmSpec": "pikachat-openclaw",
-      "localPath": "extensions/pikachat",
+      "localPath": "extensions/pikachat-openclaw",
       "defaultChoice": "path"
     }
   }

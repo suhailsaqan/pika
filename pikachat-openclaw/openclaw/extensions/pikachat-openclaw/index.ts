@@ -4,7 +4,7 @@ import { pikachatPluginConfigSchema } from "./src/config-schema.js";
 import { setPikachatRuntime } from "./src/runtime.js";
 
 const plugin = {
-  id: "pikachat",
+  id: "pikachat-openclaw",
   name: "Pikachat",
   description: "Pikachat MLS group messaging over Nostr (Rust sidecar)",
   configSchema: pikachatPluginConfigSchema,

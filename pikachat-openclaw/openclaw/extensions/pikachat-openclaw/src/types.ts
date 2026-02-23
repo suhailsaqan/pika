@@ -15,7 +15,7 @@ function normalizeAccountId(accountId?: string | null): string {
 }
 
 export function listPikachatAccountIds(cfg: OpenClawConfig): string[] {
-  const accounts = (cfg.channels?.pikachat as any)?.accounts;
+  const accounts = (cfg.channels?.["pikachat-openclaw"] as any)?.accounts;
   if (accounts && typeof accounts === "object") {
     const ids = Object.keys(accounts)
       .map((k) => normalizeAccountId(k))
@@ -36,7 +36,7 @@ export function resolvePikachatAccount(params: {
   accountId?: string | null;
 }): ResolvedPikachatAccount {
   const accountId = normalizeAccountId(params.accountId);
-  const rawChannel = (params.cfg.channels?.pikachat ?? {}) as Record<string, unknown>;
+  const rawChannel = (params.cfg.channels?.["pikachat-openclaw"] ?? {}) as Record<string, unknown>;
   const rawAccount =
     (rawChannel as any)?.accounts && typeof (rawChannel as any).accounts === "object"
       ? ((rawChannel as any).accounts[accountId] as Record<string, unknown> | undefined)

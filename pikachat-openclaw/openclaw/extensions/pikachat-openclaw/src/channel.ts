@@ -261,7 +261,7 @@ function getCachedProfileName(pubkeyHex: string): string | null | undefined {
 
 function resolveMemberName(pubkey: string, cfg: any): string {
   // Check memberNames config (supports both hex and npub keys)
-  const memberNames = cfg?.channels?.pikachat?.memberNames ?? {};
+  const memberNames = cfg?.channels?.["pikachat-openclaw"]?.memberNames ?? {};
   const pk = pubkey.toLowerCase();
   const npub = hexToNpub(pk);
   for (const [key, name] of Object.entries(memberNames)) {
@@ -280,7 +280,7 @@ function resolveMemberName(pubkey: string, cfg: any): string {
 /** Async version: fetches profile from relays if not cached, then caches it */
 async function resolveMemberNameAsync(pubkey: string, cfg: any): Promise<string> {
   // Check memberNames config first
-  const memberNames = cfg?.channels?.pikachat?.memberNames ?? {};
+  const memberNames = cfg?.channels?.["pikachat-openclaw"]?.memberNames ?? {};
   const pk = pubkey.toLowerCase();
   const npub = hexToNpub(pk);
   for (const [key, name] of Object.entries(memberNames)) {
@@ -293,14 +293,14 @@ async function resolveMemberNameAsync(pubkey: string, cfg: any): Promise<string>
   const cached = getCachedProfileName(pk);
   if (cached !== undefined) return cached || npub;
   // Fetch from relays
-  const relays: string[] = cfg?.channels?.pikachat?.relays ?? [];
+  const relays: string[] = cfg?.channels?.["pikachat-openclaw"]?.relays ?? [];
   const profileName = await fetchNostrProfileName(pk, relays);
   profileCache.set(pk, { name: profileName, fetchedAt: Date.now() });
   return profileName || npub;
 }
 
 function isDmGroup(chatId: string, cfg: any): boolean {
-  const dmGroups: string[] = cfg?.channels?.pikachat?.dmGroups ?? [];
+  const dmGroups: string[] = cfg?.channels?.["pikachat-openclaw"]?.dmGroups ?? [];
   return dmGroups.some((id: string) => id.toLowerCase() === chatId.toLowerCase());
 }
 
@@ -350,7 +350,7 @@ type GroupConfig = {
 };
 
 function resolveGroupConfig(chatId: string, cfg: any): GroupConfig | null {
-  const groups = cfg?.channels?.pikachat?.groups ?? {};
+  const groups = cfg?.channels?.["pikachat-openclaw"]?.groups ?? {};
   const gid = chatId.toLowerCase();
   // Exact match first, then wildcard fallback
   return groups[gid] ?? groups["*"] ?? null;
@@ -430,7 +430,7 @@ async function dispatchInboundToAgent(params: {
   // Resolve agent binding — respects bindings config (e.g. channel: "pikachat" → agentId)
   const route = runtime.channel.routing.resolveAgentRoute({
     cfg,
-    channel: "pikachat",
+    channel: "pikachat-openclaw",
     accountId,
     peer: {
       kind: isGroupChat ? "group" : "direct",
@@ -459,8 +459,8 @@ async function dispatchInboundToAgent(params: {
     To: chatId,
     SessionKey: route.sessionKey,
     AccountId: route.accountId,
-    Provider: "pikachat",
-    Surface: "pikachat",
+    Provider: "pikachat-openclaw",
+    Surface: "pikachat-openclaw",
     ChatType: chatType,
     SenderId: senderId,
     SenderName: senderName,
@@ -516,8 +516,10 @@ function normalizeGroupId(input: string): string {
   const trimmed = input.trim();
   if (!trimmed) return trimmed;
   return trimmed
+    .replace(/^pikachat-openclaw:/i, "")
     .replace(/^pikachat:/i, "")
     .replace(/^group:/i, "")
+    .replace(/^pikachat-openclaw:group:/i, "")
     .replace(/^pikachat:group:/i, "")
     .trim()
     .toLowerCase();
@@ -582,13 +584,13 @@ function resolveSidecarArgs(cfgArgs?: string[] | null): string[] | null {
 }
 
 export const pikachatPlugin: ChannelPlugin<ResolvedPikachatAccount> = {
-  id: "pikachat",
+  id: "pikachat-openclaw",
   meta: {
-    id: "pikachat",
+    id: "pikachat-openclaw",
     label: "Pikachat",
     selectionLabel: "Pikachat (Rust)",
-    docsPath: "/channels/pikachat",
-    docsLabel: "pikachat",
+    docsPath: "/channels/pikachat-openclaw",
+    docsLabel: "pikachat-openclaw",
     blurb: "MLS E2EE groups over Nostr (Rust sidecar).",
     order: 56,
     quickstartAllowFrom: true,
@@ -598,7 +600,7 @@ export const pikachatPlugin: ChannelPlugin<ResolvedPikachatAccount> = {
     media: true,
     nativeCommands: false,
   },
-  reload: { configPrefixes: ["channels.pikachat", "plugins.entries.pikachat"] },
+  reload: { configPrefixes: ["channels.pikachat-openclaw", "plugins.entries.pikachat-openclaw"] },
 
   config: {
     listAccountIds: (cfg) => listPikachatAccountIds(cfg),
@@ -628,7 +630,7 @@ export const pikachatPlugin: ChannelPlugin<ResolvedPikachatAccount> = {
   // For now: no DMs, but keep the pairing surface stubbed so OpenClaw help output stays consistent.
   pairing: {
     idLabel: "pikachatPubkey",
-    normalizeAllowEntry: (entry) => entry.replace(/^pikachat:/i, "").trim().toLowerCase(),
+    normalizeAllowEntry: (entry) => entry.replace(/^pikachat-openclaw:/i, "").replace(/^pikachat:/i, "").trim().toLowerCase(),
     notifyApproval: async () => {
       // Not implemented (DMs not implemented yet).
     },
@@ -637,10 +639,10 @@ export const pikachatPlugin: ChannelPlugin<ResolvedPikachatAccount> = {
     resolveDmPolicy: () => ({
       policy: "pairing",
       allowFrom: [],
-      policyPath: "channels.pikachat.dmPolicy",
-      allowFromPath: "channels.pikachat.allowFrom",
-      approveHint: formatPairingApproveHint("pikachat"),
-      normalizeEntry: (raw) => raw.replace(/^pikachat:/i, "").trim().toLowerCase(),
+      policyPath: "channels.pikachat-openclaw.dmPolicy",
+      allowFromPath: "channels.pikachat-openclaw.allowFrom",
+      approveHint: formatPairingApproveHint("pikachat-openclaw"),
+      normalizeEntry: (raw) => raw.replace(/^pikachat-openclaw:/i, "").replace(/^pikachat:/i, "").trim().toLowerCase(),
     }),
   },
 
@@ -648,7 +650,7 @@ export const pikachatPlugin: ChannelPlugin<ResolvedPikachatAccount> = {
     normalizeTarget: (target) => normalizeGroupId(target),
     targetResolver: {
       looksLikeId: (input) => looksLikeGroupIdHex(normalizeGroupId(input)),
-      hint: "<nostrGroupIdHex|pikachat:group:<hex>>",
+      hint: "<nostrGroupIdHex|pikachat-openclaw:group:<hex>>",
     },
   },
 
@@ -658,7 +660,7 @@ export const pikachatPlugin: ChannelPlugin<ResolvedPikachatAccount> = {
     sendText: async ({ to, text, accountId }) => {
       const { handle, groupId } = resolveOutboundTarget(to, accountId);
       await handle.sidecar.sendMessage(groupId, text ?? "");
-      return { channel: "pikachat", to: groupId };
+      return { channel: "pikachat-openclaw", to: groupId };
     },
     sendMedia: async ({ to, text, mediaUrl, accountId }) => {
       const { handle, groupId } = resolveOutboundTarget(to, accountId);
@@ -687,7 +689,7 @@ export const pikachatPlugin: ChannelPlugin<ResolvedPikachatAccount> = {
         const result = (await handle.sidecar.sendMedia(groupId, tempFile, {
           caption: text ?? "",
         })) as any;
-        return { channel: "pikachat" as const, to: groupId, messageId: result?.event_id ?? "" };
+        return { channel: "pikachat-openclaw" as const, to: groupId, messageId: result?.event_id ?? "" };
       } finally {
         // Clean up temp file after a delay to ensure sidecar has read it
         const timer = setTimeout(() => {
@@ -737,7 +739,7 @@ export const pikachatPlugin: ChannelPlugin<ResolvedPikachatAccount> = {
         throw new Error("pikachat account disabled");
       }
       if (!resolved.configured) {
-        throw new Error("pikachat relays not configured (channels.pikachat.relays)");
+        throw new Error("pikachat relays not configured (channels.pikachat-openclaw.relays)");
       }
 
       const relays = resolved.config.relays.map((r) => String(r).trim()).filter(Boolean);
@@ -1198,7 +1200,7 @@ export const pikachatPlugin: ChannelPlugin<ResolvedPikachatAccount> = {
             const senderIsOwner = isOwnerPubkey(senderPk);
             const currentCfg = runtime.config.loadConfig();
             const groupId = ev.nostr_group_id.toLowerCase();
-            const historyKey = `pikachat:${resolved.accountId}:${groupId}`;
+            const historyKey = `pikachat-openclaw:${resolved.accountId}:${groupId}`;
 
             // Determine if this is a DM group (1:1 with bot)
             const isDm = isOneOnOneGroup(groupId);
