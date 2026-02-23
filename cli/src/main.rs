@@ -1269,6 +1269,9 @@ async fn cmd_agent_new(cli: &Cli, name: Option<&str>) -> anyhow::Result<()> {
     env.insert("ANTHROPIC_API_KEY".to_string(), anthropic_key);
     if let Some(mode) = ui_mode.bridge_call_mode() {
         env.insert("PI_BRIDGE_CALL_MODE".to_string(), mode.to_string());
+    } else {
+        // Nostr mode uses normal Marmot message transport and needs legacy chat handling in pi-bridge.
+        env.insert("PI_BRIDGE_ENABLE_CHAT".to_string(), "1".to_string());
     }
     for key in ["PI_BRIDGE_REPLAY_FILE", "PI_BRIDGE_REPLAY_SPEED"] {
         if let Ok(value) = std::env::var(key) {
