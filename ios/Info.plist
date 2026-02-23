@@ -47,7 +47,9 @@
 	<key>NSCameraUsageDescription</key>
 	<string>Scan QR codes to start new chats.</string>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>Voice calls require microphone access.</string>
+	<string>Voice calls and voice messages require microphone access.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>Speech recognition is used to transcribe your voice messages.</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
 	<string>Save photos from chats to your photo library.</string>
 	<key>NSUserActivityTypes</key>

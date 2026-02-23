@@ -1,6 +1,7 @@
 import SwiftUI
 import MarkdownUI
 import PhotosUI
+import AVFAudio
 
 struct ChatView: View {
     let chatId: String
@@ -31,6 +32,8 @@ struct ChatView: View {
     @State private var insertedMentions: [(display: String, npub: String)] = []
     @State private var replyDraftMessage: ChatMessage?
     @State private var fullscreenImageAttachment: ChatMediaAttachment?
+    @State private var voiceRecorder = VoiceRecorder()
+    @State private var showMicPermissionDenied = false
     @FocusState private var isInputFocused: Bool
 
     private let scrollButtonBottomPadding: CGFloat = 12
@@ -574,98 +577,127 @@ struct ChatView: View {
     @ViewBuilder
     private func messageInputBar(chat: ChatViewState) -> some View {
         VStack(spacing: 0) {
-            if showMentionPicker, chat.isGroup {
-                MentionPickerPopup(members: chat.members, query: mentionQuery) { member in
-                    let displayTag = "@\(member.name ?? String(member.npub.prefix(8)))"
-                    // Remove the "@" + any partial query that triggered the picker.
-                    if let atIdx = messageText.lastIndex(of: "@") {
-                        messageText = String(messageText[..<atIdx])
-                    }
-                    messageText += "\(displayTag) "
-                    insertedMentions.append((display: displayTag, npub: member.npub))
-                    mentionQuery = ""
-                    showMentionPicker = false
-                }
-            }
-
-            if let replying = replyDraftMessage {
-                HStack(spacing: 10) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Replying to \(replySenderLabel(replying))")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(.secondary)
-                        Text(replySnippet(replying))
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                    }
-                    Spacer()
-                    Button {
-                        replyDraftMessage = nil
-                    } label: {
-                        Image(systemName: "xmark.circle.fill")
-                            .font(.body)
-                            .foregroundStyle(.tertiary)
-                    }
-                    .buttonStyle(.plain)
-                }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 8)
-                .background(.ultraThinMaterial)
-                .overlay(alignment: .leading) {
-                    Rectangle()
-                        .fill(Color.blue)
-                        .frame(width: 3)
-                }
-                .padding(.horizontal, 12)
-            }
-
-            HStack(spacing: 10) {
-                if onSendMedia != nil {
-                    PhotosPicker(selection: $selectedPhotoItem, matching: .images) {
-                        Image(systemName: "plus.circle.fill")
-                            .font(.title2)
-                    }
-                    .tint(.secondary)
-                }
-
-                TextEditor(text: $messageText)
-                    .focused($isInputFocused)
-                    .frame(minHeight: 36, maxHeight: 150)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .scrollContentBackground(.hidden)
-                    .onAppear {
-                        if ProcessInfo.processInfo.isiOSAppOnMac {
-                            isInputFocused = true
+            if voiceRecorder.isRecording {
+                VoiceRecordingView(
+                    recorder: voiceRecorder,
+                    onSend: {
+                        Task {
+                            // Capture transcript before stopRecording resets state
+                            let transcriptText = voiceRecorder.transcript
+                            guard let url = await voiceRecorder.stopRecording() else { return }
+                            guard let data = try? Data(contentsOf: url) else { return }
+                            let timestamp = Int(Date().timeIntervalSince1970)
+                            // Send transcript as italic markdown caption
+                            let caption = transcriptText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                                ? ""
+                                : "*\(transcriptText.trimmingCharacters(in: .whitespacesAndNewlines))*"
+                            onSendMedia?(chatId, data, "audio/mp4", "voice_\(timestamp).m4a", caption)
+                            try? FileManager.default.removeItem(at: url)
                         }
+                    },
+                    onCancel: {
+                        voiceRecorder.cancelRecording()
                     }
-                    .onKeyPress(.return, phases: .down) { keyPress in
-                        if keyPress.modifiers.contains(.shift) {
-                            return .ignored
+                )
+                .modifier(GlassInputModifier())
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+            } else {
+                if showMentionPicker, chat.isGroup {
+                    MentionPickerPopup(members: chat.members, query: mentionQuery) { member in
+                        let displayTag = "@\(member.name ?? String(member.npub.prefix(8)))"
+                        // Remove the "@" + any partial query that triggered the picker.
+                        if let atIdx = messageText.lastIndex(of: "@") {
+                            messageText = String(messageText[..<atIdx])
                         }
-                        sendMessage()
-                        return .handled
+                        messageText += "\(displayTag) "
+                        insertedMentions.append((display: displayTag, npub: member.npub))
+                        mentionQuery = ""
+                        showMentionPicker = false
                     }
-                    .overlay(alignment: .topLeading) {
-                        if messageText.isEmpty {
-                            Text("Message")
+                }
+
+                if let replying = replyDraftMessage {
+                    HStack(spacing: 10) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Replying to \(replySenderLabel(replying))")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.secondary)
+                            Text(replySnippet(replying))
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                        }
+                        Spacer()
+                        Button {
+                            replyDraftMessage = nil
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .font(.body)
                                 .foregroundStyle(.tertiary)
-                                .padding(.leading, 5)
-                                .padding(.top, 8)
-                                .allowsHitTesting(false)
                         }
+                        .buttonStyle(.plain)
                     }
-                    .onChange(of: messageText) { _, newValue in
-                        if chat.isGroup {
-                            if let atIdx = newValue.lastIndex(of: "@") {
-                                let prefix = newValue[..<atIdx]
-                                let isWordStart = prefix.isEmpty || prefix.last == " " || prefix.last == "\n"
-                                if isWordStart {
-                                    let query = String(newValue[newValue.index(after: atIdx)...])
-                                    if !query.contains(" ") {
-                                        showMentionPicker = true
-                                        mentionQuery = query
-                                    } else {
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .background(.ultraThinMaterial)
+                    .overlay(alignment: .leading) {
+                        Rectangle()
+                            .fill(Color.blue)
+                            .frame(width: 3)
+                    }
+                    .padding(.horizontal, 12)
+                }
+
+                HStack(spacing: 10) {
+                    if onSendMedia != nil {
+                        PhotosPicker(selection: $selectedPhotoItem, matching: .images) {
+                            Image(systemName: "plus.circle.fill")
+                                .font(.title2)
+                        }
+                        .tint(.secondary)
+                    }
+
+                    TextEditor(text: $messageText)
+                        .focused($isInputFocused)
+                        .frame(minHeight: 36, maxHeight: 150)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .scrollContentBackground(.hidden)
+                        .onAppear {
+                            if ProcessInfo.processInfo.isiOSAppOnMac {
+                                isInputFocused = true
+                            }
+                        }
+                        .onKeyPress(.return, phases: .down) { keyPress in
+                            if keyPress.modifiers.contains(.shift) {
+                                return .ignored
+                            }
+                            sendMessage()
+                            return .handled
+                        }
+                        .overlay(alignment: .topLeading) {
+                            if messageText.isEmpty {
+                                Text("Message")
+                                    .foregroundStyle(.tertiary)
+                                    .padding(.leading, 5)
+                                    .padding(.top, 8)
+                                    .allowsHitTesting(false)
+                            }
+                        }
+                        .onChange(of: messageText) { _, newValue in
+                            if chat.isGroup {
+                                if let atIdx = newValue.lastIndex(of: "@") {
+                                    let prefix = newValue[..<atIdx]
+                                    let isWordStart = prefix.isEmpty || prefix.last == " " || prefix.last == "\n"
+                                    if isWordStart {
+                                        let query = String(newValue[newValue.index(after: atIdx)...])
+                                        if !query.contains(" ") {
+                                            showMentionPicker = true
+                                            mentionQuery = query
+                                        } else {
+                                            showMentionPicker = false
+                                            mentionQuery = ""
+                                        }
+                                    } else if showMentionPicker {
                                         showMentionPicker = false
                                         mentionQuery = ""
                                     }
@@ -673,57 +705,88 @@ struct ChatView: View {
                                     showMentionPicker = false
                                     mentionQuery = ""
                                 }
-                            } else if showMentionPicker {
-                                showMentionPicker = false
-                                mentionQuery = ""
+                            }
+                            if !newValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                                onTypingStarted?()
                             }
                         }
-                        if !newValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                            onTypingStarted?()
+                        .accessibilityIdentifier(TestIds.chatMessageInput)
+
+                    if messageText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, onSendMedia != nil {
+                        Button {
+                            startVoiceRecording()
+                        } label: {
+                            Image(systemName: "mic.fill")
+                                .font(.title2)
                         }
-                    }
-                    .accessibilityIdentifier(TestIds.chatMessageInput)
-
-                Button(action: { sendMessage() }) {
-                    Image(systemName: "arrow.up.circle.fill")
-                        .font(.title2)
-                }
-                .disabled(messageText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                .accessibilityIdentifier(TestIds.chatSend)
-            }
-            .modifier(GlassInputModifier())
-            .onChange(of: selectedPhotoItem) { _, item in
-                guard let item else { return }
-                Task {
-                    defer { selectedPhotoItem = nil }
-                    guard let data = try? await item.loadTransferable(type: Data.self) else { return }
-
-                    // Determine MIME type from supported content types
-                    let mimeType: String
-                    if let contentType = item.supportedContentTypes.first {
-                        mimeType = contentType.preferredMIMEType ?? "image/jpeg"
+                        .transition(.scale.combined(with: .opacity))
                     } else {
-                        mimeType = "image/jpeg"
+                        Button(action: { sendMessage() }) {
+                            Image(systemName: "arrow.up.circle.fill")
+                                .font(.title2)
+                        }
+                        .disabled(messageText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                        .accessibilityIdentifier(TestIds.chatSend)
+                        .transition(.scale.combined(with: .opacity))
                     }
-
-                    // Determine filename from MIME type
-                    let ext = switch mimeType {
-                    case "image/png": "png"
-                    case "image/gif": "gif"
-                    case "image/webp": "webp"
-                    case "image/heic": "heic"
-                    default: "jpg"
-                    }
-                    let filename = "photo.\(ext)"
-
-                    // Use message text as caption if non-empty
-                    let caption = messageText.trimmingCharacters(in: .whitespacesAndNewlines)
-                    if !caption.isEmpty {
-                        messageText = ""
-                    }
-
-                    onSendMedia?(chatId, data, mimeType, filename, caption)
                 }
+                .animation(.easeInOut(duration: 0.15), value: messageText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                .modifier(GlassInputModifier())
+                .onChange(of: selectedPhotoItem) { _, item in
+                    guard let item else { return }
+                    Task {
+                        defer { selectedPhotoItem = nil }
+                        guard let data = try? await item.loadTransferable(type: Data.self) else { return }
+
+                        // Determine MIME type from supported content types
+                        let mimeType: String
+                        if let contentType = item.supportedContentTypes.first {
+                            mimeType = contentType.preferredMIMEType ?? "image/jpeg"
+                        } else {
+                            mimeType = "image/jpeg"
+                        }
+
+                        // Determine filename from MIME type
+                        let ext = switch mimeType {
+                        case "image/png": "png"
+                        case "image/gif": "gif"
+                        case "image/webp": "webp"
+                        case "image/heic": "heic"
+                        default: "jpg"
+                        }
+                        let filename = "photo.\(ext)"
+
+                        // Use message text as caption if non-empty
+                        let caption = messageText.trimmingCharacters(in: .whitespacesAndNewlines)
+                        if !caption.isEmpty {
+                            messageText = ""
+                        }
+
+                        onSendMedia?(chatId, data, mimeType, filename, caption)
+                    }
+                }
+            }
+        }
+        .animation(.easeInOut(duration: 0.2), value: voiceRecorder.isRecording)
+        .alert("Microphone Access Denied", isPresented: $showMicPermissionDenied) {
+            Button("Open Settings") {
+                if let url = URL(string: UIApplication.openSettingsURLString) {
+                    UIApplication.shared.open(url)
+                }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Enable microphone access in Settings to send voice messages.")
+        }
+    }
+
+    private func startVoiceRecording() {
+        Task {
+            let granted = await CallMicrophonePermission.ensureGranted()
+            if granted {
+                voiceRecorder.startRecording()
+            } else {
+                showMicPermissionDenied = true
             }
         }
     }
