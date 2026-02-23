@@ -1,3 +1,11 @@
+---
+summary: How to run and validate pika-cli agent RPC parity mode on Fly, including image/deploy requirements and current RPC feature gaps
+read_when:
+  - testing `pikachat agent new` in RPC parity mode
+  - debugging differences between PTY and RPC agent UI behavior
+  - deciding when remote bot image redeploys are required for agent changes
+---
+
 # Pi Agent RPC Parity (pika-cli)
 
 This document covers how to run/test `pika-cli agent new` in RPC parity mode, when you need to redeploy the bot image, and what is currently missing in Pi's RPC interface.
