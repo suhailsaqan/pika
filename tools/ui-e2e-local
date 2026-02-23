@@ -3,7 +3,7 @@ set -euo pipefail
 
 # Deterministic local E2E UI runner:
 # - starts a local nostr-rs-relay (nix develop: nostr-rs-relay on PATH)
-# - starts a local Rust "bot" (tools/pika-e2e-bot; implemented via pika-cli in this repo)
+# - starts a local Rust "bot" (tools/pika-e2e-bot; implemented via pikachat in this repo)
 # - runs platform UI E2E tests against that relay+bot
 #
 # Usage:
@@ -151,12 +151,12 @@ echo "bot_npub=${BOT_NPUB}"
 
 # Deterministic local test identity. This is NOT used for public relays.
 generated_nsec=0
-if [ -z "${PIKA_UI_E2E_NSEC:-}" ] && [ ! -f "${ROOT}/.pika-cli-test-nsec" ]; then
+if [ -z "${PIKA_UI_E2E_NSEC:-}" ] && [ ! -f "${ROOT}/.pikachat-test-nsec" ]; then
   generated_nsec=1
 fi
 CLIENT_NSEC="$(pika_fixture_client_nsec "${ROOT}")"
 if [ "${generated_nsec}" = "1" ]; then
-  echo "note: generated ephemeral local e2e nsec (set PIKA_UI_E2E_NSEC or .pika-cli-test-nsec to override)" >&2
+  echo "note: generated ephemeral local e2e nsec (set PIKA_UI_E2E_NSEC or .pikachat-test-nsec to override)" >&2
 fi
 
 case "$platform" in

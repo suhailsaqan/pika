@@ -21,7 +21,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       pika: ${{ steps.filter.outputs.pika || 'true' }}
-      marmotd: ${{ steps.filter.outputs.marmotd || 'true' }}
+      pikachat: ${{ steps.filter.outputs.pikachat || 'true' }}
       rmp: ${{ steps.filter.outputs.rmp || 'true' }}
       notifications: ${{ steps.filter.outputs.notifications || 'true' }}
     steps:
@@ -50,7 +50,7 @@ jobs:
               - 'docs/**'
               - 'scripts/**'
               - 'tools/**'
-            marmotd:
+            pikachat:
               - 'Cargo.toml'
               - 'Cargo.lock'
               - 'flake.nix'
@@ -58,8 +58,9 @@ jobs:
               - 'nix/**'
               - 'justfile'
               - '.github/workflows/pre-merge.yml'
-              - 'crates/marmotd/**'
-              - 'openclaw-marmot/**'
+              - 'cli/**'
+              - 'crates/pikachat-sidecar/**'
+              - 'pikachat-openclaw/**'
               - 'crates/pika-media/**'
               - 'crates/pika-tls/**'
             rmp:
@@ -111,9 +112,9 @@ jobs:
 
       - run: nix develop .#default -c just pre-merge-pika
 
-  check-marmotd:
+  check-pikachat:
     needs: [detect-changes]
-    if: needs.detect-changes.outputs.marmotd == 'true'
+    if: needs.detect-changes.outputs.pikachat == 'true'
     runs-on: blacksmith-16vcpu-ubuntu-2404
     environment:
       name: ${{ github.event_name == 'pull_request' && github.actor != 'justinmoon' && github.actor != 'futurepaul' && github.actor != 'AnthonyRonning' && github.actor != 'benthecarman' && 'ci-approval' || 'ci-auto' }}
@@ -140,7 +141,7 @@ jobs:
           key: ${{ github.repository }}-cargo-target-v1-${{ runner.os }}
           path: target
 
-      - run: nix develop .#default -c just pre-merge-marmotd
+      - run: nix develop .#default -c just pre-merge-pikachat
 
   check-rmp:
     needs: [detect-changes]
@@ -202,17 +203,17 @@ jobs:
 
   pre-merge:
     if: always() && (github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'pre-merge'))
-    needs: [detect-changes, check-pika, check-marmotd, check-rmp, check-notifications]
+    needs: [detect-changes, check-pika, check-pikachat, check-rmp, check-notifications]
     runs-on: ubuntu-latest
     steps:
       - name: Evaluate lane results
         run: |
           failed=""
-          for lane in pika marmotd rmp notifications; do
+          for lane in pika pikachat rmp notifications; do
             result=""
             case "$lane" in
               pika)          result="${{ needs.check-pika.result }}" ;;
-              marmotd)       result="${{ needs.check-marmotd.result }}" ;;
+              pikachat)      result="${{ needs.check-pikachat.result }}" ;;
               rmp)           result="${{ needs.check-rmp.result }}" ;;
               notifications) result="${{ needs.check-notifications.result }}" ;;
             esac
@@ -284,7 +285,7 @@ jobs:
 
       - run: nix develop .#default -c just nightly-pika-e2e
 
-  nightly-marmotd:
+  nightly-pikachat:
     if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'nightly')
     runs-on: blacksmith-16vcpu-ubuntu-2404
     steps:
@@ -310,7 +311,7 @@ jobs:
           key: ${{ github.repository }}-cargo-target-v1-${{ runner.os }}
           path: target
 
-      - run: nix develop .#default -c just nightly-marmotd
+      - run: nix develop .#default -c just nightly-pikachat
 
   nightly-pika-ui-android:
     if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'nightly')
@@ -356,7 +357,7 @@ jobs:
 
   nightly:
     if: always() && (github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'nightly'))
-    needs: [nightly-linux, nightly-pika, nightly-marmotd, nightly-pika-ui-android, nightly-primal-ios-interop]
+    needs: [nightly-linux, nightly-pika, nightly-pikachat, nightly-pika-ui-android, nightly-primal-ios-interop]
     runs-on: ubuntu-latest
     permissions:
       issues: write
@@ -373,9 +374,9 @@ jobs:
             echo "nightly-pika failed"
             failed="${failed}- **nightly-pika**: ${{ needs.nightly-pika.result }}\n"
           fi
-          if [[ "${{ needs.nightly-marmotd.result }}" != "success" ]]; then
-            echo "nightly-marmotd failed"
-            failed="${failed}- **nightly-marmotd**: ${{ needs.nightly-marmotd.result }}\n"
+          if [[ "${{ needs.nightly-pikachat.result }}" != "success" ]]; then
+            echo "nightly-pikachat failed"
+            failed="${failed}- **nightly-pikachat**: ${{ needs.nightly-pikachat.result }}\n"
           fi
           if [[ "${{ needs.nightly-pika-ui-android.result }}" != "success" ]]; then
             echo "nightly-pika-ui-android failed"

@@ -9,8 +9,8 @@ ENV CARGO_NET_GIT_FETCH_WITH_CLI true
 
 RUN --mount=type=cache,target=/usr/local/cargo,from=rust:latest,source=/usr/local/cargo \
     --mount=type=cache,target=target \
-    cargo build --target $(cat rust_target) -p marmotd --release && \
-    mv ./target/$(cat rust_target)/release/marmotd ./marmotd
+    cargo build --target $(cat rust_target) -p pikachat --release && \
+    mv ./target/$(cat rust_target)/release/pikachat ./pikachat
 
 FROM node:22-bookworm-slim
 
@@ -21,7 +21,7 @@ RUN npm install -g @mariozechner/pi-coding-agent
 USER app
 WORKDIR /app
 
-COPY --from=builder /usr/src/app/marmotd /app/marmotd
+COPY --from=builder /usr/src/app/pikachat /app/pikachat
 COPY bots/pi-bridge.py /app/pi-bridge.py
 COPY crates/pika-bot/entrypoint.sh /app/entrypoint.sh
 

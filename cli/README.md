@@ -1,4 +1,4 @@
-# pika-cli
+# pikachat
 
 Encrypted messaging over Nostr + MLS from the command line.
 
@@ -6,19 +6,19 @@ Encrypted messaging over Nostr + MLS from the command line.
 
 ```sh
 # Build
-cargo build -p pika-cli
+cargo build -p pikachat
 
 # Create your identity (generates keypair + publishes key package)
-pika-cli init
+pikachat init
 
 # Set your display name
-pika-cli update-profile --name "Alice"
+pikachat update-profile --name "Alice"
 
 # Send a message to someone by npub (creates a DM automatically)
-pika-cli send --to npub1... --content "hello!"
+pikachat send --to npub1... --content "hello!"
 
 # Listen for incoming messages
-pika-cli listen
+pikachat listen
 ```
 
 That's it. No relay flags needed — sensible defaults are built in.
@@ -40,12 +40,15 @@ That's it. No relay flags needed — sensible defaults are built in.
 | `welcomes` | List pending invitations |
 | `accept-welcome` | Accept an invitation |
 | `publish-kp` | Refresh your key package |
+| `daemon` | Long-running JSONL sidecar daemon (OpenClaw integration) |
+| `scenario` | Interop lab scenarios (Phase 1–4) |
+| `bot` | Deterministic Rust bot fixture |
 
-Run `pika-cli <command> --help` for details and examples.
+Run `pikachat <command> --help` for details and examples.
 
 ## Relay defaults
 
-pika-cli uses the same default relays as the Pika app:
+pikachat uses the same default relays as the Pika app:
 
 - **Message relays**: `relay.damus.io`, `relay.primal.net`, `nos.lol`
 - **Key-package relays**: `nostr-pub.wellorder.net`, `nostr-01.yakihonne.com`, `nostr-02.yakihonne.com`
@@ -54,7 +57,7 @@ Override with `--relay` and `--kp-relay` for testing or custom setups.
 
 ## State directory
 
-Identity and MLS state are stored in `.pika-cli/` (configurable with `--state-dir`). This directory contains:
+Identity and MLS state are stored under `${XDG_STATE_HOME:-$HOME/.local/state}/pikachat` by default (override with `--state-dir`). The state directory contains:
 
 - `identity.json` — your keypair (plaintext, not for production use)
 - `mdk.sqlite` — MLS group state
@@ -65,13 +68,13 @@ Identity and MLS state are stored in `.pika-cli/` (configurable with `--state-di
 
 ```sh
 # First message to someone — group is created automatically
-pika-cli send --to npub1xyz... --content "hey!"
+pikachat send --to npub1xyz... --content "hey!"
 
 # Subsequent messages find the existing DM
-pika-cli send --to npub1xyz... --content "how's it going?"
+pikachat send --to npub1xyz... --content "how's it going?"
 
 # You can also send directly to a group ID
-pika-cli send --group <hex-id> --content "hello group"
+pikachat send --group <hex-id> --content "hello group"
 ```
 
 ## Encrypted media (Blossom)

@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
 use nostr_sdk::prelude::*;
 use tokio::time::Instant;
 
@@ -29,11 +29,11 @@ pub async fn check_relay_ready(relay_url: &str, timeout: Duration) -> Result<()>
             client.shutdown().await;
             return Err(anyhow!("timeout waiting for relay {relay_url} to connect"));
         }
-        if let Ok(relay) = client.relay(parsed.clone()).await {
-            if relay.is_connected() {
-                client.shutdown().await;
-                return Ok(());
-            }
+        if let Ok(relay) = client.relay(parsed.clone()).await
+            && relay.is_connected()
+        {
+            client.shutdown().await;
+            return Ok(());
         }
         tokio::time::sleep(Duration::from_millis(250)).await;
     }

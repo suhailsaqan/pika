@@ -4,11 +4,11 @@ members = [
   "rust",
   "uniffi-bindgen",
   "cli",
+  "crates/pikachat-sidecar",
   "crates/pika-desktop",
   "crates/pika-media",
   "crates/pika-nse",
   "crates/pika-tls",
-  "crates/marmotd",
   "crates/rmp-cli",
   "crates/pika-server",
 ]
