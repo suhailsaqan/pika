@@ -167,6 +167,7 @@ enum OutMsg {
     GroupJoined {
         nostr_group_id: String,
         mls_group_id: String,
+        member_count: u32,
     },
     MessageReceived {
         nostr_group_id: String,
@@ -207,6 +208,7 @@ enum OutMsg {
         nostr_group_id: String,
         mls_group_id: String,
         peer_pubkey: String,
+        member_count: u32,
     },
 }
 
@@ -2334,7 +2336,8 @@ pub async fn daemon_main(
                                             "nostr_group_id": nostr_group_id_hex,
                                             "mls_group_id": mls_group_id_hex,
                                         })))).ok();
-                                        out_tx.send(OutMsg::GroupJoined { nostr_group_id: nostr_group_id_hex, mls_group_id: mls_group_id_hex }).ok();
+                                        let member_count = mdk.get_members(&w.mls_group_id).map(|m| m.len() as u32).unwrap_or(0);
+                                        out_tx.send(OutMsg::GroupJoined { nostr_group_id: nostr_group_id_hex, mls_group_id: mls_group_id_hex, member_count }).ok();
                                     }
                                     Err(e) => {
                                         out_tx.send(out_error(request_id, "mdk_error", format!("{e:#}"))).ok();
@@ -2350,11 +2353,13 @@ pub async fn daemon_main(
                         match mdk.get_groups() {
                             Ok(gs) => {
                                 let out = gs.iter().map(|g| {
+                                    let member_count = mdk.get_members(&g.mls_group_id).map(|m| m.len() as u32).unwrap_or(0);
                                     json!({
                                         "nostr_group_id": hex::encode(g.nostr_group_id),
                                         "mls_group_id": hex::encode(g.mls_group_id.as_slice()),
                                         "name": g.name,
                                         "description": g.description,
+                                        "member_count": member_count,
                                     })
                                 }).collect::<Vec<_>>();
                                 let _ = out_tx.send(out_ok(request_id, Some(json!({"groups": out}))));
@@ -3000,10 +3005,12 @@ pub async fn daemon_main(
                             "mls_group_id": mls_group_id_hex,
                             "peer_pubkey": peer_pubkey.to_hex(),
                         })))).ok();
+                        let member_count = mdk.get_members(&group_result.group.mls_group_id).map(|m| m.len() as u32).unwrap_or(0);
                         out_tx.send(OutMsg::GroupCreated {
                             nostr_group_id: nostr_group_id_hex,
                             mls_group_id: mls_group_id_hex,
                             peer_pubkey: peer_pubkey.to_hex(),
+                            member_count,
                         }).ok();
                     }
                     InCmd::Shutdown { request_id } => {

@@ -18,7 +18,7 @@ type SidecarOutMsg =
       nostr_group_id: string;
       group_name: string;
     }
-  | { type: "group_joined"; nostr_group_id: string; mls_group_id: string }
+  | { type: "group_joined"; nostr_group_id: string; mls_group_id: string; member_count: number }
   | {
       type: "message_received";
       nostr_group_id: string;
@@ -69,6 +69,7 @@ type SidecarOutMsg =
       nostr_group_id: string;
       mls_group_id: string;
       peer_pubkey: string;
+      member_count: number;
     };
 
 type SidecarInCmd =

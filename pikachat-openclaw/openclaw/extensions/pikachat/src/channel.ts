@@ -96,6 +96,10 @@ const GROUP_HISTORY_LIMIT = 50;
 // Cache group names from welcome events
 const groupNames = new Map<string, string>();
 
+// Cache group member counts from sidecar events (group_joined, group_created, list_groups).
+// Used to auto-detect 1:1 DM groups without relying on the group name.
+const groupMemberCounts = new Map<string, number>();
+
 function recordPendingHistory(historyKey: string, entry: PendingHistoryEntry): void {
   const history = groupHistories.get(historyKey) ?? [];
   history.push(entry);
@@ -302,27 +306,13 @@ function isDmGroup(chatId: string, cfg: any): boolean {
 
 /**
  * Check if a group is a 1:1 conversation (2 or fewer members).
- * Uses the MLS group membership via sqlite, with a fallback to the group name
- * from the welcome event (Pika names DM groups "DM").
- * Returns false on any error (fail-open: treat as multi-person group).
+ * Uses the member count cache populated from sidecar events (group_joined,
+ * group_created, list_groups).
+ * Returns false if unknown (fail-open: treat as multi-person group).
  */
-function isOneOnOneGroup(nostrGroupId: string, stateDir: string): boolean {
-  // Check in-memory cache first
-  const cachedName = groupNames.get(nostrGroupId.toLowerCase());
-  if (cachedName?.toLowerCase() === "dm") return true;
-
-  // Query the MLS groups table for the group name (persists across restarts)
-  try {
-    const { execSync } = require("node:child_process");
-    const dbPath = path.join(stateDir, "mdk.sqlite");
-    const query = `SELECT name FROM groups WHERE nostr_group_id = x'${nostrGroupId}';`;
-    const result = execSync(`sqlite3 "${dbPath}" "${query}"`, { encoding: "utf-8", timeout: 3000 }).trim();
-    if (result.toLowerCase() === "dm") return true;
-  } catch {
-    // fall through
-  }
-
-  return false;
+function isOneOnOneGroup(nostrGroupId: string): boolean {
+  const count = groupMemberCounts.get(nostrGroupId.toLowerCase());
+  return count !== undefined && count <= 2;
 }
 
 /**
@@ -792,35 +782,39 @@ export const pikachatPlugin: ChannelPlugin<ResolvedPikachatAccount> = {
       await sidecar.setRelays(relays);
       await sidecar.publishKeypackage(relays);
 
-      // If the bot has no groups yet and an owner is configured, create a DM
-      // group with the owner so the bot can reach them immediately.
+      // Seed member counts from existing groups (so isOneOnOneGroup works
+      // immediately) and create an owner DM if no groups exist yet.
       // Fire-and-forget so it doesn't block startup.
       {
         const ownerCfg = resolved.config.owner;
         const ownerPk: string | undefined = ownerCfg
           ? String(Array.isArray(ownerCfg) ? ownerCfg[0] : ownerCfg).trim().toLowerCase()
           : undefined;
-        if (ownerPk) {
-          void (async () => {
-            try {
-              const groupsResult = (await sidecar.listGroups()) as any;
-              const groups: unknown[] = groupsResult?.groups ?? [];
-              if (groups.length === 0) {
-                ctx.log?.info(
-                  `[${resolved.accountId}] no groups found, creating DM with owner ${ownerPk}`,
-                );
-                const created = await sidecar.initGroup(ownerPk);
-                ctx.log?.info(
-                  `[${resolved.accountId}] owner DM created nostr_group_id=${created.nostr_group_id}`,
-                );
-              }
-            } catch (err) {
-              ctx.log?.warn(
-                `[${resolved.accountId}] failed to init owner DM group: ${err}`,
+        void (async () => {
+          try {
+            const groupsResult = (await sidecar.listGroups()) as any;
+            const groups: any[] = groupsResult?.groups ?? [];
+            // Seed member count cache for all groups
+            for (const g of groups) {
+              const gid = String(g.nostr_group_id ?? "").toLowerCase();
+              const mc = typeof g.member_count === "number" ? g.member_count : 0;
+              if (gid) groupMemberCounts.set(gid, mc);
+            }
+            if (ownerPk && groups.length === 0) {
+              ctx.log?.info(
+                `[${resolved.accountId}] no groups found, creating DM with owner ${ownerPk}`,
+              );
+              const created = await sidecar.initGroup(ownerPk);
+              ctx.log?.info(
+                `[${resolved.accountId}] owner DM created nostr_group_id=${created.nostr_group_id}`,
               );
             }
-          })();
-        }
+          } catch (err) {
+            ctx.log?.warn(
+              `[${resolved.accountId}] failed to seed groups / init owner DM: ${err}`,
+            );
+          }
+        })();
       }
 
       const groupPolicy = resolved.config.groupPolicy ?? "allowlist";
@@ -923,14 +917,16 @@ export const pikachatPlugin: ChannelPlugin<ResolvedPikachatAccount> = {
           return;
         }
         if (ev.type === "group_joined") {
+          groupMemberCounts.set(ev.nostr_group_id.toLowerCase(), ev.member_count);
           ctx.log?.info(
-            `[${resolved.accountId}] group_joined nostr_group_id=${ev.nostr_group_id} mls_group_id=${ev.mls_group_id}`,
+            `[${resolved.accountId}] group_joined nostr_group_id=${ev.nostr_group_id} mls_group_id=${ev.mls_group_id} members=${ev.member_count}`,
           );
           return;
         }
         if (ev.type === "group_created") {
+          groupMemberCounts.set(ev.nostr_group_id.toLowerCase(), ev.member_count);
           ctx.log?.info(
-            `[${resolved.accountId}] group_created nostr_group_id=${ev.nostr_group_id} mls_group_id=${ev.mls_group_id} peer=${ev.peer_pubkey}`,
+            `[${resolved.accountId}] group_created nostr_group_id=${ev.nostr_group_id} mls_group_id=${ev.mls_group_id} peer=${ev.peer_pubkey} members=${ev.member_count}`,
           );
           return;
         }
@@ -1204,20 +1200,13 @@ export const pikachatPlugin: ChannelPlugin<ResolvedPikachatAccount> = {
             const historyKey = `pikachat:${resolved.accountId}:${groupId}`;
 
             // Determine if this is a DM group (1:1 with bot)
-            const isDm = isDmGroup(groupId, currentCfg);
+            const isDm = isOneOnOneGroup(groupId);
             // Multi-person groups use group flow (even for owners); DM groups route to main session
             const isGroupChat = !isDm;
 
             if (isGroupChat) {
               // GROUP CHAT FLOW — mention gating + history buffering
-              // Skip mention gating for 1:1 groups (2 members) — they should always trigger
-              const oneOnOne = isOneOnOneGroup(groupId, baseStateDir);
-              if (oneOnOne) {
-                ctx.log?.debug(
-                  `[${resolved.accountId}] 1:1 group detected, skipping mention gating group=${ev.nostr_group_id} from=${senderPk}`,
-                );
-              }
-              const requireMention = oneOnOne ? false : resolveRequireMention(groupId, currentCfg);
+              const requireMention = resolveRequireMention(groupId, currentCfg);
               const wasMentioned = handle ? detectMention(messageText, handle.pubkey, handle.npub, currentCfg) : false;
 
               if (requireMention && !wasMentioned) {
