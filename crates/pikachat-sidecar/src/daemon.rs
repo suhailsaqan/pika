@@ -71,6 +71,23 @@ enum InCmd {
         request_id: Option<String>,
         nostr_group_id: String,
     },
+    InviteCall {
+        #[serde(default)]
+        request_id: Option<String>,
+        nostr_group_id: String,
+        peer_pubkey: String,
+        #[serde(default)]
+        call_id: Option<String>,
+        moq_url: String,
+        #[serde(default)]
+        broadcast_base: Option<String>,
+        #[serde(default)]
+        track_name: Option<String>,
+        #[serde(default)]
+        track_codec: Option<String>,
+        #[serde(default)]
+        relay_auth: Option<String>,
+    },
     AcceptCall {
         #[serde(default)]
         request_id: Option<String>,
@@ -104,6 +121,14 @@ enum InCmd {
         sample_rate: u32,
         #[serde(default = "default_channels")]
         channels: u16,
+    },
+    SendCallData {
+        #[serde(default)]
+        request_id: Option<String>,
+        call_id: String,
+        payload_hex: String,
+        #[serde(default)]
+        track_name: Option<String>,
     },
     InitGroup {
         #[serde(default)]
@@ -185,6 +210,11 @@ enum OutMsg {
         sample_rate: u32,
         channels: u8,
     },
+    CallData {
+        call_id: String,
+        payload_hex: String,
+        track_name: String,
+    },
     GroupCreated {
         nostr_group_id: String,
         mls_group_id: String,
@@ -234,14 +264,29 @@ struct PendingCallInvite {
     session: CallSessionParams,
 }
 
+#[derive(Debug, Clone)]
+struct PendingOutgoingCallInvite {
+    call_id: String,
+    peer_pubkey: String,
+    nostr_group_id: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ActiveCallMode {
+    Audio,
+    Data,
+}
+
 #[derive(Debug)]
-struct ActiveEchoCall {
+struct ActiveCall {
     call_id: String,
     nostr_group_id: String,
     session: CallSessionParams,
+    mode: ActiveCallMode,
     media_crypto: CallMediaCryptoContext,
     next_voice_seq: u64,
-    worker: EchoWorker,
+    next_data_seq: u64,
+    worker: CallWorker,
 }
 
 #[derive(Debug, Clone)]
@@ -265,15 +310,20 @@ enum CallWorkerEvent {
         request_id: Option<String>,
         result: anyhow::Result<VoicePublishStats>,
     },
+    DataFrame {
+        call_id: String,
+        payload: Vec<u8>,
+        track_name: String,
+    },
 }
 
 #[derive(Debug)]
-struct EchoWorker {
+struct CallWorker {
     stop: Arc<AtomicBool>,
     task: JoinHandle<()>,
 }
 
-impl EchoWorker {
+impl CallWorker {
     async fn stop(self) {
         self.stop.store(true, Ordering::Relaxed);
         let _ = self.task.await;
@@ -437,6 +487,7 @@ struct CallSignalEnvelope {
 }
 
 enum OutgoingCallSignal<'a> {
+    Invite(&'a CallSessionParams),
     Accept(&'a CallSessionParams),
     Reject { reason: &'a str },
     End { reason: &'a str },
@@ -580,6 +631,14 @@ fn build_call_signal_json(call_id: &str, signal: OutgoingCallSignal<'_>) -> anyh
         .unwrap_or_default()
         .as_millis() as i64;
     let value = match signal {
+        OutgoingCallSignal::Invite(session) => json!({
+            "v": 1,
+            "ns": "pika.call",
+            "type": "call.invite",
+            "call_id": call_id,
+            "ts_ms": ts_ms,
+            "body": session,
+        }),
         OutgoingCallSignal::Accept(session) => json!({
             "v": 1,
             "ns": "pika.call",
@@ -747,7 +806,11 @@ fn derive_mls_media_crypto_context(
         .ok_or_else(|| anyhow!("mls group not found"))?;
 
     let shared_seed = call_shared_seed(call_id, session, local_pubkey_hex, peer_pubkey_hex);
-    let track = "audio0";
+    let track = session
+        .tracks
+        .first()
+        .map(|t| t.name.as_str())
+        .ok_or_else(|| anyhow!("call session must include at least one track"))?;
     let generation = 0u8;
     let tx_hash = context_hash(&[
         b"pika.call.media.base.v1",
@@ -819,6 +882,22 @@ fn derive_mls_media_crypto_context(
         local_participant_label: opaque_participant_label(&group_root, local_pubkey_hex.as_bytes()),
         peer_participant_label: opaque_participant_label(&group_root, peer_pubkey_hex.as_bytes()),
     })
+}
+
+fn active_call_mode(session: &CallSessionParams) -> ActiveCallMode {
+    if call_audio_track_spec(session).is_some() {
+        ActiveCallMode::Audio
+    } else {
+        ActiveCallMode::Data
+    }
+}
+
+fn call_primary_track_name(session: &CallSessionParams) -> anyhow::Result<&str> {
+    session
+        .tracks
+        .first()
+        .map(|t| t.name.as_str())
+        .ok_or_else(|| anyhow!("call session must include at least one track"))
 }
 
 #[allow(dead_code)]
@@ -1227,7 +1306,7 @@ fn start_stt_worker(
     media_crypto: CallMediaCryptoContext,
     out_tx: mpsc::UnboundedSender<OutMsg>,
     call_evt_tx: mpsc::UnboundedSender<CallWorkerEvent>,
-) -> anyhow::Result<EchoWorker> {
+) -> anyhow::Result<CallWorker> {
     if is_real_moq_url(&session.moq_url) {
         let transport = CallMediaTransport::for_session(session)?;
         start_stt_worker_with_transport(
@@ -1251,7 +1330,7 @@ fn start_stt_worker_with_relay(
     media_crypto: CallMediaCryptoContext,
     out_tx: mpsc::UnboundedSender<OutMsg>,
     call_evt_tx: mpsc::UnboundedSender<CallWorkerEvent>,
-) -> anyhow::Result<EchoWorker> {
+) -> anyhow::Result<CallWorker> {
     let Some(track) = call_audio_track_spec(session) else {
         return Err(anyhow!("call session missing opus audio track"));
     };
@@ -1351,7 +1430,7 @@ fn start_stt_worker_with_relay(
         }
     });
 
-    Ok(EchoWorker { stop, task })
+    Ok(CallWorker { stop, task })
 }
 
 fn start_stt_worker_with_transport(
@@ -1361,7 +1440,7 @@ fn start_stt_worker_with_transport(
     media_crypto: CallMediaCryptoContext,
     out_tx: mpsc::UnboundedSender<OutMsg>,
     call_evt_tx: mpsc::UnboundedSender<CallWorkerEvent>,
-) -> anyhow::Result<EchoWorker> {
+) -> anyhow::Result<CallWorker> {
     let Some(track) = call_audio_track_spec(session) else {
         return Err(anyhow!("call session missing opus audio track"));
     };
@@ -1458,7 +1537,7 @@ fn start_stt_worker_with_transport(
         }
     });
 
-    Ok(EchoWorker { stop, task })
+    Ok(CallWorker { stop, task })
 }
 
 fn start_echo_worker_with_relay(
@@ -1468,7 +1547,7 @@ fn start_echo_worker_with_relay(
     local_pubkey_hex: &str,
     peer_pubkey_hex: &str,
     out_tx: mpsc::UnboundedSender<OutMsg>,
-) -> anyhow::Result<EchoWorker> {
+) -> anyhow::Result<CallWorker> {
     let mut media = MediaSession::with_relay(
         SessionConfig {
             moq_url: session.moq_url.clone(),
@@ -1531,7 +1610,7 @@ fn start_echo_worker_with_relay(
         }
     });
 
-    Ok(EchoWorker { stop, task })
+    Ok(CallWorker { stop, task })
 }
 
 fn start_echo_worker_with_transport(
@@ -1540,7 +1619,7 @@ fn start_echo_worker_with_transport(
     transport: CallMediaTransport,
     media_crypto: CallMediaCryptoContext,
     out_tx: mpsc::UnboundedSender<OutMsg>,
-) -> anyhow::Result<EchoWorker> {
+) -> anyhow::Result<CallWorker> {
     let Some(track) = call_audio_track_spec(session) else {
         return Err(anyhow!("call session missing opus audio track"));
     };
@@ -1643,7 +1722,7 @@ fn start_echo_worker_with_transport(
         }
     });
 
-    Ok(EchoWorker { stop, task })
+    Ok(CallWorker { stop, task })
 }
 
 fn echo_mode_enabled() -> bool {
@@ -1657,9 +1736,106 @@ fn start_echo_worker(
     session: &CallSessionParams,
     media_crypto: CallMediaCryptoContext,
     out_tx: mpsc::UnboundedSender<OutMsg>,
-) -> anyhow::Result<EchoWorker> {
+) -> anyhow::Result<CallWorker> {
     let transport = CallMediaTransport::for_session(session)?;
     start_echo_worker_with_transport(call_id, session, transport, media_crypto, out_tx)
+}
+
+fn start_data_worker(
+    call_id: &str,
+    session: &CallSessionParams,
+    media_crypto: CallMediaCryptoContext,
+    call_evt_tx: mpsc::UnboundedSender<CallWorkerEvent>,
+) -> anyhow::Result<CallWorker> {
+    let transport = CallMediaTransport::for_session(session)?;
+    let mut subscriptions: Vec<(String, pika_media::subscription::MediaFrameSubscription)> =
+        Vec::new();
+    for track in &session.tracks {
+        let subscribe_track = TrackAddress {
+            broadcast_path: broadcast_path(
+                &session.broadcast_base,
+                &media_crypto.peer_participant_label,
+            )
+            .map_err(|e| anyhow!("invalid peer broadcast path: {e}"))?,
+            track_name: track.name.clone(),
+        };
+        let sub = transport
+            .subscribe(&subscribe_track)
+            .context("subscribe peer track for data call")?;
+        subscriptions.push((track.name.clone(), sub));
+    }
+    if subscriptions.is_empty() {
+        return Err(anyhow!("call session must include at least one track"));
+    }
+
+    let call_id = call_id.to_string();
+    let stop = Arc::new(AtomicBool::new(false));
+    let stop_for_task = stop.clone();
+    let task = tokio::task::spawn_blocking(move || {
+        while !stop_for_task.load(Ordering::Relaxed) {
+            for (track_name, sub) in &subscriptions {
+                while let Ok(inbound) = sub.try_recv() {
+                    let decrypted = match decrypt_frame(&inbound.payload, &media_crypto.rx_keys) {
+                        Ok(v) => v,
+                        Err(err) => {
+                            warn!(
+                                "[marmotd] call data decrypt failed call_id={} track={} err={err}",
+                                call_id, track_name
+                            );
+                            continue;
+                        }
+                    };
+                    let _ = call_evt_tx.send(CallWorkerEvent::DataFrame {
+                        call_id: call_id.clone(),
+                        payload: decrypted.payload,
+                        track_name: track_name.clone(),
+                    });
+                }
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+    });
+
+    Ok(CallWorker { stop, task })
+}
+
+fn publish_call_data(
+    session: &CallSessionParams,
+    media_crypto: &CallMediaCryptoContext,
+    seq: u64,
+    track_name: &str,
+    payload: &[u8],
+) -> anyhow::Result<u64> {
+    let transport = CallMediaTransport::for_session(session)?;
+    let publish_track = TrackAddress {
+        broadcast_path: broadcast_path(
+            &session.broadcast_base,
+            &media_crypto.local_participant_label,
+        )
+        .map_err(|e| anyhow!("invalid local broadcast path: {e}"))?,
+        track_name: track_name.to_string(),
+    };
+    let frame_counter =
+        u32::try_from(seq).map_err(|_| anyhow!("call media tx counter exhausted"))?;
+    let encrypted = encrypt_frame(
+        payload,
+        &media_crypto.tx_keys,
+        FrameInfo {
+            counter: frame_counter,
+            group_seq: seq,
+            frame_idx: 0,
+            keyframe: true,
+        },
+    )
+    .map_err(|e| anyhow!("encrypt call data failed: {e}"))?;
+    let frame = MediaFrame {
+        seq,
+        timestamp_us: seq.saturating_mul(1_000),
+        keyframe: true,
+        payload: encrypted,
+    };
+    transport.publish(&publish_track, frame)?;
+    Ok(seq.saturating_add(1))
 }
 
 pub async fn run_audio_echo_smoke(frame_count: u64) -> anyhow::Result<AudioEchoSmokeStats> {
@@ -1979,7 +2155,9 @@ pub async fn daemon_main(
     // Track group subscriptions.
     let mut group_subs: HashMap<SubscriptionId, String> = HashMap::new();
     let mut pending_call_invites: HashMap<String, PendingCallInvite> = HashMap::new();
-    let mut active_call: Option<ActiveEchoCall> = None;
+    let mut pending_outgoing_call_invites: HashMap<String, PendingOutgoingCallInvite> =
+        HashMap::new();
+    let mut active_call: Option<ActiveCall> = None;
     let (call_evt_tx, mut call_evt_rx) = mpsc::unbounded_channel::<CallWorkerEvent>();
 
     // On startup, subscribe to any groups already present in state, so the daemon is restart-safe.
@@ -2382,6 +2560,121 @@ pub async fn daemon_main(
                             }
                         });
                     }
+                    InCmd::InviteCall {
+                        request_id,
+                        nostr_group_id,
+                        peer_pubkey,
+                        call_id,
+                        moq_url,
+                        broadcast_base,
+                        track_name,
+                        track_codec,
+                        relay_auth,
+                    } => {
+                        if active_call.is_some() {
+                            let _ = out_tx.send(out_error(request_id, "busy", "call already active"));
+                            continue;
+                        }
+                        let peer_pubkey = match PublicKey::parse(peer_pubkey.trim()) {
+                            Ok(pk) => pk,
+                            Err(e) => {
+                                let _ = out_tx.send(out_error(
+                                    request_id,
+                                    "bad_pubkey",
+                                    format!("invalid peer_pubkey: {e}"),
+                                ));
+                                continue;
+                            }
+                        };
+                        let peer_pubkey_hex = peer_pubkey.to_hex().to_lowercase();
+                        let call_id = call_id
+                            .filter(|id| !id.trim().is_empty())
+                            .unwrap_or_else(|| {
+                                let a = rand::random::<u32>();
+                                let b = rand::random::<u16>();
+                                let c = rand::random::<u16>();
+                                let d = rand::random::<u16>();
+                                let e = rand::random::<u64>() & 0x0000_FFFF_FFFF_FFFF;
+                                format!("{a:08x}-{b:04x}-{c:04x}-{d:04x}-{e:012x}")
+                            });
+                        let track_name = track_name
+                            .filter(|v| !v.trim().is_empty())
+                            .unwrap_or_else(|| "pty0".to_string());
+                        let track_codec = track_codec
+                            .filter(|v| !v.trim().is_empty())
+                            .unwrap_or_else(|| "bytes".to_string());
+                        let mut session = CallSessionParams {
+                            moq_url,
+                            broadcast_base: broadcast_base
+                                .filter(|v| !v.trim().is_empty())
+                                .unwrap_or_else(|| format!("pika/pty/{call_id}")),
+                            relay_auth: relay_auth.unwrap_or_default(),
+                            tracks: vec![CallTrackSpec {
+                                name: track_name,
+                                codec: track_codec,
+                                sample_rate: 1,
+                                channels: 1,
+                                frame_ms: 1,
+                            }],
+                        };
+                        if session.relay_auth.trim().is_empty() {
+                            match derive_relay_auth_token(
+                                &mdk,
+                                &nostr_group_id,
+                                &call_id,
+                                &session,
+                                &pubkey_hex,
+                                &peer_pubkey_hex,
+                            ) {
+                                Ok(token) => {
+                                    session.relay_auth = token;
+                                }
+                                Err(e) => {
+                                    let _ = out_tx.send(out_error(
+                                        request_id,
+                                        "runtime_error",
+                                        format!("derive relay auth token failed: {e:#}"),
+                                    ));
+                                    continue;
+                                }
+                            }
+                        }
+                        match send_call_signal(
+                            &client,
+                            &relay_urls,
+                            &mdk,
+                            &keys,
+                            &nostr_group_id,
+                            &call_id,
+                            OutgoingCallSignal::Invite(&session),
+                            "call_invite",
+                        )
+                        .await
+                        {
+                            Ok(()) => {
+                                pending_outgoing_call_invites.insert(
+                                    call_id.clone(),
+                                    PendingOutgoingCallInvite {
+                                        call_id: call_id.clone(),
+                                        peer_pubkey: peer_pubkey_hex,
+                                        nostr_group_id: nostr_group_id.clone(),
+                                    },
+                                );
+                                let _ = out_tx.send(out_ok(
+                                    request_id,
+                                    Some(json!({
+                                        "call_id": call_id,
+                                        "nostr_group_id": nostr_group_id,
+                                        "session": session,
+                                    })),
+                                ));
+                            }
+                            Err(e) => {
+                                let _ =
+                                    out_tx.send(out_error(request_id, "publish_failed", format!("{e:#}")));
+                            }
+                        }
+                    }
                     InCmd::AcceptCall { request_id, call_id } => {
                         if active_call.is_some() {
                             let _ = out_tx.send(out_error(request_id, "busy", "call already active"));
@@ -2445,41 +2738,72 @@ pub async fn daemon_main(
                             }
                         }
 
-                        let worker = if echo_mode_enabled() {
-                            match start_echo_worker(
-                                &invite.call_id,
-                                &invite.session,
-                                media_crypto.clone(),
-                                out_tx.clone(),
-                            ) {
-                                Ok(v) => v,
-                                Err(e) => {
-                                    let _ = out_tx.send(out_error(request_id, "runtime_error", format!("{e:#}")));
-                                    continue;
+                        let mode = active_call_mode(&invite.session);
+                        let worker = match mode {
+                            ActiveCallMode::Audio => {
+                                if echo_mode_enabled() {
+                                    match start_echo_worker(
+                                        &invite.call_id,
+                                        &invite.session,
+                                        media_crypto.clone(),
+                                        out_tx.clone(),
+                                    ) {
+                                        Ok(v) => v,
+                                        Err(e) => {
+                                            let _ = out_tx.send(out_error(
+                                                request_id,
+                                                "runtime_error",
+                                                format!("{e:#}"),
+                                            ));
+                                            continue;
+                                        }
+                                    }
+                                } else {
+                                    match start_stt_worker(
+                                        &invite.call_id,
+                                        &invite.session,
+                                        media_crypto.clone(),
+                                        out_tx.clone(),
+                                        call_evt_tx.clone(),
+                                    ) {
+                                        Ok(v) => v,
+                                        Err(e) => {
+                                            let _ = out_tx.send(out_error(
+                                                request_id,
+                                                "runtime_error",
+                                                format!("{e:#}"),
+                                            ));
+                                            continue;
+                                        }
+                                    }
                                 }
                             }
-                        } else {
-                            match start_stt_worker(
+                            ActiveCallMode::Data => match start_data_worker(
                                 &invite.call_id,
                                 &invite.session,
                                 media_crypto.clone(),
-                                out_tx.clone(),
                                 call_evt_tx.clone(),
                             ) {
                                 Ok(v) => v,
                                 Err(e) => {
-                                    let _ = out_tx.send(out_error(request_id, "runtime_error", format!("{e:#}")));
+                                    let _ = out_tx.send(out_error(
+                                        request_id,
+                                        "runtime_error",
+                                        format!("{e:#}"),
+                                    ));
                                     continue;
                                 }
-                            }
+                            },
                         };
 
-                        active_call = Some(ActiveEchoCall {
+                        active_call = Some(ActiveCall {
                             call_id: invite.call_id.clone(),
                             nostr_group_id: invite.nostr_group_id.clone(),
                             session: invite.session.clone(),
+                            mode,
                             media_crypto,
                             next_voice_seq: 0,
+                            next_data_seq: 0,
                             worker,
                         });
                         if let Some(call) = active_call.as_ref() {
@@ -2576,6 +2900,14 @@ pub async fn daemon_main(
                             let _ = out_tx.send(out_error(request_id, "not_found", "active call id mismatch"));
                             continue;
                         }
+                        if current.mode != ActiveCallMode::Audio {
+                            let _ = out_tx.send(out_error(
+                                request_id,
+                                "bad_request",
+                                "active call is not an audio call",
+                            ));
+                            continue;
+                        }
                         if tts_text.trim().is_empty() {
                             let _ = out_tx.send(out_error(request_id, "bad_request", "tts_text must not be empty"));
                             continue;
@@ -2653,6 +2985,14 @@ pub async fn daemon_main(
                             let _ = out_tx.send(out_error(request_id, "not_found", "active call id mismatch"));
                             continue;
                         }
+                        if current.mode != ActiveCallMode::Audio {
+                            let _ = out_tx.send(out_error(
+                                request_id,
+                                "bad_request",
+                                "active call is not an audio call",
+                            ));
+                            continue;
+                        }
                         tracing::info!(
                             "[pikachat] send_audio_file start call_id={} path={} sample_rate={} channels={}",
                             call_id, audio_path, sample_rate, channels
@@ -2710,6 +3050,73 @@ pub async fn daemon_main(
                                 result,
                             });
                         });
+                    }
+                    InCmd::SendCallData {
+                        request_id,
+                        call_id,
+                        payload_hex,
+                        track_name,
+                    } => {
+                        let Some(current) = active_call.as_mut() else {
+                            let _ = out_tx.send(out_error(request_id, "not_found", "active call not found"));
+                            continue;
+                        };
+                        if current.call_id != call_id {
+                            let _ = out_tx.send(out_error(request_id, "not_found", "active call id mismatch"));
+                            continue;
+                        }
+                        if current.mode != ActiveCallMode::Data {
+                            let _ = out_tx.send(out_error(
+                                request_id,
+                                "bad_request",
+                                "active call is not a data call",
+                            ));
+                            continue;
+                        }
+                        let payload = match hex::decode(payload_hex.trim()) {
+                            Ok(v) => v,
+                            Err(_) => {
+                                let _ = out_tx.send(out_error(
+                                    request_id,
+                                    "bad_request",
+                                    "payload_hex must be valid hex",
+                                ));
+                                continue;
+                            }
+                        };
+                        let track_name = match track_name {
+                            Some(name) if !name.trim().is_empty() => name,
+                            _ => match call_primary_track_name(&current.session) {
+                                Ok(name) => name.to_string(),
+                                Err(err) => {
+                                    let _ = out_tx.send(out_error(
+                                        request_id,
+                                        "runtime_error",
+                                        format!("{err:#}"),
+                                    ));
+                                    continue;
+                                }
+                            },
+                        };
+                        match publish_call_data(
+                            &current.session,
+                            &current.media_crypto,
+                            current.next_data_seq,
+                            &track_name,
+                            &payload,
+                        ) {
+                            Ok(next_seq) => {
+                                current.next_data_seq = next_seq;
+                                let _ = out_tx.send(out_ok(request_id, None));
+                            }
+                            Err(err) => {
+                                let _ = out_tx.send(out_error(
+                                    request_id,
+                                    "runtime_error",
+                                    format!("publish call data failed: {err:#}"),
+                                ));
+                            }
+                        }
                     }
                     InCmd::InitGroup { request_id, peer_pubkey: peer_str, group_name } => {
                         let peer_pubkey = match PublicKey::parse(&peer_str) {
@@ -2892,6 +3299,17 @@ pub async fn daemon_main(
                             }
                         }
                     }
+                    CallWorkerEvent::DataFrame {
+                        call_id,
+                        payload,
+                        track_name,
+                    } => {
+                        let _ = out_tx.send(OutMsg::CallData {
+                            call_id,
+                            payload_hex: hex::encode(payload),
+                            track_name,
+                        });
+                    }
                 }
             }
             notification = rx.recv() => {
@@ -3044,12 +3462,122 @@ pub async fn daemon_main(
                                             .ok();
                                     }
                                     ParsedCallSignal::Accept { call_id, session } => {
-                                        // We currently operate as the callee/echo sidecar.
-                                        // Accepts are reserved for future outgoing-call support.
-                                        let _ = (call_id, session);
+                                        let Some(pending) = pending_outgoing_call_invites.remove(&call_id) else {
+                                            continue;
+                                        };
+                                        if active_call.is_some() {
+                                            continue;
+                                        }
+                                        if sender_hex != pending.peer_pubkey {
+                                            warn!(
+                                                "[marmotd] call.accept sender mismatch call_id={} expected={} got={}",
+                                                call_id, pending.peer_pubkey, sender_hex
+                                            );
+                                            continue;
+                                        }
+                                        if let Err(err) = validate_relay_auth_token(
+                                            &mdk,
+                                            &pending.nostr_group_id,
+                                            &pending.call_id,
+                                            &session,
+                                            &pubkey_hex,
+                                            &sender_hex,
+                                        ) {
+                                            warn!("[marmotd] call.accept auth failed call_id={} err={err:#}", call_id);
+                                            continue;
+                                        }
+                                        let media_crypto = match derive_mls_media_crypto_context(
+                                            &mdk,
+                                            &pending.nostr_group_id,
+                                            &pending.call_id,
+                                            &session,
+                                            &pubkey_hex,
+                                            &sender_hex,
+                                        ) {
+                                            Ok(v) => v,
+                                            Err(err) => {
+                                                warn!(
+                                                    "[marmotd] call.accept derive media context failed call_id={} err={err:#}",
+                                                    call_id
+                                                );
+                                                continue;
+                                            }
+                                        };
+                                        let mode = active_call_mode(&session);
+                                        let worker = match mode {
+                                            ActiveCallMode::Audio => {
+                                                if echo_mode_enabled() {
+                                                    match start_echo_worker(
+                                                        &pending.call_id,
+                                                        &session,
+                                                        media_crypto.clone(),
+                                                        out_tx.clone(),
+                                                    ) {
+                                                        Ok(v) => v,
+                                                        Err(err) => {
+                                                            warn!(
+                                                                "[marmotd] start echo worker failed call_id={} err={err:#}",
+                                                                call_id
+                                                            );
+                                                            continue;
+                                                        }
+                                                    }
+                                                } else {
+                                                    match start_stt_worker(
+                                                        &pending.call_id,
+                                                        &session,
+                                                        media_crypto.clone(),
+                                                        out_tx.clone(),
+                                                        call_evt_tx.clone(),
+                                                    ) {
+                                                        Ok(v) => v,
+                                                        Err(err) => {
+                                                            warn!(
+                                                                "[marmotd] start stt worker failed call_id={} err={err:#}",
+                                                                call_id
+                                                            );
+                                                            continue;
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                            ActiveCallMode::Data => match start_data_worker(
+                                                &pending.call_id,
+                                                &session,
+                                                media_crypto.clone(),
+                                                call_evt_tx.clone(),
+                                            ) {
+                                                Ok(v) => v,
+                                                Err(err) => {
+                                                    warn!(
+                                                        "[marmotd] start data worker failed call_id={} err={err:#}",
+                                                        call_id
+                                                    );
+                                                    continue;
+                                                }
+                                            },
+                                        };
+                                        active_call = Some(ActiveCall {
+                                            call_id: pending.call_id.clone(),
+                                            nostr_group_id: pending.nostr_group_id.clone(),
+                                            session: session.clone(),
+                                            mode,
+                                            media_crypto,
+                                            next_voice_seq: 0,
+                                            next_data_seq: 0,
+                                            worker,
+                                        });
+                                        out_tx
+                                            .send(OutMsg::CallSessionStarted {
+                                                call_id: pending.call_id,
+                                                from_pubkey: sender_hex,
+                                                nostr_group_id: pending.nostr_group_id,
+                                            })
+                                            .ok();
                                     }
                                     ParsedCallSignal::Reject { call_id, reason } => {
                                         pending_call_invites.remove(&call_id);
+                                        pending_outgoing_call_invites.remove(&call_id);
                                         if active_call
                                             .as_ref()
                                             .map(|c| c.call_id == call_id)
@@ -3065,6 +3593,7 @@ pub async fn daemon_main(
                                     }
                                     ParsedCallSignal::End { call_id, reason } => {
                                         pending_call_invites.remove(&call_id);
+                                        pending_outgoing_call_invites.remove(&call_id);
                                         if active_call
                                             .as_ref()
                                             .map(|c| c.call_id == call_id)

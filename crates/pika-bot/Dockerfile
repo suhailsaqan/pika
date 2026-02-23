@@ -14,7 +14,9 @@ RUN --mount=type=cache,target=/usr/local/cargo,from=rust:latest,source=/usr/loca
 
 FROM node:22-bookworm-slim
 
-RUN apt-get update && apt-get install -y python3 ca-certificates && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y python3 ca-certificates ripgrep fd-find && \
+    ln -sf /usr/bin/fdfind /usr/local/bin/fd && \
+    rm -rf /var/lib/apt/lists/*
 RUN useradd -ms /bin/bash app
 RUN npm install -g @mariozechner/pi-coding-agent
 
@@ -24,6 +26,7 @@ WORKDIR /app
 COPY --from=builder /usr/src/app/pikachat /app/pikachat
 COPY bots/pi-bridge.py /app/pi-bridge.py
 COPY crates/pika-bot/entrypoint.sh /app/entrypoint.sh
+COPY tools/agent-pty/fixtures /app/fixtures/pty
 
 ENV RUST_LOG=info
 

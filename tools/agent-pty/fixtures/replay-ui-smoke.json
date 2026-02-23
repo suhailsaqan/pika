@@ -1,0 +1,43 @@
+{
+  "version": 1,
+  "name": "ui-smoke",
+  "description": "Deterministic PTY replay for agent UI transport tests.",
+  "frames": [
+    {
+      "delay_ms": 0,
+      "stdout_b64": "G1syShtbSBtbPzI1bA=="
+    },
+    {
+      "delay_ms": 80,
+      "stdout_b64": "cGkgdjAuNTQuMg0K"
+    },
+    {
+      "delay_ms": 80,
+      "stdout_b64": "UmVhZHkgd2hlbiB5b3UgYXJlISBJZiB5b3UgaGF2ZSBhIHRhc2sgaW4gbWluZCwgdGVsbCBtZS4NCg=="
+    },
+    {
+      "delay_ms": 120,
+      "stdout_b64": "OjogV29ya2luZy4uLg0K"
+    },
+    {
+      "delay_ms": 120,
+      "stdout_b64": "OjogV29ya2luZy4uLg0K"
+    },
+    {
+      "delay_ms": 120,
+      "stdout_b64": "OjogV29ya2luZy4uLg0K"
+    },
+    {
+      "delay_ms": 100,
+      "stdout_b64": "b2s5bQ0K"
+    },
+    {
+      "delay_ms": 80,
+      "stdout_b64": "8J+RjQ0K"
+    },
+    {
+      "delay_ms": 0,
+      "stdout_b64": "G1s/MjVo"
+    }
+  ]
+}

@@ -16,7 +16,6 @@ use nostr_blossom::client::BlossomClient;
 use nostr_sdk::prelude::*;
 use serde_json::json;
 use sha2::{Digest, Sha256};
-use tokio::io::AsyncBufReadExt;
 
 // Same defaults as the Pika app (rust/src/core/config.rs).
 const DEFAULT_RELAY_URLS: &[&str] = &[
@@ -51,6 +50,11 @@ fn default_state_dir() -> PathBuf {
     }
     PathBuf::from(".pikachat")
 }
+
+const DEFAULT_AGENT_MOQ_URLS: &[&str] = &[
+    "https://us-east.moq.pikachat.org/anon",
+    "https://eu.moq.pikachat.org/anon",
+];
 
 #[derive(Debug, Parser)]
 #[command(name = "pikachat")]
@@ -1229,6 +1233,14 @@ async fn cmd_agent_new(cli: &Cli, name: Option<&str>) -> anyhow::Result<()> {
     env.insert("STATE_DIR".to_string(), "/app/state".to_string());
     env.insert("NOSTR_SECRET_KEY".to_string(), bot_secret_hex);
     env.insert("ANTHROPIC_API_KEY".to_string(), anthropic_key);
+    for key in ["PI_BRIDGE_REPLAY_FILE", "PI_BRIDGE_REPLAY_SPEED"] {
+        if let Ok(value) = std::env::var(key) {
+            let trimmed = value.trim();
+            if !trimmed.is_empty() {
+                env.insert(key.to_string(), trimmed.to_string());
+            }
+        }
+    }
 
     eprint!("Creating Fly machine...");
     std::io::stderr().flush().ok();
@@ -1282,7 +1294,6 @@ async fn cmd_agent_new(cli: &Cli, name: Option<&str>) -> anyhow::Result<()> {
     let result = mdk
         .create_group(&keys.public_key(), vec![bot_kp], config)
         .context("create group for bot")?;
-    let mls_group_id = result.group.mls_group_id.clone();
     let nostr_group_id_hex = hex::encode(result.group.nostr_group_id);
 
     for rumor in result.welcome_rumors {
@@ -1292,85 +1303,116 @@ async fn cmd_agent_new(cli: &Cli, name: Option<&str>) -> anyhow::Result<()> {
         relay_util::publish_and_confirm(&client, &relays, &giftwrap, "welcome").await?;
     }
     eprintln!(" done");
-
-    let group_filter = Filter::new()
-        .kind(Kind::MlsGroupMessage)
-        .custom_tag(SingleLetterTag::lowercase(Alphabet::H), &nostr_group_id_hex)
-        .since(Timestamp::now());
-    let sub = client.subscribe(group_filter, None).await?;
-    let mut rx = client.notifications();
-
-    let bot_npub = bot_pubkey
-        .to_bech32()
-        .unwrap_or_else(|_| bot_pubkey.to_hex().to_string());
-    eprintln!();
-    eprintln!("Connected to pi agent ({bot_npub})");
-    eprintln!("Type messages below. Ctrl-C to exit.");
-    eprintln!();
-
-    let mut stdin = tokio::io::BufReader::new(tokio::io::stdin()).lines();
-    eprint!("you> ");
-    std::io::stderr().flush().ok();
-
-    loop {
-        tokio::select! {
-            line = stdin.next_line() => {
-                let Some(line) = line? else { break };
-                let line = line.trim().to_string();
-                if line.is_empty() {
-                    eprint!("you> ");
-                    std::io::stderr().flush().ok();
-                    continue;
-                }
-
-                let rumor = EventBuilder::new(Kind::ChatMessage, &line).build(keys.public_key());
-                let msg_event = mdk.create_message(&mls_group_id, rumor).context("create chat message")?;
-                relay_util::publish_and_confirm(&client, &relays, &msg_event, "chat").await?;
-                eprint!("you> ");
-                std::io::stderr().flush().ok();
-            }
-            notification = rx.recv() => {
-                let notification = match notification {
-                    Ok(n) => n,
-                    Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
-                    Err(_) => break,
-                };
-                let RelayPoolNotification::Event { subscription_id, event, .. } = notification else { continue };
-                if subscription_id != sub.val {
-                    continue;
-                }
-                let event = *event;
-                if event.kind != Kind::MlsGroupMessage {
-                    continue;
-                }
-                if let Ok(MessageProcessingResult::ApplicationMessage(msg)) =
-                    mdk.process_message(&event)
-                    && msg.pubkey == bot_pubkey
-                {
-                    eprint!("\r");
-                    println!("pi> {}", msg.content);
-                    println!();
-                    eprint!("you> ");
-                    std::io::stderr().flush().ok();
-                }
-            }
-            _ = tokio::signal::ctrl_c() => {
-                break;
-            }
-        }
-    }
-
-    client.unsubscribe_all().await;
     client.shutdown().await;
 
+    let relay_urls = resolve_relays(cli);
+    let moq_urls = resolve_agent_moq_urls();
+    launch_agent_pty_client(
+        &cli.state_dir,
+        &relay_urls,
+        &moq_urls,
+        &nostr_group_id_hex,
+        &bot_pubkey.to_hex(),
+        &machine.id,
+        fly.app_name(),
+    )
+}
+
+fn resolve_agent_moq_urls() -> Vec<String> {
+    if let Ok(raw) = std::env::var("PIKA_AGENT_MOQ_URLS") {
+        let urls: Vec<String> = raw
+            .split(',')
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(ToOwned::to_owned)
+            .collect();
+        if !urls.is_empty() {
+            return urls;
+        }
+    }
+    DEFAULT_AGENT_MOQ_URLS
+        .iter()
+        .map(|s| s.to_string())
+        .collect()
+}
+
+fn resolve_marmotd_bin() -> anyhow::Result<PathBuf> {
+    if let Ok(path) = std::env::var("PIKA_AGENT_MARMOTD_BIN") {
+        let candidate = PathBuf::from(path);
+        if candidate.exists() {
+            return Ok(candidate);
+        }
+        anyhow::bail!(
+            "PIKA_AGENT_MARMOTD_BIN is set but does not exist: {}",
+            candidate.display()
+        );
+    }
+
+    let mut sibling = std::env::current_exe().context("resolve pika-cli binary path")?;
+    sibling.set_file_name("marmotd");
+    if sibling.exists() {
+        return Ok(sibling);
+    }
+
+    match std::process::Command::new("marmotd")
+        .arg("--version")
+        .status()
+    {
+        Ok(status) if status.success() => Ok(PathBuf::from("marmotd")),
+        _ => anyhow::bail!(
+            "could not find marmotd binary (tried sibling {} and PATH). Build it with `cargo build -p marmotd` or set PIKA_AGENT_MARMOTD_BIN",
+            sibling.display()
+        ),
+    }
+}
+
+fn launch_agent_pty_client(
+    state_dir: &Path,
+    relay_urls: &[String],
+    moq_urls: &[String],
+    nostr_group_id_hex: &str,
+    bot_pubkey_hex: &str,
+    machine_id: &str,
+    fly_app_name: &str,
+) -> anyhow::Result<()> {
+    let script_path = PathBuf::from("tools/agent-pty/agent-pty-client.py");
+    if !script_path.exists() {
+        anyhow::bail!("missing {} (run from repo root)", script_path.display());
+    }
+    let marmotd_bin = resolve_marmotd_bin()?;
+
     eprintln!();
-    eprintln!("Machine {} is still running.", machine.id);
-    eprintln!(
-        "Stop with: fly machine stop {} -a {}",
-        machine.id,
-        fly.app_name()
-    );
-    Ok(())
+    eprintln!("Launching PTY agent session...");
+    eprintln!("Machine {machine_id} is running in app {fly_app_name}.");
+    eprintln!("Stop with: fly machine stop {machine_id} -a {fly_app_name}");
+    eprintln!();
+
+    let mut cmd = std::process::Command::new("python3");
+    cmd.arg(&script_path);
+    cmd.env("PIKA_AGENT_MARMOTD_BIN", marmotd_bin);
+    cmd.env("PIKA_AGENT_STATE_DIR", state_dir);
+    cmd.env("PIKA_AGENT_GROUP_ID", nostr_group_id_hex);
+    cmd.env("PIKA_AGENT_BOT_PUBKEY", bot_pubkey_hex);
+    cmd.env("PIKA_AGENT_MACHINE_ID", machine_id);
+    cmd.env("PIKA_AGENT_FLY_APP_NAME", fly_app_name);
+    cmd.env("PIKA_AGENT_RELAYS_JSON", serde_json::to_string(relay_urls)?);
+    cmd.env("PIKA_AGENT_MOQ_URLS_JSON", serde_json::to_string(moq_urls)?);
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        let err = cmd.exec();
+        anyhow::bail!("failed to exec python3 {}: {err}", script_path.display());
+    }
+
+    #[cfg(not(unix))]
+    {
+        let status = cmd.status().context("launch agent tui")?;
+        if !status.success() {
+            anyhow::bail!("agent TUI exited with status {status}");
+        }
+        Ok(())
+    }
 }
 
 fn cmd_messages(cli: &Cli, nostr_group_id_hex: &str, limit: usize) -> anyhow::Result<()> {
