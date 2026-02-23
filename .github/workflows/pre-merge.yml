@@ -116,7 +116,7 @@ jobs:
     if: needs.detect-changes.outputs.marmotd == 'true'
     runs-on: blacksmith-16vcpu-ubuntu-2404
     environment:
-      name: ${{ github.event_name == 'pull_request' && github.actor != 'justinmoon' && github.actor != 'futurepaul' && github.actor != 'AnthonyRonning' && github.actor != 'benthecarman' && 'ci-approval' || 'ci-auto' }}
+      name: ${{ github.event_name == 'pull_request' && github.actor != 'justinmoon' && github.actor != 'futurepaul' && github.actor != 'AnthonyRonning' && github.actor != 'benthecarman' && github.actor != 'clarkmoody' && 'ci-approval' || 'ci-auto' }}
     steps:
       - uses: actions/checkout@v4
 
