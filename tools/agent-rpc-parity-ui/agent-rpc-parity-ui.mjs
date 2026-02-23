@@ -109,6 +109,13 @@ const parsedRequestTimeout = Number.parseInt(process.env.PIKA_AGENT_RPC_REQUEST_
 const RPC_REQUEST_TIMEOUT_MS = Number.isFinite(parsedRequestTimeout) && parsedRequestTimeout > 0 ? parsedRequestTimeout : 30_000;
 const MARMOTD_STDERR_MODE = String(process.env.PIKA_AGENT_MARMOTD_STDERR ?? "quiet").trim().toLowerCase();
 
+function createAuthStorage() {
+  if (AuthStorage && typeof AuthStorage.inMemory === "function") {
+    return AuthStorage.inMemory();
+  }
+  return new AuthStorage();
+}
+
 function requiredEnv(name) {
   const value = process.env[name];
   if (!value || !value.trim()) {
@@ -429,7 +436,7 @@ class RpcBridgeClient {
 class RemoteAgentSessionAdapter {
   constructor(rpcClient) {
     this.rpcClient = rpcClient;
-    this.authStorage = AuthStorage.inMemory();
+    this.authStorage = createAuthStorage();
     this.modelRegistry = new ModelRegistry(this.authStorage);
     this.settingsManager = SettingsManager.inMemory();
     this.sessionManager = SessionManager.inMemory(process.cwd());

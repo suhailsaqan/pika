@@ -282,6 +282,50 @@ def set_pty_size(fd: int, cols: int, rows: int) -> None:
         log(f"set pty size failed: {err}")
 
 
+def decode_wait_status(status: int) -> int | None:
+    if os.WIFEXITED(status):
+        return os.WEXITSTATUS(status)
+    if os.WIFSIGNALED(status):
+        return 128 + os.WTERMSIG(status)
+    return None
+
+
+def reap_child_exit_code(pid: int, timeout_sec: float = 1.0) -> int | None:
+    deadline = time.monotonic() + max(0.0, timeout_sec)
+    sent_term = False
+    while True:
+        try:
+            waited_pid, status = os.waitpid(pid, os.WNOHANG)
+        except ChildProcessError:
+            return None
+        if waited_pid == pid:
+            return decode_wait_status(status)
+
+        now = time.monotonic()
+        if now < deadline:
+            time.sleep(0.02)
+            continue
+
+        if not sent_term:
+            sent_term = True
+            deadline = now + 0.5
+            try:
+                os.kill(pid, signal.SIGTERM)
+            except Exception:
+                pass
+            continue
+
+        try:
+            os.kill(pid, signal.SIGKILL)
+        except Exception:
+            pass
+        try:
+            _, status = os.waitpid(pid, 0)
+            return decode_wait_status(status)
+        except ChildProcessError:
+            return None
+
+
 def pty_reader_loop(call_id: str, pid: int, fd: int) -> None:
     global active_call_id, active_pty_fd, active_pty_pid
     flush_interval_sec = 0.03
@@ -327,16 +371,7 @@ def pty_reader_loop(call_id: str, pid: int, fd: int) -> None:
                 flush_pending()
     finally:
         flush_pending()
-        exit_code = None
-        try:
-            _, status = os.waitpid(pid, os.WNOHANG)
-            if status != 0:
-                if os.WIFEXITED(status):
-                    exit_code = os.WEXITSTATUS(status)
-                elif os.WIFSIGNALED(status):
-                    exit_code = 128 + os.WTERMSIG(status)
-        except ChildProcessError:
-            pass
+        exit_code = reap_child_exit_code(pid)
         send_call_payload(call_id, {"t": "exit", "code": exit_code})
         send_to_marmotd({"cmd": "end_call", "call_id": call_id, "reason": "pty_exit"})
         with PTY_LOCK:

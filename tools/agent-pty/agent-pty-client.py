@@ -8,6 +8,7 @@ then forwards local terminal input/output over encrypted call data frames.
 from __future__ import annotations
 
 import base64
+from collections import deque
 import json
 import os
 import queue
@@ -97,6 +98,7 @@ STREAM_DAEMON_LOGS = env_bool("PIKA_AGENT_STREAM_DAEMON_LOGS")
 
 WRITE_LOCK = threading.Lock()
 EVENTS: "queue.Queue[dict[str, Any]]" = queue.Queue()
+DEFERRED_EVENTS: "deque[dict[str, Any]]" = deque()
 STOP_EVENT = threading.Event()
 RESIZE_PENDING = threading.Event()
 
@@ -297,6 +299,8 @@ def wait_for_ready(timeout_sec: float = 15.0) -> None:
 
 
 def next_event(timeout: float = 0.0) -> dict[str, Any] | None:
+    if DEFERRED_EVENTS:
+        return DEFERRED_EVENTS.popleft()
     try:
         return EVENTS.get(timeout=timeout)
     except queue.Empty:
@@ -326,22 +330,46 @@ def invite_call(moq_url: str) -> str:
     return call_id
 
 
-def wait_for_call_start(call_id: str, timeout_sec: float = 20.0) -> bool:
+def wait_for_call_start(
+    candidate_call_ids: set[str], timeout_sec: float = 20.0
+) -> tuple[str | None, set[str]]:
     deadline = time_now() + timeout_sec
-    while time_now() < deadline and not STOP_EVENT.is_set():
-        msg = next_event(timeout=0.25)
-        if not msg:
-            continue
-        msg_type = str(msg.get("type", ""))
-        if msg_type == "error":
-            message = str(msg.get("message", "unknown error"))
-            tty_print(f"\n[agent] daemon error: {message}\n")
-            continue
-        if msg_type == "call_session_started" and str(msg.get("call_id", "")) == call_id:
-            return True
-        if msg_type == "call_session_ended" and str(msg.get("call_id", "")) == call_id:
-            return False
-    return False
+    ended_call_ids: set[str] = set()
+    deferred: list[dict[str, Any]] = []
+    try:
+        while time_now() < deadline and not STOP_EVENT.is_set():
+            msg = next_event(timeout=0.25)
+            if not msg:
+                continue
+            msg_type = str(msg.get("type", ""))
+            if msg_type == "error":
+                message = str(msg.get("message", "unknown error"))
+                tty_print(f"\n[agent] daemon error: {message}\n")
+                continue
+            if msg_type == "call_session_started":
+                msg_call_id = str(msg.get("call_id", ""))
+                if msg_call_id in candidate_call_ids:
+                    return msg_call_id, ended_call_ids
+                continue
+            if msg_type == "call_session_ended":
+                msg_call_id = str(msg.get("call_id", ""))
+                if msg_call_id in candidate_call_ids:
+                    ended_call_ids.add(msg_call_id)
+                    candidate_call_ids.discard(msg_call_id)
+                    if not candidate_call_ids:
+                        return None, ended_call_ids
+                    continue
+                continue
+            deferred.append(msg)
+    finally:
+        # Preserve ordering for non-call lifecycle events.
+        for msg in reversed(deferred):
+            DEFERRED_EVENTS.appendleft(msg)
+    return None, ended_call_ids
+
+
+def end_call(call_id: str, reason: str) -> None:
+    send_cmd({"cmd": "end_call", "call_id": call_id, "reason": reason})
 
 
 def run_terminal_loop(call_id: str) -> None:
@@ -559,15 +587,29 @@ def main() -> int:
     try:
         wait_for_ready()
         started_call_id: str | None = None
+        pending_call_ids: set[str] = set()
         for moq_url in MOQ_URLS:
             tty_print(f"[agent] inviting call via {moq_url}...\n")
             call_id = invite_call(moq_url)
-            if wait_for_call_start(call_id):
-                started_call_id = call_id
+            pending_call_ids.add(call_id)
+            matched_call_id, ended_call_ids = wait_for_call_start(
+                set(pending_call_ids)
+            )
+            if ended_call_ids:
+                pending_call_ids.difference_update(ended_call_ids)
+            if matched_call_id is not None:
+                started_call_id = matched_call_id
                 break
             tty_print(f"[agent] no start for {moq_url}, trying next relay...\n")
 
+        if started_call_id is not None:
+            for pending_call_id in list(pending_call_ids):
+                if pending_call_id != started_call_id:
+                    end_call(pending_call_id, "superseded")
+
         if not started_call_id:
+            for pending_call_id in list(pending_call_ids):
+                end_call(pending_call_id, "no_start")
             tty_print("[agent] failed to start PTY call on available MoQ relays.\n")
             return 1
 

@@ -990,6 +990,46 @@ async fn send_call_signal(
     .await
 }
 
+#[allow(clippy::too_many_arguments)]
+async fn send_call_invite_with_retry(
+    client: &Client,
+    relay_urls: &[RelayUrl],
+    mdk: &MDK<MdkSqliteStorage>,
+    keys: &Keys,
+    nostr_group_id: &str,
+    call_id: &str,
+    session: &CallSessionParams,
+    max_attempts: usize,
+) -> anyhow::Result<()> {
+    let attempts = max_attempts.max(1);
+    for attempt in 1..=attempts {
+        match send_call_signal(
+            client,
+            relay_urls,
+            mdk,
+            keys,
+            nostr_group_id,
+            call_id,
+            OutgoingCallSignal::Invite(session),
+            "call_invite",
+        )
+        .await
+        {
+            Ok(()) => return Ok(()),
+            Err(err) => {
+                if attempt == attempts {
+                    return Err(err);
+                }
+                warn!(
+                    "[marmotd] call invite publish attempt {attempt}/{attempts} failed call_id={call_id}: {err:#}; retrying"
+                );
+                tokio::time::sleep(Duration::from_millis(750)).await;
+            }
+        }
+    }
+    unreachable!("attempt loop must return");
+}
+
 fn call_audio_track_spec(session: &CallSessionParams) -> Option<&CallTrackSpec> {
     session
         .tracks
@@ -2639,18 +2679,17 @@ pub async fn daemon_main(
                                 }
                             }
                         }
-                        match send_call_signal(
+                        match send_call_invite_with_retry(
                             &client,
                             &relay_urls,
                             &mdk,
                             &keys,
                             &nostr_group_id,
                             &call_id,
-                            OutgoingCallSignal::Invite(&session),
-                            "call_invite",
+                            &session,
+                            3,
                         )
-                        .await
-                        {
+                        .await {
                             Ok(()) => {
                                 pending_outgoing_call_invites.insert(
                                     call_id.clone(),
@@ -3462,7 +3501,7 @@ pub async fn daemon_main(
                                             .ok();
                                     }
                                     ParsedCallSignal::Accept { call_id, session } => {
-                                        let Some(pending) = pending_outgoing_call_invites.remove(&call_id) else {
+                                        let Some(pending) = pending_outgoing_call_invites.get(&call_id).cloned() else {
                                             continue;
                                         };
                                         if active_call.is_some() {
@@ -3567,6 +3606,7 @@ pub async fn daemon_main(
                                             next_data_seq: 0,
                                             worker,
                                         });
+                                        pending_outgoing_call_invites.remove(&call_id);
                                         out_tx
                                             .send(OutMsg::CallSessionStarted {
                                                 call_id: pending.call_id,
