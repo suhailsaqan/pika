@@ -167,13 +167,17 @@ impl State {
             .clean_reply_target(new_state.current_chat.as_ref());
 
         // Refilter follows if an overlay needs them.
-        let source = follow_source(new_state, cached_profiles);
+        let source: Vec<_> = follow_source(new_state, cached_profiles)
+            .iter()
+            .filter(|entry| self.my_npub != entry.npub)
+            .cloned()
+            .collect();
         match &mut self.pane {
             Pane::NewChat(ref mut s) => {
-                s.update_follows(source);
+                s.update_follows(source.as_slice());
             }
             Pane::NewGroup(ref mut s) => {
-                s.update_follows(source);
+                s.update_follows(source.as_slice());
             }
             _ => {}
         }
