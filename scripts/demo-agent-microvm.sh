@@ -44,6 +44,7 @@ fi
 cmd+=(
   agent new
   --provider microvm
+  --brain pi
   --spawner-url "$SPAWNER_URL"
   --spawn-variant "$SPAWN_VARIANT"
   --flake-ref "$FLAKE_REF"
