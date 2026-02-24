@@ -125,7 +125,7 @@ pub fn build_create_vm_request(
 
 pub fn spawner_create_error(spawner_url: &str, err: anyhow::Error) -> anyhow::Error {
     anyhow!(
-        "failed to create microvm via vm-spawner at {}: {:#}\nhint: ensure vm-spawner is reachable (curl {}/healthz)\nif this is a remote host, open a tunnel:\n  nix develop .#infra -c just -f infra/justfile build-vmspawner-tunnel",
+        "failed to create microvm via vm-spawner at {}: {:#}\nhint: ensure vm-spawner is reachable (curl {}/healthz)\nif this is a remote host, open a tunnel:\n  just agent-microvm-tunnel",
         spawner_url,
         err,
         spawner_url.trim_end_matches('/')
