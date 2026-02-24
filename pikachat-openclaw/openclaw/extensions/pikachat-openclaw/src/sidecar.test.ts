@@ -1,5 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { SendThrottle } from "./sidecar.js";
 
 // We can't import the PikachatSidecar class directly (it spawns a process),
 // but we can test the type shapes and serde contracts by constructing the
@@ -174,5 +175,86 @@ describe("media text augmentation", () => {
       { filename: "file.bin", mime_type: "application/octet-stream", width: null, height: null },
     ]);
     assert.equal(result, "hi\n[Attachment: file.bin — application/octet-stream]");
+  });
+});
+
+describe("SendThrottle", () => {
+  // Use a short interval (100ms) to keep tests fast while still verifiable.
+  const INTERVAL = 100;
+
+  /** Helper: wait for the internal chain to drain by enqueuing a sentinel. */
+  function drain(throttle: SendThrottle): Promise<void> {
+    return new Promise((resolve) => {
+      throttle.enqueue(async () => { resolve(); });
+    });
+  }
+
+  it("enqueue returns synchronously", () => {
+    const throttle = new SendThrottle(INTERVAL);
+    // enqueue returns void, not a Promise — caller is never blocked.
+    const ret = throttle.enqueue(() => Promise.resolve());
+    assert.equal(ret, undefined);
+  });
+
+  it("spaces rapid sends by at least the minimum interval", async () => {
+    const throttle = new SendThrottle(INTERVAL);
+    const timestamps: number[] = [];
+
+    throttle.enqueue(async () => { timestamps.push(Date.now()); });
+    throttle.enqueue(async () => { timestamps.push(Date.now()); });
+    throttle.enqueue(async () => { timestamps.push(Date.now()); });
+
+    await drain(throttle);
+
+    assert.equal(timestamps.length, 3);
+    // Each subsequent send should be >= INTERVAL after the previous one.
+    for (let i = 1; i < timestamps.length; i++) {
+      const gap = timestamps[i] - timestamps[i - 1];
+      assert.ok(gap >= INTERVAL - 5, `gap between send ${i - 1} and ${i} was ${gap}ms, expected >= ${INTERVAL}ms`);
+    }
+  });
+
+  it("preserves execution order", async () => {
+    const throttle = new SendThrottle(INTERVAL);
+    const order: number[] = [];
+
+    for (let i = 0; i < 5; i++) {
+      const n = i;
+      throttle.enqueue(async () => { order.push(n); });
+    }
+
+    await drain(throttle);
+    assert.deepStrictEqual(order, [0, 1, 2, 3, 4]);
+  });
+
+  it("calls onError and continues after a failure", async () => {
+    const errors: string[] = [];
+    const throttle = new SendThrottle(INTERVAL, (err) => { errors.push(err.message); });
+    const results: string[] = [];
+
+    throttle.enqueue(async () => { results.push("ok"); });
+    throttle.enqueue(() => Promise.reject(new Error("boom")));
+    throttle.enqueue(async () => { results.push("recovered"); });
+
+    await drain(throttle);
+
+    assert.deepStrictEqual(results, ["ok", "recovered"]);
+    assert.deepStrictEqual(errors, ["boom"]);
+  });
+
+  it("skips delay when enough time has already passed", async () => {
+    const throttle = new SendThrottle(INTERVAL);
+    throttle.enqueue(() => Promise.resolve());
+    await drain(throttle);
+
+    // Wait longer than the interval
+    await new Promise((r) => setTimeout(r, INTERVAL + 50));
+
+    let executedAt = 0;
+    const enqueuedAt = Date.now();
+    throttle.enqueue(async () => { executedAt = Date.now(); });
+    await drain(throttle);
+    const delay = executedAt - enqueuedAt;
+    assert.ok(delay < INTERVAL, `should not have delayed, took ${delay}ms`);
   });
 });
