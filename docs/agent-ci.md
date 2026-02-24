@@ -1,3 +1,10 @@
+---
+summary: Deterministic CI lanes for `pikachat agent` providers and how to reproduce them
+read_when:
+  - changing provider CI gating in `.github/workflows/pre-merge.yml`
+  - debugging `check-agent-contracts` or `check-workers` failures
+---
+
 # Agent Provider CI Lanes
 
 This document defines deterministic CI coverage for `pikachat agent new` providers.
