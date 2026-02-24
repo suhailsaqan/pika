@@ -5,7 +5,7 @@ use std::time::Duration;
 
 const DEFAULT_CREATE_VM_TIMEOUT_SECS: u64 = 60;
 const MIN_CREATE_VM_TIMEOUT_SECS: u64 = 10;
-const DELETE_VM_TIMEOUT: Duration = Duration::from_secs(10);
+const DELETE_VM_TIMEOUT: Duration = Duration::from_secs(30);
 
 #[derive(Debug, Clone)]
 pub struct MicrovmSpawnerClient {

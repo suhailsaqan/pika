@@ -717,24 +717,37 @@ cli-smoke:
 cli-smoke-media:
     ./tools/cli-smoke --with-media
 
-# Run `pikachat agent new` (loads FLY_API_TOKEN + ANTHROPIC_API_KEY from .env).
-agent-fly-moq RELAY_EU="wss://eu.nostr.pikachat.org" RELAY_US="wss://us-east.nostr.pikachat.org" MOQ_US="https://us-east.moq.pikachat.org/anon" MOQ_EU="https://eu.moq.pikachat.org/anon":
+# Run `pika-cli agent new` (loads FLY_API_TOKEN + ANTHROPIC_API_KEY from .env).
+agent RELAY_PRIMARY="wss://us-east.nostr.pikachat.org" RELAY_FALLBACK="wss://eu.nostr.pikachat.org":
     set -euo pipefail; \
     if [ ! -f .env ]; then \
       echo "error: missing .env in repo root"; \
       echo "hint: add FLY_API_TOKEN and ANTHROPIC_API_KEY to .env"; \
       exit 1; \
     fi; \
+    relay_args="--relay {{ RELAY_PRIMARY }}"; \
+    if [ -n "{{ RELAY_FALLBACK }}" ]; then \
+      relay_args="$relay_args --relay {{ RELAY_FALLBACK }}"; \
+    fi; \
     set -a; \
     source .env; \
     set +a; \
-    cargo run -p pika-cli -- --relay {{ RELAY_EU }} --relay {{ RELAY_US }} agent new
+    cargo run -p pika-cli -- $relay_args agent new
 
 # Run `pika-cli agent new` against local vm-spawner (loads ANTHROPIC_API_KEY from .env).
-agent-microvm RELAY_EU="wss://eu.nostr.pikachat.org" RELAY_US="wss://us-east.nostr.pikachat.org" SPAWNER_URL="http://127.0.0.1:8080" SPAWN_VARIANT="prebuilt-cow":
+agent-microvm RELAY_PRIMARY="wss://us-east.nostr.pikachat.org" RELAY_FALLBACK="" SPAWNER_URL="http://127.0.0.1:8080" SPAWN_VARIANT="prebuilt-cow":
     set -euo pipefail; \
     spawner_url="{{ SPAWNER_URL }}"; \
+    spawn_variant="{{ SPAWN_VARIANT }}"; \
     tunnel_socket="${TMPDIR:-/tmp}/pika-build-vmspawner.sock"; \
+    relay_args="--relay {{ RELAY_PRIMARY }}"; \
+    if [ -n "{{ RELAY_FALLBACK }}" ]; then \
+      relay_args="$relay_args --relay {{ RELAY_FALLBACK }}"; \
+    fi; \
+    if [ "$spawn_variant" != "prebuilt" ] && [ "$spawn_variant" != "prebuilt-cow" ]; then \
+      echo "error: SPAWN_VARIANT must be prebuilt or prebuilt-cow for MVP demo"; \
+      exit 1; \
+    fi; \
     is_local_spawner=0; \
     if [[ "$spawner_url" == "http://127.0.0.1:8080" || "$spawner_url" == "http://localhost:8080" ]]; then \
       is_local_spawner=1; \
@@ -768,7 +781,7 @@ agent-microvm RELAY_EU="wss://eu.nostr.pikachat.org" RELAY_US="wss://us-east.nos
     set -a; \
     source .env; \
     set +a; \
-    cargo run -p pika-cli -- --relay {{ RELAY_EU }} --relay {{ RELAY_US }} agent new \
+    cargo run -p pika-cli -- $relay_args agent new \
       --provider microvm \
       --spawner-url {{ SPAWNER_URL }} \
       --spawn-variant {{ SPAWN_VARIANT }}

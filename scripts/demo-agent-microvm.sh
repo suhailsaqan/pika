@@ -11,9 +11,14 @@ DEV_SHELL="${DEV_SHELL:-default}"
 CPU="${CPU:-1}"
 MEMORY_MB="${MEMORY_MB:-1024}"
 TTL_SECONDS="${TTL_SECONDS:-7200}"
-RELAY_US="${RELAY_US:-wss://us-east.nostr.pikachat.org}"
-RELAY_EU="${RELAY_EU:-wss://eu.nostr.pikachat.org}"
+RELAY_PRIMARY="${RELAY_PRIMARY:-wss://us-east.nostr.pikachat.org}"
+RELAY_FALLBACK="${RELAY_FALLBACK:-}"
 KEEP_VM="${KEEP_VM:-0}"
+
+if [[ "$SPAWN_VARIANT" != "prebuilt" && "$SPAWN_VARIANT" != "prebuilt-cow" ]]; then
+  echo "SPAWN_VARIANT must be prebuilt or prebuilt-cow for MVP demo."
+  exit 1
+fi
 
 if [[ -z "${ANTHROPIC_API_KEY:-}" ]]; then
   echo "ANTHROPIC_API_KEY is required."
@@ -29,8 +34,14 @@ fi
 
 cmd=(
   cargo run -q -p pika-cli --
-  --relay "$RELAY_US"
-  --relay "$RELAY_EU"
+  --relay "$RELAY_PRIMARY"
+)
+
+if [[ -n "$RELAY_FALLBACK" ]]; then
+  cmd+=(--relay "$RELAY_FALLBACK")
+fi
+
+cmd+=(
   agent new
   --provider microvm
   --spawner-url "$SPAWNER_URL"

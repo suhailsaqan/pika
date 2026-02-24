@@ -5,6 +5,7 @@ mod microvm_spawner;
 mod relay_util;
 
 use std::collections::HashMap;
+use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -1426,21 +1427,14 @@ mkdir -p "$STATE_DIR"
 
 PI_RUNTIME_DIR="${{PIKA_RUNTIME_ARTIFACTS_GUEST:-/opt/runtime-artifacts}}"
 PI_RUNTIME_BIN="$PI_RUNTIME_DIR/pi/bin/pi"
-PI_LEGACY_HOME="${{PIKA_PI_HOME_GUEST:-/opt/pi-home}}"
-PI_LEGACY_BIN="$PI_LEGACY_HOME/node_modules/.bin/pi"
 if [ -x "$PI_RUNTIME_BIN" ]; then
   export PATH="$PI_RUNTIME_DIR/pi/bin:$PATH"
-  if [ -z "${{PI_CMD:-}}" ]; then
-    export PI_CMD="pi --mode rpc --no-session --provider anthropic"
-  fi
-elif [ -x "$PI_LEGACY_BIN" ]; then
-  export PATH="$PI_LEGACY_HOME/node_modules/.bin:$PATH"
-  if [ -z "${{PI_CMD:-}}" ]; then
-    export PI_CMD="pi --mode rpc --no-session --provider anthropic"
-  fi
 elif [ -z "${{PI_CMD:-}}" ]; then
-  # Fallback for non-prebuilt/dev flows where the runtime artifact mount is unavailable.
-  export PI_CMD="npx --yes @mariozechner/pi-coding-agent --mode rpc --no-session --provider anthropic"
+  echo "[agent-autostart] missing pi runtime at $PI_RUNTIME_BIN" >&2
+  exit 1
+fi
+if [ -z "${{PI_CMD:-}}" ]; then
+  export PI_CMD="pi --mode rpc --no-session --provider anthropic"
 fi
 
 BRIDGE_CMD="bash /workspace/pika-agent/pi-bridge.sh"
@@ -1448,31 +1442,15 @@ if command -v python3 >/dev/null 2>&1; then
   BRIDGE_CMD="python3 /workspace/pika-agent/pi-bridge.py"
 fi
 
-if [ -n "${{PIKA_MARMOTD_BIN:-}}" ] && [ -x "${{PIKA_MARMOTD_BIN}}" ]; then
-  "${{PIKA_MARMOTD_BIN}}" init --nsec "${{NOSTR_SECRET_KEY}}" --state-dir "$STATE_DIR" >/dev/null
-  exec "${{PIKA_MARMOTD_BIN}}" daemon {} --state-dir "$STATE_DIR" --auto-accept-welcomes --exec "$BRIDGE_CMD"
+if [ -z "${{PIKA_MARMOTD_BIN:-}}" ] || [ ! -x "${{PIKA_MARMOTD_BIN}}" ]; then
+  echo "[agent-autostart] missing packaged marmotd at ${{PIKA_MARMOTD_BIN:-<unset>}}" >&2
+  exit 1
 fi
 
-PIKA_FLAKE_REF="${{PIKA_FLAKE_REF:-github:sledtools/pika}}"
-PIKA_DEV_SHELL="${{PIKA_DEV_SHELL:-default}}"
-src="/workspace/pika-agent/src"
-git_url="https://github.com/sledtools/pika.git"
-if [[ "$PIKA_FLAKE_REF" == github:* ]]; then
-  repo_ref="${{PIKA_FLAKE_REF#github:}}"
-  git_url="https://github.com/${{repo_ref}}.git"
-fi
-if [ ! -d "$src/.git" ]; then
-  rm -rf "$src"
-  git clone --depth 1 "$git_url" "$src"
-else
-  git -C "$src" fetch --depth 1 origin || true
-  git -C "$src" reset --hard origin/HEAD || true
-fi
-cd "$src"
-nix develop "$src#$PIKA_DEV_SHELL" -c cargo run -q -p marmotd -- init --nsec "${{NOSTR_SECRET_KEY}}" --state-dir "$STATE_DIR" >/dev/null
-exec nix develop "$src#$PIKA_DEV_SHELL" -c cargo run -q -p marmotd -- daemon {} --state-dir "$STATE_DIR" --auto-accept-welcomes --exec "$BRIDGE_CMD"
+"${{PIKA_MARMOTD_BIN}}" init --nsec "${{NOSTR_SECRET_KEY}}" --state-dir "$STATE_DIR" >/dev/null
+exec "${{PIKA_MARMOTD_BIN}}" daemon {} --state-dir "$STATE_DIR" --auto-accept-welcomes --exec "$BRIDGE_CMD"
     "#,
-        relay_flags, relay_flags
+        relay_flags
     );
     let relays_json = serde_json::to_string(&spawn.relays).unwrap_or_else(|_| "[]".to_string());
 
@@ -1538,7 +1516,11 @@ async fn cmd_agent_new(cli: &Cli, args: &AgentNewArgs) -> anyhow::Result<()> {
     let (keys, mdk) = open(cli)?;
     eprintln!("Your pubkey: {}", keys.public_key().to_hex());
 
-    let bot_keys = Keys::generate();
+    let bot_keys = if matches!(args.provider, AgentProviderArg::Microvm) {
+        load_or_create_microvm_bot_keys(&cli.state_dir)?
+    } else {
+        Keys::generate()
+    };
     let bot_pubkey = bot_keys.public_key();
     let bot_secret_hex = bot_keys.secret_key().to_secret_hex();
     eprintln!("Bot pubkey: {}", bot_pubkey.to_hex());
@@ -1746,6 +1728,34 @@ async fn cmd_agent_new(cli: &Cli, args: &AgentNewArgs) -> anyhow::Result<()> {
         return Err(err);
     }
     Ok(())
+}
+
+fn load_or_create_microvm_bot_keys(state_dir: &Path) -> anyhow::Result<Keys> {
+    let path = state_dir.join("agent-microvm-bot-secret.hex");
+    if let Ok(raw) = fs::read_to_string(&path) {
+        let secret = raw.trim();
+        if !secret.is_empty() {
+            return Keys::parse(secret)
+                .with_context(|| format!("parse bot key from {}", path.display()));
+        }
+    }
+
+    fs::create_dir_all(state_dir)
+        .with_context(|| format!("create state dir {}", state_dir.display()))?;
+    let keys = Keys::generate();
+    fs::write(&path, format!("{}\n", keys.secret_key().to_secret_hex()))
+        .with_context(|| format!("write bot key to {}", path.display()))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut perms = fs::metadata(&path)
+            .with_context(|| format!("stat bot key {}", path.display()))?
+            .permissions();
+        perms.set_mode(0o600);
+        fs::set_permissions(&path, perms)
+            .with_context(|| format!("chmod 600 {}", path.display()))?;
+    }
+    Ok(keys)
 }
 
 fn cmd_messages(cli: &Cli, nostr_group_id_hex: &str, limit: usize) -> anyhow::Result<()> {
