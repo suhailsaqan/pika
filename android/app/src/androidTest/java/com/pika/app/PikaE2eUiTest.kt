@@ -51,9 +51,15 @@ class PikaE2eUiTest {
         Log.d("PikaE2eUiTest", "botNpub=$botNpub")
 
         // Create + open chat via actions to avoid UI flakes.
+        // 3 attempts x 60s (same total budget as old single 180s wait).
         runOnMain { AppManager.getInstance(ctx).dispatch(AppAction.CreateChat(botNpub)) }
-        waitUntilState(180_000, ctx, "chat created") { st ->
-            st.chatList.any { !it.isGroup && it.members.any { m -> m.npub == botNpub } }
+        retryOnTimeout(
+            maxAttempts = 3,
+            beforeRetry = { runOnMain { AppManager.getInstance(ctx).dispatch(AppAction.CreateChat(botNpub)) } },
+        ) {
+            waitUntilState(60_000, ctx, "chat created") { st ->
+                st.chatList.any { !it.isGroup && it.members.any { m -> m.npub == botNpub } }
+            }
         }
         val chatId =
             runOnMain {
@@ -80,14 +86,18 @@ class PikaE2eUiTest {
             }
         }
 
-        // Wait for deterministic ack from the bot. Rely on Rust-owned state (Compose text nodes can
-        // be virtualized/offscreen in LazyColumn, causing false negatives on real devices).
-        compose.waitUntil(180_000) {
-            runOnMain {
-                AppManager.getInstance(ctx).state.currentChat?.messages?.any {
-                    it.content.trim() == expect
+        // Wait for deterministic ack from the bot. 3 attempts x 60s; re-send ping before each retry.
+        retryOnTimeout(
+            maxAttempts = 3,
+            beforeRetry = { runOnMain { AppManager.getInstance(ctx).dispatch(AppAction.SendMessage(chatId, probe, null, null)) } },
+        ) {
+            compose.waitUntil(60_000) {
+                runOnMain {
+                    AppManager.getInstance(ctx).state.currentChat?.messages?.any {
+                        it.content.trim() == expect
+                    }
+                        ?: false
                 }
-                    ?: false
             }
         }
     }
@@ -115,9 +125,15 @@ class PikaE2eUiTest {
         waitUntilState(120_000, ctx, "logged in") { it.auth is com.pika.app.rust.AuthState.LoggedIn }
 
         // Create + open chat via actions to avoid UI flakes.
+        // 3 attempts x 60s (same total budget as old single 180s wait).
         runOnMain { AppManager.getInstance(ctx).dispatch(AppAction.CreateChat(botNpub)) }
-        waitUntilState(180_000, ctx, "chat created") { st ->
-            st.chatList.any { !it.isGroup && it.members.any { m -> m.npub == botNpub } }
+        retryOnTimeout(
+            maxAttempts = 3,
+            beforeRetry = { runOnMain { AppManager.getInstance(ctx).dispatch(AppAction.CreateChat(botNpub)) } },
+        ) {
+            waitUntilState(60_000, ctx, "chat created") { st ->
+                st.chatList.any { !it.isGroup && it.members.any { m -> m.npub == botNpub } }
+            }
         }
         val chatId =
             runOnMain {
@@ -156,22 +172,18 @@ class PikaE2eUiTest {
             }
         }
 
-        // Public relays + deployed bot are nondeterministic. Allow a single retry if the bot
+        // Public relays + deployed bot are nondeterministic. Allow a retry if the bot
         // doesn't accept quickly (common when relays are flaky).
-        var attempt = 0
-        while (true) {
-            attempt += 1
-            runOnMain { AppManager.getInstance(ctx).dispatch(AppAction.StartCall(chatId)) }
-            try {
-                waitForActiveMedia(180_000)
-                break
-            } catch (e: ComposeTimeoutException) {
-                if (attempt >= 2) throw e
-                Log.d("PikaE2eUiTest", "call attempt $attempt timed out; retrying once")
+        runOnMain { AppManager.getInstance(ctx).dispatch(AppAction.StartCall(chatId)) }
+        retryOnTimeout(
+            maxAttempts = 2,
+            beforeRetry = {
                 runOnMain { AppManager.getInstance(ctx).dispatch(AppAction.EndCall) }
-                // Give Rust a moment to tear down, then retry.
                 Thread.sleep(1000)
-            }
+                runOnMain { AppManager.getInstance(ctx).dispatch(AppAction.StartCall(chatId)) }
+            },
+        ) {
+            waitForActiveMedia(180_000)
         }
 
         // End call.
@@ -182,6 +194,23 @@ class PikaE2eUiTest {
             runOnMain {
                 val call = AppManager.getInstance(ctx).state.activeCall
                 call == null || call.status is com.pika.app.rust.CallStatus.Ended
+            }
+        }
+    }
+
+    private fun retryOnTimeout(maxAttempts: Int, beforeRetry: (() -> Unit)? = null, block: () -> Unit) {
+        var attempt = 0
+        while (true) {
+            attempt++
+            try {
+                block()
+                return
+            } catch (e: Throwable) {
+                if (e !is ComposeTimeoutException && e !is AssertionError) throw e
+                if (attempt >= maxAttempts) throw e
+                Log.d("PikaE2eUiTest", "attempt $attempt timed out; retrying")
+                beforeRetry?.invoke()
+                Thread.sleep(2000)
             }
         }
     }
