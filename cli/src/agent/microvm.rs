@@ -205,16 +205,311 @@ fn microvm_bridge_script() -> &'static str {
     r#"#!/usr/bin/env python3
 import json
 import os
+import re
+import shlex
+import subprocess
 import sys
+from collections import deque
+from urllib import error as urlerror
+from urllib import request as urlrequest
 
 owner = os.environ.get("PIKA_OWNER_PUBKEY", "").strip().lower()
 relay_env = os.environ.get("PIKA_RELAY_URLS", "")
 relays = [relay.strip() for relay in relay_env.split(",") if relay.strip()]
+pi_cmd = os.environ.get("PIKA_PI_CMD", "pi -p").strip()
+pi_timeout_ms = int(os.environ.get("PIKA_PI_TIMEOUT_MS", "120000"))
+pi_history_turns = int(os.environ.get("PIKA_PI_HISTORY_TURNS", "8"))
+pi_adapter_base_url = os.environ.get("PI_ADAPTER_BASE_URL", "").strip().rstrip("/")
+pi_adapter_token = os.environ.get("PI_ADAPTER_TOKEN", "").strip()
+anthropic_api_key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
+pi_model = os.environ.get("PI_MODEL", "claude-sonnet-4-6").strip()
+agent_id = os.environ.get("PIKA_BOT_PUBKEY", "microvm-agent").strip()
+if pi_timeout_ms < 1000:
+    pi_timeout_ms = 1000
+if pi_history_turns < 0:
+    pi_history_turns = 0
+
+ANSI_RE = re.compile(r"\x1B\[[0-?]*[ -/]*[@-~]")
+seen_message_ids = deque(maxlen=256)
+history_by_group = {}
+anthropic_model_cache = None
+
+
+def strip_ansi(text):
+    return ANSI_RE.sub("", text)
 
 
 def send(cmd):
     sys.stdout.write(json.dumps(cmd) + "\n")
     sys.stdout.flush()
+
+
+def is_duplicate(message_id):
+    if not message_id:
+        return False
+    if message_id in seen_message_ids:
+        return True
+    seen_message_ids.append(message_id)
+    return False
+
+
+def history_for_group(group_id):
+    if pi_history_turns == 0:
+        return None
+    history = history_by_group.get(group_id)
+    if history is None:
+        history = deque(maxlen=pi_history_turns * 2)
+        history_by_group[group_id] = history
+    return history
+
+
+def build_prompt(group_id, user_message):
+    history = history_for_group(group_id)
+    if history is None:
+        return user_message
+    lines = ["Conversation context:"]
+    for role, content in history:
+        lines.append(f"{role}: {content}")
+    lines.append("assistant:")
+    return "\n".join(lines)
+
+
+def history_payload(group_id):
+    history = history_for_group(group_id)
+    if history is None:
+        return []
+    return [{"role": role, "content": content} for role, content in history]
+
+
+def run_local_pi(prompt):
+    if not pi_cmd:
+        return None, "PIKA_PI_CMD is empty"
+    try:
+        proc = subprocess.run(
+            shlex.split(pi_cmd),
+            input=prompt + "\n",
+            text=True,
+            capture_output=True,
+            timeout=pi_timeout_ms / 1000.0,
+            check=False,
+        )
+    except FileNotFoundError:
+        return None, f"pi command not found: {pi_cmd}"
+    except subprocess.TimeoutExpired:
+        return None, f"pi command timed out after {pi_timeout_ms}ms"
+    except Exception as exc:
+        return None, f"pi command failed: {exc}"
+
+    stdout = strip_ansi(proc.stdout or "").strip()
+    stderr = strip_ansi(proc.stderr or "").strip()
+    if proc.returncode != 0:
+        detail = stderr or stdout or f"exit code {proc.returncode}"
+        return None, f"pi command failed ({detail})"
+
+    lines = [line.strip() for line in stdout.splitlines() if line.strip()]
+    if not lines:
+        return None, "pi command returned empty output"
+    return lines[-1], None
+
+
+def extract_adapter_reply(parsed):
+    if not isinstance(parsed, dict):
+        return ""
+    direct = str(parsed.get("reply") or (parsed.get("result") or {}).get("reply") or "").strip()
+    if direct:
+        return direct
+    events = parsed.get("events")
+    if not isinstance(events, list):
+        return ""
+    for event in events:
+        if not isinstance(event, dict):
+            continue
+        for key in ("text", "delta", "reply", "message"):
+            value = event.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+        assistant = event.get("assistantMessageEvent")
+        if isinstance(assistant, dict):
+            delta = assistant.get("delta")
+            if isinstance(delta, str) and delta.strip():
+                return delta.strip()
+    return ""
+
+
+def run_pi_adapter(group_id, user_message):
+    if not pi_adapter_base_url:
+        return None, "PI_ADAPTER_BASE_URL is not set"
+    payload = {
+        "agent_id": agent_id,
+        "message": user_message,
+    }
+    history = history_payload(group_id)
+    if history:
+        payload["history"] = history
+    body = json.dumps(payload).encode("utf-8")
+    headers = {"content-type": "application/json; charset=utf-8"}
+    if pi_adapter_token:
+        headers["authorization"] = f"Bearer {pi_adapter_token}"
+    req = urlrequest.Request(
+        f"{pi_adapter_base_url}/reply",
+        data=body,
+        headers=headers,
+        method="POST",
+    )
+    try:
+        with urlrequest.urlopen(req, timeout=pi_timeout_ms / 1000.0) as resp:
+            text = resp.read().decode("utf-8", errors="replace")
+    except urlerror.HTTPError as exc:
+        err_body = exc.read().decode("utf-8", errors="replace")
+        return None, f"pi-adapter HTTP {exc.code}: {err_body[:300]}"
+    except Exception as exc:
+        return None, f"pi-adapter request failed: {exc}"
+
+    try:
+        parsed = json.loads(text)
+    except json.JSONDecodeError:
+        return None, "pi-adapter returned invalid JSON"
+    reply = extract_adapter_reply(parsed)
+    if not reply:
+        return None, "pi-adapter returned empty reply"
+    return reply, None
+
+
+def run_anthropic(prompt):
+    if not anthropic_api_key:
+        return None, "ANTHROPIC_API_KEY is not set"
+    def anthropic_headers():
+        return {
+            "content-type": "application/json",
+            "x-api-key": anthropic_api_key,
+            "anthropic-version": "2023-06-01",
+        }
+
+    def call_model(model_id):
+        body = json.dumps(
+            {
+                "model": model_id,
+                "max_tokens": 512,
+                "messages": [{"role": "user", "content": prompt}],
+            }
+        ).encode("utf-8")
+        req = urlrequest.Request(
+            "https://api.anthropic.com/v1/messages",
+            data=body,
+            headers=anthropic_headers(),
+            method="POST",
+        )
+        try:
+            with urlrequest.urlopen(req, timeout=pi_timeout_ms / 1000.0) as resp:
+                text = resp.read().decode("utf-8", errors="replace")
+        except urlerror.HTTPError as exc:
+            err_body = exc.read().decode("utf-8", errors="replace")
+            retry_model = exc.code == 404 and "model" in err_body.lower()
+            return None, f"{model_id}: HTTP {exc.code}: {err_body[:300]}", retry_model
+        except Exception as exc:
+            return None, f"{model_id}: request failed: {exc}", False
+
+        try:
+            parsed = json.loads(text)
+        except json.JSONDecodeError:
+            return None, f"{model_id}: invalid JSON response", False
+        content = parsed.get("content")
+        if not isinstance(content, list):
+            return None, f"{model_id}: response missing content", False
+        for item in content:
+            if not isinstance(item, dict):
+                continue
+            if item.get("type") != "text":
+                continue
+            text_value = str(item.get("text") or "").strip()
+            if text_value:
+                return text_value, None, False
+        return None, f"{model_id}: no text output", False
+
+    global anthropic_model_cache
+
+    candidates = []
+    if pi_model:
+        candidates.append(pi_model)
+    candidates.extend(
+        [
+            "claude-sonnet-4-6",
+            "claude-sonnet-4-5-20250929",
+            "claude-sonnet-4-20250514",
+            "claude-3-haiku-20240307",
+        ]
+    )
+
+    if anthropic_model_cache is None:
+        req = urlrequest.Request(
+            "https://api.anthropic.com/v1/models",
+            headers=anthropic_headers(),
+            method="GET",
+        )
+        try:
+            with urlrequest.urlopen(req, timeout=pi_timeout_ms / 1000.0) as resp:
+                payload = json.loads(resp.read().decode("utf-8", errors="replace"))
+            models = payload.get("data")
+            if isinstance(models, list):
+                anthropic_model_cache = [
+                    str(item.get("id") or "").strip()
+                    for item in models
+                    if isinstance(item, dict) and str(item.get("id") or "").strip()
+                ]
+            else:
+                anthropic_model_cache = []
+        except Exception:
+            anthropic_model_cache = []
+    candidates.extend(anthropic_model_cache)
+
+    ordered_candidates = []
+    seen = set()
+    for model_id in candidates:
+        trimmed = str(model_id).strip()
+        if not trimmed or trimmed in seen:
+            continue
+        seen.add(trimmed)
+        ordered_candidates.append(trimmed)
+
+    last_error = "anthropic request failed"
+    for model_id in ordered_candidates:
+        reply, error_text, retry_model = call_model(model_id)
+        if reply:
+            return reply, None
+        if error_text:
+            last_error = error_text
+        if not retry_model:
+            return None, last_error
+    return None, last_error
+
+
+def generate_reply(group_id, user_message):
+    prompt = build_prompt(group_id, user_message)
+    errors = []
+
+    if pi_adapter_base_url:
+        reply, err = run_pi_adapter(group_id, user_message)
+        if reply:
+            return reply, None
+        if err:
+            errors.append(err)
+
+    reply, err = run_local_pi(prompt)
+    if reply:
+        return reply, None
+    if err:
+        errors.append(err)
+
+    if anthropic_api_key:
+        reply, err = run_anthropic(prompt)
+        if reply:
+            return reply, None
+        if err:
+            errors.append(err)
+
+    if not errors:
+        errors.append("no pi backend configured")
+    return None, "; ".join(errors)
 
 
 for raw_line in sys.stdin:
@@ -241,15 +536,29 @@ for raw_line in sys.stdin:
     if owner and sender != owner:
         continue
 
+    message_id = str(msg.get("message_id", "")).strip().lower()
+    if is_duplicate(message_id):
+        continue
+
     group_id = str(msg.get("nostr_group_id", "")).strip()
     content = str(msg.get("content", "")).strip()
     if not group_id or not content:
         continue
 
+    history = history_for_group(group_id)
+    if history is not None:
+        history.append(("user", content))
+
+    reply, err = generate_reply(group_id, content)
+    if err:
+        reply = f"[microvm] pi backend error: {err}"
+    if history is not None and reply:
+        history.append(("assistant", reply))
+
     send({
         "cmd": "send_message",
         "nostr_group_id": group_id,
-        "content": f"microvm> {content}",
+        "content": reply,
     })
 "#
 }
@@ -337,12 +646,12 @@ mod tests {
                 .expect("autostart script")
                 .contains("starting daemon")
         );
-        assert!(
-            value["guest_autostart"]["files"][AUTOSTART_BRIDGE_PATH]
-                .as_str()
-                .expect("bridge script")
-                .contains("publish_keypackage")
-        );
+        let bridge_script = value["guest_autostart"]["files"][AUTOSTART_BRIDGE_PATH]
+            .as_str()
+            .expect("bridge script");
+        assert!(bridge_script.contains("publish_keypackage"));
+        assert!(bridge_script.contains("run_pi"));
+        assert!(!bridge_script.contains("microvm> {content}"));
         let identity_text = value["guest_autostart"]["files"][AUTOSTART_IDENTITY_PATH]
             .as_str()
             .expect("identity file");
