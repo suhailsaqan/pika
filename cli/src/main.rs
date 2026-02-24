@@ -1516,7 +1516,9 @@ async fn cmd_agent_new(cli: &Cli, args: &AgentNewArgs) -> anyhow::Result<()> {
     let (keys, mdk) = open(cli)?;
     eprintln!("Your pubkey: {}", keys.public_key().to_hex());
 
-    let bot_keys = if matches!(args.provider, AgentProviderArg::Microvm) {
+    let bot_keys = if matches!(args.provider, AgentProviderArg::Microvm)
+        && microvm_reuse_bot_identity_enabled()
+    {
         load_or_create_microvm_bot_keys(&cli.state_dir)?
     } else {
         Keys::generate()
@@ -1756,6 +1758,16 @@ fn load_or_create_microvm_bot_keys(state_dir: &Path) -> anyhow::Result<Keys> {
             .with_context(|| format!("chmod 600 {}", path.display()))?;
     }
     Ok(keys)
+}
+
+fn microvm_reuse_bot_identity_enabled() -> bool {
+    match std::env::var("PIKA_MICROVM_REUSE_BOT_IDENTITY") {
+        Ok(raw) => matches!(
+            raw.trim().to_ascii_lowercase().as_str(),
+            "1" | "true" | "yes" | "on"
+        ),
+        Err(_) => false,
+    }
 }
 
 fn cmd_messages(cli: &Cli, nostr_group_id_hex: &str, limit: usize) -> anyhow::Result<()> {
