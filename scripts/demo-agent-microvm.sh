@@ -76,6 +76,25 @@ if ! spawner_reachable; then
       tail -n 120 "$TUNNEL_LOG" || true
       exit 1
     fi
+
+    # Guard against short-lived tunnels that pass one probe then drop.
+    for _ in 1 2 3 4; do
+      if ! kill -0 "$TUNNEL_PID" >/dev/null 2>&1; then
+        echo "vm-spawner tunnel exited before stabilization."
+        echo "Tunnel command: $TUNNEL_CMD"
+        echo "Tunnel log (tail):"
+        tail -n 120 "$TUNNEL_LOG" || true
+        exit 1
+      fi
+      if ! spawner_reachable; then
+        echo "vm-spawner became unreachable during tunnel stabilization."
+        echo "Tunnel command: $TUNNEL_CMD"
+        echo "Tunnel log (tail):"
+        tail -n 120 "$TUNNEL_LOG" || true
+        exit 1
+      fi
+      sleep 0.5
+    done
     echo "vm-spawner tunnel is ready."
   else
     echo "vm-spawner is unreachable at ${SPAWNER_URL}."
