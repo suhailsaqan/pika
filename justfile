@@ -45,9 +45,11 @@ info:
     @echo
     @echo "Agent demos"
     @echo "  Fly demo:"
-    @echo "    just agent"
+    @echo "    just agent-fly"
     @echo "  Cloudflare demo (deployed worker):"
     @echo "    just agent-cf"
+    @echo "  MicroVM demo:"
+    @echo "    just agent-microvm"
     @echo "  Local worker dev:"
     @echo "    just agent-workers"
     @echo
@@ -764,6 +766,20 @@ agent-fly-moq RELAY_EU="wss://eu.nostr.pikachat.org" RELAY_US="wss://us-east.nos
     source .env; \
     set +a; \
     cargo run -p pikachat -- --relay {{ RELAY_EU }} --relay {{ RELAY_US }} agent new
+
+# Run the Fly provider demo (`pikachat agent new --provider fly`).
+agent-fly RELAY_EU="wss://eu.nostr.pikachat.org" RELAY_US="wss://us-east.nostr.pikachat.org" MOQ_US="https://us-east.moq.pikachat.org/anon" MOQ_EU="https://eu.moq.pikachat.org/anon":
+    just agent-fly-moq "{{ RELAY_EU }}" "{{ RELAY_US }}" "{{ MOQ_US }}" "{{ MOQ_EU }}"
+
+# Run the MicroVM provider demo (`pikachat agent new --provider microvm --brain pi`).
+agent-microvm *ARGS="":
+    set -euo pipefail; \
+    if [ -f .env ]; then \
+      set -a; \
+      source .env; \
+      set +a; \
+    fi; \
+    ./scripts/demo-agent-microvm.sh {{ ARGS }}
 
 # Deploy the pika-bot Docker image to Fly.
 deploy-bot:
