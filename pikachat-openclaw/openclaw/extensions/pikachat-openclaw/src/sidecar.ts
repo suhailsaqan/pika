@@ -123,6 +123,43 @@ export function resolveAccountStateDir(params: {
   return path.join(stateDir, "pikachat", "accounts", sanitizePathSegment(params.accountId));
 }
 
+/**
+ * Serializes async operations with a minimum time interval between them.
+ * Used to space outbound nostr publishes at least 1 second apart so that
+ * each message gets a distinct second-level timestamp.
+ *
+ * `enqueue` resolves immediately once the operation is queued (fire-and-forget)
+ * so the caller isn't blocked while earlier sends drain.  Errors are forwarded
+ * to the `onError` callback instead of propagating to the caller.
+ */
+export class SendThrottle {
+  #lastSendAt = 0;
+  #chain: Promise<void> = Promise.resolve();
+  #minIntervalMs: number;
+  #onError: (err: Error) => void;
+
+  constructor(minIntervalMs = 1000, onError: (err: Error) => void = () => {}) {
+    this.#minIntervalMs = minIntervalMs;
+    this.#onError = onError;
+  }
+
+  enqueue(fn: () => Promise<unknown>): void {
+    this.#chain = this.#chain.then(async () => {
+      const now = Date.now();
+      const elapsed = now - this.#lastSendAt;
+      if (elapsed < this.#minIntervalMs) {
+        await new Promise((r) => setTimeout(r, this.#minIntervalMs - elapsed));
+      }
+      try {
+        await fn();
+        this.#lastSendAt = Date.now();
+      } catch (err) {
+        this.#onError(err as Error);
+      }
+    });
+  }
+}
+
 export class PikachatSidecar {
   #proc: ChildProcessWithoutNullStreams;
   #closed = false;
@@ -142,6 +179,9 @@ export class PikachatSidecar {
   #readyPromise: Promise<SidecarOutMsg & { type: "ready" }>;
   #exitResolve: (() => void) | null = null;
   #exitPromise: Promise<void>;
+  #sendThrottle = new SendThrottle(1000, (err) => {
+    getPikachatRuntime().logger?.error(`[pikachat] throttled send failed: ${err}`);
+  });
 
   constructor(params: { cmd: string; args: string[]; env?: NodeJS.ProcessEnv }) {
     this.#proc = spawn(params.cmd, params.args, {
@@ -280,11 +320,13 @@ export class PikachatSidecar {
     return await this.request({ cmd: "list_groups" } as any);
   }
 
-  async sendMessage(nostrGroupId: string, content: string): Promise<void> {
-    await this.request({ cmd: "send_message", nostr_group_id: nostrGroupId, content } as any);
+  sendMessage(nostrGroupId: string, content: string): void {
+    this.#sendThrottle.enqueue(() =>
+      this.request({ cmd: "send_message", nostr_group_id: nostrGroupId, content } as any),
+    );
   }
 
-  async sendMedia(
+  sendMedia(
     nostrGroupId: string,
     filePath: string,
     opts?: {
@@ -293,16 +335,18 @@ export class PikachatSidecar {
       caption?: string;
       blossomServers?: string[];
     },
-  ): Promise<unknown> {
-    return await this.request({
-      cmd: "send_media",
-      nostr_group_id: nostrGroupId,
-      file_path: filePath,
-      mime_type: opts?.mimeType,
-      filename: opts?.filename,
-      caption: opts?.caption,
-      blossom_servers: opts?.blossomServers,
-    } as any);
+  ): void {
+    this.#sendThrottle.enqueue(() =>
+      this.request({
+        cmd: "send_media",
+        nostr_group_id: nostrGroupId,
+        file_path: filePath,
+        mime_type: opts?.mimeType,
+        filename: opts?.filename,
+        caption: opts?.caption,
+        blossom_servers: opts?.blossomServers,
+      } as any),
+    );
   }
 
   async sendTyping(nostrGroupId: string): Promise<void> {
