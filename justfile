@@ -246,12 +246,18 @@ pre-merge-pikachat:
     cargo test -p pikachat-sidecar
     @echo "pre-merge-pikachat complete"
 
+# Deterministic provider control-plane contracts (mocked Fly + mocked MicroVM spawner).
+pre-merge-agent-contracts:
+    cargo test -p pikachat fly_machines::tests
+    cargo test -p pikachat microvm_spawner::tests
+    @echo "pre-merge-agent-contracts complete"
+
 # CI-safe pre-merge for the RMP tooling lane.
 pre-merge-rmp:
     just rmp-init-smoke-ci
     @echo "pre-merge-rmp complete"
 
-# CI-safe pre-merge for the Workers agent lane (non-blocking in CI for now).
+# CI-safe deterministic Workers provider contract lane.
 pre-merge-workers:
     set -euo pipefail; \
     SYSROOT="$(rustc --print sysroot 2>/dev/null || true)"; \
