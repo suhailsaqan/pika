@@ -823,6 +823,9 @@ impl AppCore {
         if !matches!(active.status, CallStatus::Ringing) {
             return;
         }
+        // End locally first so the UI updates and audio stops immediately.
+        // The signal to the peer is best-effort and publishes asynchronously.
+        self.end_call_local("declined".to_string());
         let payload = match build_call_signal_json(
             &active.call_id,
             OutgoingCallSignal::Reject { reason: "declined" },
@@ -836,7 +839,6 @@ impl AppCore {
         if let Err(e) = self.publish_call_signal(chat_id, payload, "Call reject publish failed") {
             self.toast(e);
         }
-        self.end_call_local("declined".to_string());
     }
 
     pub(super) fn handle_end_call_action(&mut self) {
@@ -852,6 +854,9 @@ impl AppCore {
         ) {
             return;
         }
+        // End locally first so the UI updates and audio stops immediately.
+        // The signal to the peer is best-effort and publishes asynchronously.
+        self.end_call_local("user_hangup".to_string());
         let payload = match build_call_signal_json(
             &active.call_id,
             OutgoingCallSignal::End {
@@ -869,7 +874,6 @@ impl AppCore {
         {
             self.toast(e);
         }
-        self.end_call_local("user_hangup".to_string());
     }
 
     pub(super) fn handle_toggle_mute_action(&mut self) {
