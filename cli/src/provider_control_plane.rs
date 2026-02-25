@@ -66,6 +66,8 @@ pub struct ProvisionCommand {
     pub protocol: ProtocolKind,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub runtime_class: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub relay_urls: Vec<String>,
     #[serde(default)]
@@ -96,6 +98,20 @@ pub struct GetRuntimeCommand {
     pub runtime_id: String,
 }
 
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, Default)]
+pub struct ListRuntimesCommand {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub provider: Option<ProviderKind>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub protocol: Option<ProtocolKind>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub lifecycle_phase: Option<RuntimeLifecyclePhase>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub runtime_class: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub limit: Option<usize>,
+}
+
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(tag = "command", rename_all = "snake_case")]
 pub enum AgentControlCommand {
@@ -103,6 +119,7 @@ pub enum AgentControlCommand {
     ProcessWelcome(ProcessWelcomeCommand),
     Teardown(TeardownCommand),
     GetRuntime(GetRuntimeCommand),
+    ListRuntimes(ListRuntimesCommand),
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -138,6 +155,14 @@ pub struct RuntimeDescriptor {
     pub runtime_id: String,
     pub provider: ProviderKind,
     pub lifecycle_phase: RuntimeLifecyclePhase,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub runtime_class: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub region: Option<String>,
+    #[serde(default, skip_serializing_if = "Value::is_null")]
+    pub capacity: Value,
+    #[serde(default, skip_serializing_if = "Value::is_null")]
+    pub policy_constraints: Value,
     #[serde(default)]
     pub protocol_compatibility: Vec<ProtocolKind>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -244,6 +269,7 @@ mod tests {
                 provider: ProviderKind::Workers,
                 protocol: ProtocolKind::Pi,
                 name: Some("agent".to_string()),
+                runtime_class: Some("workers-us-east".to_string()),
                 relay_urls: vec!["wss://us-east.nostr.pikachat.org".to_string()],
                 keep: false,
                 bot_secret_key_hex: None,
@@ -274,6 +300,10 @@ mod tests {
                 runtime_id: "runtime-1".to_string(),
                 provider: ProviderKind::Microvm,
                 lifecycle_phase: RuntimeLifecyclePhase::Ready,
+                runtime_class: Some("microvm-dev".to_string()),
+                region: Some("us-east".to_string()),
+                capacity: json!({"slots": 12}),
+                policy_constraints: json!({"allow_keep": true}),
                 protocol_compatibility: vec![ProtocolKind::Pi, ProtocolKind::Acp],
                 bot_pubkey: Some("ab".repeat(32)),
                 metadata: json!({"vm_id":"vm-123"}),

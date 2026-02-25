@@ -8,7 +8,7 @@ use pikachat::fly_machines::FlyClient;
 use pikachat::microvm_spawner::{CreateVmRequest, GuestAutostartRequest, MicrovmSpawnerClient};
 use pikachat::provider_control_plane::{
     AgentControlCmdEnvelope, AgentControlCommand, AgentControlErrorEnvelope,
-    AgentControlResultEnvelope, AgentControlStatusEnvelope, GetRuntimeCommand,
+    AgentControlResultEnvelope, AgentControlStatusEnvelope, GetRuntimeCommand, ListRuntimesCommand,
     MicrovmProvisionParams, ProcessWelcomeCommand, ProtocolKind, ProviderKind, ProvisionCommand,
     RuntimeDescriptor, RuntimeLifecyclePhase, TeardownCommand, CMD_SCHEMA_V1, CONTROL_CMD_KIND,
     CONTROL_ERROR_KIND, CONTROL_RESULT_KIND, CONTROL_STATUS_KIND, ERROR_SCHEMA_V1,
@@ -384,13 +384,17 @@ impl AgentControlService {
                 self.handle_get_runtime(cmd.request_id.clone(), get_runtime, statuses)
                     .await
             }
+            AgentControlCommand::ListRuntimes(list) => {
+                self.handle_list_runtimes(cmd.request_id.clone(), list, statuses)
+                    .await
+            }
         };
 
         let terminal = match (&outcome.result, &outcome.error) {
             (Some(result), None) => CachedTerminal::Result {
                 provider: result.runtime.provider,
                 runtime_id: result.runtime.runtime_id.clone(),
-                runtime: result.runtime.clone(),
+                runtime: Box::new(result.runtime.clone()),
                 payload: result.payload.clone(),
             },
             (None, Some(err)) => CachedTerminal::Error {
@@ -428,6 +432,39 @@ impl AgentControlService {
                 "protocol": protocol_name(provision.protocol),
             }),
         ));
+        if let Some(requested_class) = provision.runtime_class.as_deref() {
+            let advertised_class = runtime_profile(provision.provider)
+                .runtime_class
+                .unwrap_or_else(|| provider_name(provision.provider).to_string());
+            if requested_class != advertised_class {
+                statuses.push(AgentControlStatusEnvelope::v1(
+                    request_id.clone(),
+                    RuntimeLifecyclePhase::Failed,
+                    None,
+                    Some(provision.provider),
+                    Some("requested runtime class is not available on this server".to_string()),
+                    json!({
+                        "requested_runtime_class": requested_class,
+                        "available_runtime_class": advertised_class,
+                    }),
+                ));
+                return CommandOutcome::error(
+                    statuses,
+                    AgentControlErrorEnvelope::v1(
+                        request_id,
+                        "runtime_class_unavailable",
+                        Some(
+                            "route this command to a server that advertises the requested class"
+                                .to_string(),
+                        ),
+                        Some(format!(
+                            "requested={}, available={}",
+                            requested_class, advertised_class
+                        )),
+                    ),
+                );
+            }
+        }
 
         let runtime_id = new_runtime_id(provision.provider);
         let adapter = self.adapter_for(provision.provider);
@@ -456,11 +493,77 @@ impl AgentControlService {
                 );
             }
         };
+        if !provisioned
+            .protocol_compatibility
+            .contains(&provision.protocol)
+        {
+            statuses.push(AgentControlStatusEnvelope::v1(
+                request_id.clone(),
+                RuntimeLifecyclePhase::Failed,
+                Some(runtime_id),
+                Some(provision.provider),
+                Some("requested protocol is not supported by runtime".to_string()),
+                json!({
+                    "requested_protocol": protocol_name(provision.protocol),
+                }),
+            ));
+            return CommandOutcome::error(
+                statuses,
+                AgentControlErrorEnvelope::v1(
+                    request_id,
+                    "unsupported_protocol",
+                    Some("choose a compatible runtime protocol".to_string()),
+                    Some(format!(
+                        "requested={}, compatibility={:?}",
+                        protocol_name(provision.protocol),
+                        provisioned.protocol_compatibility
+                    )),
+                ),
+            );
+        }
+        if let Some(requested_class) = provision.runtime_class.as_deref() {
+            if provisioned.runtime_class.as_deref() != Some(requested_class) {
+                let available = provisioned
+                    .runtime_class
+                    .clone()
+                    .unwrap_or_else(|| "unknown".to_string());
+                statuses.push(AgentControlStatusEnvelope::v1(
+                    request_id.clone(),
+                    RuntimeLifecyclePhase::Failed,
+                    Some(runtime_id),
+                    Some(provision.provider),
+                    Some("requested runtime class is not available on this server".to_string()),
+                    json!({
+                        "requested_runtime_class": requested_class,
+                        "available_runtime_class": available,
+                    }),
+                ));
+                return CommandOutcome::error(
+                    statuses,
+                    AgentControlErrorEnvelope::v1(
+                        request_id,
+                        "runtime_class_unavailable",
+                        Some(
+                            "route this command to a server that advertises the requested class"
+                                .to_string(),
+                        ),
+                        Some(format!(
+                            "requested={}, available={}",
+                            requested_class, available
+                        )),
+                    ),
+                );
+            }
+        }
 
         let descriptor = RuntimeDescriptor {
             runtime_id: runtime_id.clone(),
             provider: provision.provider,
             lifecycle_phase: RuntimeLifecyclePhase::Ready,
+            runtime_class: provisioned.runtime_class.clone(),
+            region: provisioned.region.clone(),
+            capacity: provisioned.capacity.clone(),
+            policy_constraints: provisioned.policy_constraints.clone(),
             protocol_compatibility: provisioned.protocol_compatibility.clone(),
             bot_pubkey: provisioned.bot_pubkey.clone(),
             metadata: provisioned.metadata.clone(),
@@ -660,6 +763,68 @@ impl AgentControlService {
             ),
         )
     }
+
+    async fn handle_list_runtimes(
+        &self,
+        request_id: String,
+        list: ListRuntimesCommand,
+        statuses: Vec<AgentControlStatusEnvelope>,
+    ) -> CommandOutcome {
+        let runtimes: Vec<RuntimeDescriptor> = {
+            let state = self.state.read().await;
+            state
+                .runtimes
+                .values()
+                .map(|r| r.descriptor.clone())
+                .collect()
+        };
+        let mut filtered: Vec<RuntimeDescriptor> = runtimes
+            .into_iter()
+            .filter(|descriptor| {
+                if let Some(provider) = list.provider {
+                    if descriptor.provider != provider {
+                        return false;
+                    }
+                }
+                if let Some(protocol) = list.protocol {
+                    if !descriptor.protocol_compatibility.contains(&protocol) {
+                        return false;
+                    }
+                }
+                if let Some(phase) = list.lifecycle_phase {
+                    if descriptor.lifecycle_phase != phase {
+                        return false;
+                    }
+                }
+                if let Some(requested_class) = list.runtime_class.as_deref() {
+                    if descriptor.runtime_class.as_deref() != Some(requested_class) {
+                        return false;
+                    }
+                }
+                true
+            })
+            .collect();
+        filtered.sort_by(|a, b| a.runtime_id.cmp(&b.runtime_id));
+        if let Some(limit) = list.limit {
+            filtered.truncate(limit);
+        }
+        let summary = filtered
+            .first()
+            .cloned()
+            .unwrap_or_else(default_list_summary_descriptor);
+        CommandOutcome::result(
+            statuses,
+            AgentControlResultEnvelope::v1(
+                request_id,
+                summary,
+                json!({
+                    "operation":"list_runtimes",
+                    "count": filtered.len(),
+                    "runtimes": filtered,
+                }),
+            ),
+        )
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -697,7 +862,7 @@ enum CachedTerminal {
     Result {
         provider: ProviderKind,
         runtime_id: String,
-        runtime: RuntimeDescriptor,
+        runtime: Box<RuntimeDescriptor>,
         payload: Value,
     },
     Error {
@@ -732,7 +897,11 @@ impl CachedTerminal {
                 runtime, payload, ..
             } => CommandOutcome::result(
                 statuses,
-                AgentControlResultEnvelope::v1(request_id, runtime.clone(), payload.clone()),
+                AgentControlResultEnvelope::v1(
+                    request_id,
+                    runtime.as_ref().clone(),
+                    payload.clone(),
+                ),
             ),
             Self::Error { code, hint, detail } => CommandOutcome::error(
                 statuses,
@@ -775,10 +944,55 @@ impl CommandOutcome {
 }
 
 #[derive(Clone, Debug)]
+struct RuntimeProfile {
+    runtime_class: Option<String>,
+    region: Option<String>,
+    capacity: Value,
+    policy_constraints: Value,
+}
+
+fn runtime_profile(provider: ProviderKind) -> RuntimeProfile {
+    RuntimeProfile {
+        runtime_class: env_string_for_provider(provider, "PIKA_AGENT_RUNTIME_CLASS")
+            .or_else(|| Some(provider_name(provider).to_string())),
+        region: env_string_for_provider(provider, "PIKA_AGENT_RUNTIME_REGION"),
+        capacity: env_json_for_provider(provider, "PIKA_AGENT_RUNTIME_CAPACITY_JSON"),
+        policy_constraints: env_json_for_provider(provider, "PIKA_AGENT_RUNTIME_POLICY_JSON"),
+    }
+}
+
+fn env_string_for_provider(provider: ProviderKind, key: &str) -> Option<String> {
+    let provider_key = format!("{key}_{}", provider_name(provider).to_ascii_uppercase());
+    std::env::var(provider_key)
+        .ok()
+        .or_else(|| std::env::var(key).ok())
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty())
+}
+
+fn env_json_for_provider(provider: ProviderKind, key: &str) -> Value {
+    let provider_key = format!("{key}_{}", provider_name(provider).to_ascii_uppercase());
+    let raw = std::env::var(provider_key)
+        .ok()
+        .or_else(|| std::env::var(key).ok());
+    match raw {
+        Some(value) if !value.trim().is_empty() => match serde_json::from_str::<Value>(&value) {
+            Ok(parsed) => parsed,
+            Err(_) => json!({"raw": value}),
+        },
+        _ => Value::Null,
+    }
+}
+
+#[derive(Clone, Debug)]
 struct ProvisionedRuntime {
     provider_handle: ProviderHandle,
     bot_pubkey: Option<String>,
     metadata: Value,
+    runtime_class: Option<String>,
+    region: Option<String>,
+    capacity: Value,
+    policy_constraints: Value,
     protocol_compatibility: Vec<ProtocolKind>,
 }
 
@@ -811,6 +1025,7 @@ impl ProviderAdapter for FlyAdapter {
         _owner_pubkey: PublicKey,
         provision: &ProvisionCommand,
     ) -> anyhow::Result<ProvisionedRuntime> {
+        let profile = runtime_profile(ProviderKind::Fly);
         let fly = FlyClient::from_env()?;
         let anthropic_key =
             std::env::var("ANTHROPIC_API_KEY").context("ANTHROPIC_API_KEY must be set")?;
@@ -858,7 +1073,13 @@ impl ProviderAdapter for FlyAdapter {
                 "machine_id": machine.id,
                 "volume_id": volume.id,
                 "app_name": fly.app_name(),
+                "runtime_class": profile.runtime_class.clone(),
+                "region": profile.region.clone(),
             }),
+            runtime_class: profile.runtime_class,
+            region: profile.region,
+            capacity: profile.capacity,
+            policy_constraints: profile.policy_constraints,
             protocol_compatibility: vec![ProtocolKind::Pi],
         })
     }
@@ -903,6 +1124,7 @@ impl ProviderAdapter for WorkersAdapter {
         _owner_pubkey: PublicKey,
         provision: &ProvisionCommand,
     ) -> anyhow::Result<ProvisionedRuntime> {
+        let profile = runtime_profile(ProviderKind::Workers);
         let workers = WorkersClient::from_env()?;
         let bot_keys = if let Some(secret) = provision.bot_secret_key_hex.as_deref() {
             Keys::parse(secret).context("parse bot_secret_key_hex")?
@@ -957,7 +1179,13 @@ impl ProviderAdapter for WorkersAdapter {
                 "agent_id": status.id,
                 "workers_base_url": workers.base_url(),
                 "key_package_published_at_ms": status.key_package_published_at_ms,
+                "runtime_class": profile.runtime_class.clone(),
+                "region": profile.region.clone(),
             }),
+            runtime_class: profile.runtime_class,
+            region: profile.region,
+            capacity: profile.capacity,
+            policy_constraints: profile.policy_constraints,
             protocol_compatibility: vec![ProtocolKind::Pi, ProtocolKind::Acp],
         })
     }
@@ -1013,6 +1241,7 @@ impl ProviderAdapter for MicrovmAdapter {
         owner_pubkey: PublicKey,
         provision: &ProvisionCommand,
     ) -> anyhow::Result<ProvisionedRuntime> {
+        let profile = runtime_profile(ProviderKind::Microvm);
         let params = provision.microvm.clone().unwrap_or_default();
         let resolved = resolve_microvm_params(&params, provision.keep);
         let relay_urls = if provision.relay_urls.is_empty() {
@@ -1079,7 +1308,13 @@ impl ProviderAdapter for MicrovmAdapter {
                 "vm_ip": vm.ip,
                 "spawner_url": resolved.spawner_url,
                 "keep": resolved.keep,
+                "runtime_class": profile.runtime_class.clone(),
+                "region": profile.region.clone(),
             }),
+            runtime_class: profile.runtime_class,
+            region: profile.region,
+            capacity: profile.capacity,
+            policy_constraints: profile.policy_constraints,
             protocol_compatibility: vec![ProtocolKind::Pi, ProtocolKind::Acp],
         })
     }
@@ -1175,6 +1410,21 @@ fn default_relay_urls() -> Vec<String> {
         "wss://us-east.nostr.pikachat.org".to_string(),
         "wss://eu.nostr.pikachat.org".to_string(),
     ]
+}
+
+fn default_list_summary_descriptor() -> RuntimeDescriptor {
+    RuntimeDescriptor {
+        runtime_id: "runtime-list-summary".to_string(),
+        provider: ProviderKind::Fly,
+        lifecycle_phase: RuntimeLifecyclePhase::Ready,
+        runtime_class: None,
+        region: None,
+        capacity: Value::Null,
+        policy_constraints: Value::Null,
+        protocol_compatibility: vec![],
+        bot_pubkey: None,
+        metadata: json!({"summary": true}),
+    }
 }
 
 fn provider_name(provider: ProviderKind) -> &'static str {
@@ -1390,6 +1640,10 @@ mod tests {
                 },
                 bot_pubkey: Some("ab".repeat(32)),
                 metadata: json!({"runtime_id": runtime_id, "mock": true}),
+                runtime_class: Some("mock".to_string()),
+                region: Some("local".to_string()),
+                capacity: json!({"slots": 1}),
+                policy_constraints: json!({"allow_keep": true}),
                 protocol_compatibility: vec![ProtocolKind::Pi],
             })
         }
@@ -1407,13 +1661,21 @@ mod tests {
         }
     }
 
-    fn request(command: AgentControlCommand) -> AgentControlCmdEnvelope {
+    fn request_with(
+        request_id: &str,
+        idempotency_key: &str,
+        command: AgentControlCommand,
+    ) -> AgentControlCmdEnvelope {
         AgentControlCmdEnvelope::v1(
-            "req-1".to_string(),
-            "idem-1".to_string(),
+            request_id.to_string(),
+            idempotency_key.to_string(),
             command,
             AuthContext::default(),
         )
+    }
+
+    fn request(command: AgentControlCommand) -> AgentControlCmdEnvelope {
+        request_with("req-1", "idem-1", command)
     }
 
     #[tokio::test]
@@ -1433,6 +1695,7 @@ mod tests {
                     provider: ProviderKind::Fly,
                     protocol: ProtocolKind::Pi,
                     name: None,
+                    runtime_class: None,
                     relay_urls: vec![],
                     keep: false,
                     bot_secret_key_hex: None,
@@ -1451,6 +1714,7 @@ mod tests {
                     provider: ProviderKind::Fly,
                     protocol: ProtocolKind::Pi,
                     name: None,
+                    runtime_class: None,
                     relay_urls: vec![],
                     keep: false,
                     bot_secret_key_hex: None,
@@ -1486,5 +1750,104 @@ mod tests {
         assert!(out.result.is_none());
         let err = out.error.expect("expected not found error");
         assert_eq!(err.code, "runtime_not_found");
+    }
+
+    #[tokio::test]
+    async fn list_runtimes_supports_filters() {
+        let calls = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let adapter = std::sync::Arc::new(MockAdapter {
+            calls: calls.clone(),
+        });
+        let service = AgentControlService::with_adapters(adapter.clone(), adapter.clone(), adapter);
+        let requester = Keys::generate().public_key();
+
+        for (req_id, idem, provider) in [
+            ("req-1", "idem-1", ProviderKind::Fly),
+            ("req-2", "idem-2", ProviderKind::Workers),
+        ] {
+            let out = service
+                .handle_command(
+                    &requester.to_hex(),
+                    requester,
+                    request_with(
+                        req_id,
+                        idem,
+                        AgentControlCommand::Provision(ProvisionCommand {
+                            provider,
+                            protocol: ProtocolKind::Pi,
+                            name: None,
+                            runtime_class: None,
+                            relay_urls: vec![],
+                            keep: false,
+                            bot_secret_key_hex: None,
+                            microvm: None,
+                        }),
+                    ),
+                )
+                .await;
+            assert!(out.result.is_some());
+        }
+
+        let out = service
+            .handle_command(
+                &requester.to_hex(),
+                requester,
+                request_with(
+                    "req-list",
+                    "idem-list",
+                    AgentControlCommand::ListRuntimes(ListRuntimesCommand {
+                        provider: Some(ProviderKind::Workers),
+                        protocol: Some(ProtocolKind::Pi),
+                        lifecycle_phase: Some(RuntimeLifecyclePhase::Ready),
+                        runtime_class: Some("mock".to_string()),
+                        limit: Some(10),
+                    }),
+                ),
+            )
+            .await;
+        let result = out.result.expect("list result");
+        let runtimes = result
+            .payload
+            .get("runtimes")
+            .and_then(Value::as_array)
+            .cloned()
+            .expect("runtimes array");
+        assert_eq!(runtimes.len(), 1);
+        let provider = runtimes[0]
+            .get("provider")
+            .and_then(Value::as_str)
+            .unwrap_or("");
+        assert_eq!(provider, "workers");
+    }
+
+    #[tokio::test]
+    async fn runtime_class_mismatch_fails_before_provision() {
+        let calls = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let adapter = std::sync::Arc::new(MockAdapter {
+            calls: calls.clone(),
+        });
+        let service = AgentControlService::with_adapters(adapter.clone(), adapter.clone(), adapter);
+        let requester = Keys::generate().public_key();
+
+        let out = service
+            .handle_command(
+                &requester.to_hex(),
+                requester,
+                request(AgentControlCommand::Provision(ProvisionCommand {
+                    provider: ProviderKind::Fly,
+                    protocol: ProtocolKind::Pi,
+                    name: None,
+                    runtime_class: Some("not-fly".to_string()),
+                    relay_urls: vec![],
+                    keep: false,
+                    bot_secret_key_hex: None,
+                    microvm: None,
+                })),
+            )
+            .await;
+        assert!(out.result.is_none());
+        let err = out.error.expect("runtime class mismatch");
+        assert_eq!(err.code, "runtime_class_unavailable");
+        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 0);
     }
 }
