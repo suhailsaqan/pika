@@ -69,6 +69,18 @@ enum InCmd {
         nostr_group_id: String,
         content: String,
     },
+    SendHypernote {
+        #[serde(default)]
+        request_id: Option<String>,
+        nostr_group_id: String,
+        content: String,
+        #[serde(default)]
+        actions: Option<String>,
+        #[serde(default)]
+        title: Option<String>,
+        #[serde(default)]
+        state: Option<String>,
+    },
     SendMedia {
         #[serde(default)]
         request_id: Option<String>,
@@ -2674,6 +2686,41 @@ pub async fn daemon_main(
                         };
                         let rumor = EventBuilder::new(Kind::ChatMessage, content).build(keys.public_key());
                         match sign_and_publish(&client, &relay_urls, &mdk, &keys, &mls_group_id, rumor, "daemon_send").await {
+                            Ok(ev) => {
+                                let _ = out_tx.send(out_ok(request_id, Some(json!({"event_id": ev.id.to_hex()}))));
+                            }
+                            Err(e) => {
+                                let _ = out_tx.send(out_error(request_id, "publish_failed", format!("{e:#}")));
+                            }
+                        }
+                    }
+                    InCmd::SendHypernote {
+                        request_id,
+                        nostr_group_id,
+                        content,
+                        actions,
+                        title,
+                        state,
+                    } => {
+                        let mls_group_id = match resolve_group(&mdk, &nostr_group_id) {
+                            Ok(id) => id,
+                            Err(e) => {
+                                out_tx.send(out_error(request_id, "bad_group_id", format!("{e:#}"))).ok();
+                                continue;
+                            }
+                        };
+                        let mut tags = Vec::new();
+                        if let Some(ref a) = actions {
+                            tags.push(Tag::custom(TagKind::custom("actions"), vec![a.clone()]));
+                        }
+                        if let Some(ref t) = title {
+                            tags.push(Tag::custom(TagKind::custom("title"), vec![t.clone()]));
+                        }
+                        if let Some(ref s) = state {
+                            tags.push(Tag::custom(TagKind::custom("state"), vec![s.clone()]));
+                        }
+                        let rumor = EventBuilder::new(Kind::Custom(9467), content).tags(tags).build(keys.public_key());
+                        match sign_and_publish(&client, &relay_urls, &mdk, &keys, &mls_group_id, rumor, "daemon_send_hypernote").await {
                             Ok(ev) => {
                                 let _ = out_tx.send(out_ok(request_id, Some(json!({"event_id": ev.id.to_hex()}))));
                             }

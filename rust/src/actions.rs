@@ -118,6 +118,14 @@ pub enum AppAction {
         name: String,
     },
 
+    // Hypernote
+    HypernoteAction {
+        chat_id: String,
+        message_id: String,
+        action_name: String,
+        form_json: String,
+    },
+
     // Chat management
     ArchiveChat {
         chat_id: String,
@@ -209,6 +217,9 @@ impl AppAction {
             AppAction::RemoveGroupMembers { .. } => "RemoveGroupMembers",
             AppAction::LeaveGroup { .. } => "LeaveGroup",
             AppAction::RenameGroup { .. } => "RenameGroup",
+
+            // Hypernote
+            AppAction::HypernoteAction { .. } => "HypernoteAction",
 
             // Chat management
             AppAction::ArchiveChat { .. } => "ArchiveChat",

@@ -295,11 +295,11 @@ impl AppCore {
                 .unwrap_or_default();
             let batch_len = batch.len();
             storage_len += batch_len;
-            visible_messages.extend(
-                batch
-                    .into_iter()
-                    .filter(|m| m.kind == Kind::ChatMessage || m.kind == Kind::Reaction),
-            );
+            visible_messages.extend(batch.into_iter().filter(|m| {
+                m.kind == Kind::ChatMessage
+                    || m.kind == Kind::Reaction
+                    || m.kind == super::HYPERNOTE_KIND
+            }));
             if batch_len < target || visible_messages.len() >= target {
                 break;
             }
@@ -393,6 +393,33 @@ impl AppCore {
                     poll_tally: vec![],
                     my_poll_vote: None,
                     html_state: None,
+                    hypernote: if m.kind == super::HYPERNOTE_KIND {
+                        let ast_json =
+                            hypernote_mdx::serialize_tree(&hypernote_mdx::parse(&m.content));
+                        let actions = m
+                            .tags
+                            .iter()
+                            .find(|t| t.kind() == TagKind::custom("actions"))
+                            .and_then(|t| t.content().map(|s| s.to_string()));
+                        let title = m
+                            .tags
+                            .iter()
+                            .find(|t| t.kind() == TagKind::custom("title"))
+                            .and_then(|t| t.content().map(|s| s.to_string()));
+                        let default_state = m
+                            .tags
+                            .iter()
+                            .find(|t| t.kind() == TagKind::custom("state"))
+                            .and_then(|t| t.content().map(|s| s.to_string()));
+                        Some(crate::state::HypernoteData {
+                            ast_json,
+                            actions,
+                            title,
+                            default_state,
+                        })
+                    } else {
+                        None
+                    },
                 }
             })
             .collect();
@@ -406,6 +433,13 @@ impl AppCore {
                     continue;
                 }
                 if lm.timestamp < oldest_loaded_ts {
+                    continue;
+                }
+                // Skip non-visible kinds (e.g. hypernote action responses).
+                if lm.kind != Kind::ChatMessage
+                    && lm.kind != Kind::Reaction
+                    && lm.kind != super::HYPERNOTE_KIND
+                {
                     continue;
                 }
                 let delivery = self
@@ -431,6 +465,7 @@ impl AppCore {
                     poll_tally: vec![],
                     my_poll_vote: None,
                     html_state: None,
+                    hypernote: None,
                 });
             }
             msgs.sort_by(|a, b| a.timestamp.cmp(&b.timestamp).then_with(|| a.id.cmp(&b.id)));
@@ -573,6 +608,7 @@ impl AppCore {
                     poll_tally: vec![],
                     my_poll_vote: None,
                     html_state: None,
+                    hypernote: None,
                 }
             })
             .collect();
@@ -863,6 +899,7 @@ mod tests {
             poll_tally: vec![],
             my_poll_vote: None,
             html_state: None,
+            hypernote: None,
         }
     }
 

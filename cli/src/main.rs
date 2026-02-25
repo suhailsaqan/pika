@@ -203,6 +203,48 @@ server, and --content becomes the caption (optional).")]
         blossom_servers: Vec<String>,
     },
 
+    /// Send a hypernote (MDX content with optional interactive components) to a group or peer
+    #[command(after_help = "Examples:
+  pikachat send-hypernote --group <hex-group-id> --content '# Hello\\n\\n<Card><Heading>Test</Heading></Card>'
+  pikachat send-hypernote --to <npub> --file note.hnmd
+  pikachat send-hypernote --group <hex-group-id> --content '<SubmitButton action=\"vote\">Vote</SubmitButton>' --actions '{\"vote\":{\"kind\":1,\"content\":\"\"}}'
+
+A .hnmd file can include a JSON frontmatter block with title and actions:
+
+  ```hnmd
+  {\"title\": \"My Note\", \"actions\": {\"vote\": {\"kind\": 7}}}
+  ```
+  # Content starts here")]
+    SendHypernote {
+        /// Nostr group ID (hex) — send directly to this group
+        #[arg(long, conflicts_with = "to")]
+        group: Option<String>,
+
+        /// Peer public key (npub or hex) — find or create a 1:1 DM with this peer
+        #[arg(long, conflicts_with = "group")]
+        to: Option<String>,
+
+        /// Hypernote MDX content (mutually exclusive with --file)
+        #[arg(long, conflicts_with = "file")]
+        content: Option<String>,
+
+        /// Path to a .hnmd file (mutually exclusive with --content)
+        #[arg(long, conflicts_with = "content")]
+        file: Option<std::path::PathBuf>,
+
+        /// JSON-encoded actions map (action_name -> ActionDef)
+        #[arg(long)]
+        actions: Option<String>,
+
+        /// Hypernote title
+        #[arg(long)]
+        title: Option<String>,
+
+        /// JSON-encoded default state for interactive components
+        #[arg(long)]
+        state: Option<String>,
+    },
+
     /// Download and decrypt a media attachment from a message
     #[command(after_help = "Examples:
   pikachat download-media <message-id>
@@ -551,6 +593,33 @@ async fn main() -> anyhow::Result<()> {
                 mime_type.as_deref(),
                 filename.as_deref(),
                 blossom_servers,
+            )
+            .await
+        }
+        Command::SendHypernote {
+            group,
+            to,
+            content,
+            file,
+            actions,
+            title,
+            state,
+        } => {
+            let (content, file_actions, file_title, file_state): HnmdParts = match (&content, &file)
+            {
+                (Some(c), None) => (c.clone(), None, None, None),
+                (None, Some(path)) => parse_hnmd_file(path)?,
+                (None, None) => anyhow::bail!("either --content or --file is required"),
+                _ => unreachable!(), // conflicts_with prevents this
+            };
+            cmd_send_hypernote(
+                &cli,
+                group.as_deref(),
+                to.as_deref(),
+                &content,
+                actions.as_deref().or(file_actions.as_deref()),
+                title.as_deref().or(file_title.as_deref()),
+                state.as_deref().or(file_state.as_deref()),
             )
             .await
         }
@@ -1328,6 +1397,158 @@ async fn cmd_send(
         out["media"] = mj;
     }
     print(out);
+    Ok(())
+}
+
+/// (content, actions, title, state)
+type HnmdParts = (String, Option<String>, Option<String>, Option<String>);
+
+/// Parse a `.hnmd` file into (content, actions, title, state).
+///
+/// The file may optionally start with a JSON frontmatter block:
+/// ````
+/// ```hnmd
+/// {"title": "...", "actions": {...}, "state": {...}}
+/// ```
+/// # MDX content here
+/// ````
+fn parse_hnmd_file(path: &std::path::Path) -> anyhow::Result<HnmdParts> {
+    let raw =
+        std::fs::read_to_string(path).with_context(|| format!("read file: {}", path.display()))?;
+
+    let trimmed = raw.trim_start();
+
+    // Check for ```hnmd frontmatter block.
+    if let Some(after_open) = trimmed.strip_prefix("```hnmd") {
+        let after_open = after_open.strip_prefix('\n').unwrap_or(after_open);
+        if let Some(close_pos) = after_open.find("\n```") {
+            let json_str = &after_open[..close_pos];
+            let body = after_open[close_pos + 4..].trim_start_matches('\n');
+
+            let meta: serde_json::Value = serde_json::from_str(json_str)
+                .with_context(|| "invalid JSON in ```hnmd frontmatter")?;
+
+            let title = meta.get("title").and_then(|v| v.as_str()).map(String::from);
+            let actions = meta.get("actions").map(|v| v.to_string());
+            let state = meta.get("state").map(|v| v.to_string());
+
+            return Ok((body.to_string(), actions, title, state));
+        }
+        anyhow::bail!("unclosed ```hnmd frontmatter block in {}", path.display());
+    }
+
+    // No frontmatter — entire file is content.
+    Ok((raw, None, None, None))
+}
+
+async fn cmd_send_hypernote(
+    cli: &Cli,
+    group_hex: Option<&str>,
+    to_str: Option<&str>,
+    content: &str,
+    actions: Option<&str>,
+    title: Option<&str>,
+    state: Option<&str>,
+) -> anyhow::Result<()> {
+    if group_hex.is_none() && to_str.is_none() {
+        anyhow::bail!(
+            "either --group or --to is required.\n\
+             Use --group <HEX> to send to a known group, or --to <NPUB> to send to a peer."
+        );
+    }
+    if content.is_empty() {
+        anyhow::bail!("--content is required");
+    }
+
+    let (keys, mdk) = open(cli)?;
+    let mut seen_mls_event_ids = load_processed_mls_event_ids(&cli.state_dir);
+    let relays = relay_util::parse_relay_urls(&resolve_relays(cli))?;
+
+    // Resolve target group (reuse the same logic as cmd_send for --group / --to).
+    let (group, client) = match (group_hex, to_str) {
+        (Some(gid), _) => {
+            let group = find_group(&mdk, gid)?;
+            let c = client(cli, &keys).await?;
+            (group, c)
+        }
+        (_, Some(peer_str)) => {
+            let peer_pubkey = PublicKey::parse(peer_str.trim())
+                .with_context(|| format!("parse peer key: {peer_str}"))?;
+            let my_pubkey = keys.public_key();
+            let groups = mdk.get_groups().context("get groups")?;
+            let found = groups.into_iter().find(|g| {
+                let members = mdk.get_members(&g.mls_group_id).unwrap_or_default();
+                let others: Vec<_> = members.iter().filter(|p| *p != &my_pubkey).collect();
+                others.len() == 1 && *others[0] == peer_pubkey
+            });
+            if let Some(group) = found {
+                let c = client(cli, &keys).await?;
+                (group, c)
+            } else {
+                let c = client_all(cli, &keys).await?;
+                let kp_relays = relay_util::parse_relay_urls(&resolve_kp_relays(cli))?;
+                let peer_kp = relay_util::fetch_latest_key_package(
+                    &c,
+                    &peer_pubkey,
+                    &kp_relays,
+                    Duration::from_secs(10),
+                )
+                .await
+                .context("fetch peer key package — has the peer run `pikachat init`?")?;
+                let config = NostrGroupConfigData::new(
+                    "DM".to_string(),
+                    String::new(),
+                    None,
+                    None,
+                    None,
+                    relays.clone(),
+                    vec![my_pubkey, peer_pubkey],
+                );
+                let result = mdk
+                    .create_group(&my_pubkey, vec![peer_kp], config)
+                    .context("create group")?;
+                for rumor in result.welcome_rumors {
+                    let giftwrap = EventBuilder::gift_wrap(&keys, &peer_pubkey, rumor, [])
+                        .await
+                        .context("build giftwrap")?;
+                    relay_util::publish_and_confirm(&c, &relays, &giftwrap, "welcome").await?;
+                }
+                (result.group, c)
+            }
+        }
+        _ => unreachable!(),
+    };
+
+    let ngid = hex::encode(group.nostr_group_id);
+    ingest_group_backlog(&mdk, &client, &relays, &ngid, &mut seen_mls_event_ids).await?;
+
+    // Build tags.
+    let mut tags: Vec<Tag> = Vec::new();
+    if let Some(a) = actions {
+        tags.push(Tag::custom(TagKind::custom("actions"), vec![a.to_string()]));
+    }
+    if let Some(t) = title {
+        tags.push(Tag::custom(TagKind::custom("title"), vec![t.to_string()]));
+    }
+    if let Some(s) = state {
+        tags.push(Tag::custom(TagKind::custom("state"), vec![s.to_string()]));
+    }
+
+    // Build and send MLS message with hypernote kind.
+    let rumor = EventBuilder::new(Kind::Custom(9467), content)
+        .tags(tags)
+        .build(keys.public_key());
+    let msg_event = mdk
+        .create_message(&group.mls_group_id, rumor)
+        .context("create message")?;
+    relay_util::publish_and_confirm(&client, &relays, &msg_event, "send_hypernote").await?;
+    client.shutdown().await;
+    persist_processed_mls_event_ids(&cli.state_dir, &seen_mls_event_ids)?;
+
+    print(json!({
+        "event_id": msg_event.id.to_hex(),
+        "nostr_group_id": ngid,
+    }));
     Ok(())
 }
 

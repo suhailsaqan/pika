@@ -288,6 +288,14 @@ pub struct PollTally {
 }
 
 #[derive(uniffi::Record, Clone, Debug)]
+pub struct HypernoteData {
+    pub ast_json: String,
+    pub actions: Option<String>,
+    pub title: Option<String>,
+    pub default_state: Option<String>,
+}
+
+#[derive(uniffi::Record, Clone, Debug)]
 pub struct ChatMessage {
     pub id: String,
     pub sender_pubkey: String,
@@ -304,6 +312,7 @@ pub struct ChatMessage {
     pub poll_tally: Vec<PollTally>,
     pub my_poll_vote: Option<String>,
     pub html_state: Option<String>,
+    pub hypernote: Option<HypernoteData>,
 }
 
 #[derive(uniffi::Record, Clone, Debug)]

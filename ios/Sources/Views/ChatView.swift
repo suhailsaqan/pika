@@ -19,6 +19,7 @@ struct ChatView: View {
     let onTypingStarted: (@MainActor () -> Void)?
     let onDownloadMedia: (@MainActor (String, String, String) -> Void)?
     let onSendMedia: (@MainActor (String, Data, String, String, String) -> Void)?
+    let onHypernoteAction: (@MainActor (String, String, String, String) -> Void)?
     @State private var selectedPhotoItem: PhotosPickerItem?
     @State private var showFileImporter = false
     @State private var messageText = ""
@@ -57,7 +58,8 @@ struct ChatView: View {
         onReact: (@MainActor (String, String) -> Void)? = nil,
         onTypingStarted: (@MainActor () -> Void)? = nil,
         onDownloadMedia: (@MainActor (String, String, String) -> Void)? = nil,
-        onSendMedia: (@MainActor (String, Data, String, String, String) -> Void)? = nil
+        onSendMedia: (@MainActor (String, Data, String, String, String) -> Void)? = nil,
+        onHypernoteAction: (@MainActor (String, String, String, String) -> Void)? = nil
     ) {
         self.chatId = chatId
         self.state = state
@@ -73,6 +75,7 @@ struct ChatView: View {
         self.onTypingStarted = onTypingStarted
         self.onDownloadMedia = onDownloadMedia
         self.onSendMedia = onSendMedia
+        self.onHypernoteAction = onHypernoteAction
     }
 
     var body: some View {
@@ -302,6 +305,11 @@ struct ChatView: View {
                                         },
                                         onTapImage: { attachment in
                                             fullscreenImageAttachment = attachment
+                                        },
+                                        onHypernoteAction: onHypernoteAction.map { callback in
+                                            { actionName, messageId, formJson in
+                                                callback(chatId, actionName, messageId, formJson)
+                                            }
                                         }
                                     )
                                 case .callEvent(let event):

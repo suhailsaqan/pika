@@ -515,6 +515,7 @@ impl AppCore {
                         reply_to_message_id: reply_to_message_id.clone(),
                         seq,
                         media: media.clone(),
+                        kind,
                     },
                 );
 

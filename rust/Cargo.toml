@@ -41,6 +41,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "registry"] }
 uniffi = "0.31.0"
 uuid = { version = "1", features = ["v4"] }
 cpal = "0.16"
+hypernote-mdx = { workspace = true }
 
 [target.'cfg(not(target_os = "android"))'.dependencies]
 # SQLCipher without vendored OpenSSL. Apple targets use CommonCrypto; desktop targets can use

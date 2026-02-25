@@ -1326,3 +1326,232 @@ fn duplicate_group_message_does_not_duplicate_in_ui() {
     drop(general_relay);
     general_thread.join().unwrap();
 }
+
+#[test]
+fn alice_sends_hypernote_bob_receives_and_parses() {
+    let (general_relay, general_thread) = start_local_relay();
+
+    let dir_a = tempdir().unwrap();
+    let dir_b = tempdir().unwrap();
+    write_config(&dir_a.path().to_string_lossy(), &general_relay.url);
+    write_config(&dir_b.path().to_string_lossy(), &general_relay.url);
+
+    let alice = FfiApp::new(dir_a.path().to_string_lossy().to_string(), String::new());
+    let bob = FfiApp::new(dir_b.path().to_string_lossy().to_string(), String::new());
+
+    #[derive(Clone)]
+    struct Collector {
+        updates: Arc<Mutex<Vec<AppUpdate>>>,
+    }
+    impl AppReconciler for Collector {
+        fn reconcile(&self, update: AppUpdate) {
+            self.updates.lock().unwrap().push(update);
+        }
+    }
+    let bob_updates = Arc::new(Mutex::new(Vec::<AppUpdate>::new()));
+    bob.listen_for_updates(Box::new(Collector {
+        updates: bob_updates.clone(),
+    }));
+
+    alice.dispatch(AppAction::CreateAccount);
+    bob.dispatch(AppAction::CreateAccount);
+
+    wait_until("alice logged in", Duration::from_secs(5), || {
+        matches!(alice.state().auth, AuthState::LoggedIn { .. })
+    });
+    wait_until("bob logged in", Duration::from_secs(5), || {
+        matches!(bob.state().auth, AuthState::LoggedIn { .. })
+    });
+
+    let (bob_npub, bob_pubkey_hex) = match bob.state().auth {
+        AuthState::LoggedIn { npub, pubkey, .. } => (npub, pubkey),
+        _ => unreachable!(),
+    };
+
+    // Wait for Bob's key package to be published.
+    let bob_pubkey = PublicKey::parse(&bob_pubkey_hex).expect("pubkey parse");
+    wait_until("bob key package published", Duration::from_secs(10), || {
+        let st = general_relay.state.lock().unwrap();
+        st.events
+            .iter()
+            .any(|e| e.kind == Kind::MlsKeyPackage && e.pubkey == bob_pubkey)
+    });
+
+    // Alice creates a DM with Bob.
+    alice.dispatch(AppAction::CreateChat {
+        peer_npub: bob_npub,
+    });
+
+    wait_until("alice chat opened", Duration::from_secs(10), || {
+        alice.state().current_chat.is_some()
+    });
+    let chat_id = alice.state().current_chat.as_ref().unwrap().chat_id.clone();
+
+    wait_until("bob has chat", Duration::from_secs(10), || {
+        bob.state().chat_list.iter().any(|c| c.chat_id == chat_id)
+    });
+
+    // Wait for Bob's relay subscription to include this group.
+    wait_until(
+        "bob subscribed to kind445 #h",
+        Duration::from_secs(10),
+        || {
+            let st = general_relay.state.lock().unwrap();
+            let bob_conn_id = st.conns.iter().find_map(|(conn_id, conn)| {
+                for filters in conn.subs.values() {
+                    for f in filters {
+                        if let Ok(v) = serde_json::to_value(f) {
+                            if v.get("#p")
+                                .and_then(|x| x.as_array())
+                                .map(|a| a.iter().any(|p| p.as_str() == Some(&bob_pubkey_hex)))
+                                .unwrap_or(false)
+                            {
+                                return Some(*conn_id);
+                            }
+                        }
+                    }
+                }
+                None
+            });
+            let Some(bob_conn_id) = bob_conn_id else {
+                return false;
+            };
+            let Some(conn) = st.conns.get(&bob_conn_id) else {
+                return false;
+            };
+            for filters in conn.subs.values() {
+                for f in filters {
+                    if let Ok(v) = serde_json::to_value(f) {
+                        let h_ok = v
+                            .get("#h")
+                            .and_then(|x| x.as_array())
+                            .map(|a| a.iter().any(|h| h.as_str() == Some(chat_id.as_str())))
+                            .unwrap_or(false);
+                        let kind_ok = v
+                            .get("kinds")
+                            .and_then(|x| x.as_array())
+                            .map(|a| a.iter().any(|k| k.as_i64() == Some(445)))
+                            .unwrap_or(false);
+                        if h_ok && kind_ok {
+                            return true;
+                        }
+                    }
+                }
+            }
+            false
+        },
+    );
+
+    // Alice sends a hypernote (kind 9467) with MDX content.
+    let hypernote_content = "# Hello from Alice\n\nThis is **bold** and *italic*.\n\n<Card>\n  <Heading>Test Card</Heading>\n  <Body>Card body text</Body>\n</Card>\n\n<SubmitButton action=\"confirm\">Confirm</SubmitButton>";
+
+    alice.dispatch(AppAction::SendMessage {
+        chat_id: chat_id.clone(),
+        content: hypernote_content.to_string(),
+        kind: Some(9467),
+        reply_to_message_id: None,
+    });
+
+    // Alice should see the message as Sent.
+    wait_until("alice hypernote sent", Duration::from_secs(10), || {
+        alice
+            .state()
+            .current_chat
+            .as_ref()
+            .and_then(|c| c.messages.iter().find(|m| m.content == hypernote_content))
+            .map(|m| matches!(m.delivery, pika_core::MessageDeliveryState::Sent))
+            .unwrap_or(false)
+    });
+
+    // Bob should see the message appear.
+    wait_until("bob chat has hypernote", Duration::from_secs(10), || {
+        bob.state()
+            .chat_list
+            .iter()
+            .find(|c| c.chat_id == chat_id)
+            .map(|c| c.unread_count > 0 || c.last_message.is_some())
+            .unwrap_or(false)
+    });
+
+    // Open the chat and validate the hypernote was parsed.
+    bob.dispatch(AppAction::OpenChat {
+        chat_id: chat_id.clone(),
+    });
+    wait_until(
+        "bob opened chat has hypernote message",
+        Duration::from_secs(10),
+        || {
+            bob.state()
+                .current_chat
+                .as_ref()
+                .and_then(|c| c.messages.iter().find(|m| m.content == hypernote_content))
+                .is_some()
+        },
+    );
+
+    let bob_state = bob.state();
+    let msg = bob_state
+        .current_chat
+        .as_ref()
+        .unwrap()
+        .messages
+        .iter()
+        .find(|m| m.content == hypernote_content)
+        .expect("hypernote message not found in Bob's chat");
+
+    // Verify the hypernote field is populated.
+    let hypernote = msg
+        .hypernote
+        .as_ref()
+        .expect("hypernote field should be Some for kind 9467 messages");
+
+    // The AST JSON should be valid JSON.
+    let ast: serde_json::Value =
+        serde_json::from_str(&hypernote.ast_json).expect("ast_json should be valid JSON");
+
+    // Root node should be type "root" with children.
+    assert_eq!(ast["type"], "root", "AST root should have type 'root'");
+    let children = ast["children"]
+        .as_array()
+        .expect("root should have children array");
+    assert!(
+        !children.is_empty(),
+        "AST should have at least one child node"
+    );
+
+    // Verify specific AST nodes were parsed:
+    // 1. First child should be a heading
+    assert_eq!(
+        children[0]["type"], "heading",
+        "first child should be a heading"
+    );
+
+    // 2. Should contain an mdx_jsx_element for Card
+    let has_card = children
+        .iter()
+        .any(|node| node["type"] == "mdx_jsx_element" && node["name"] == "Card");
+    assert!(has_card, "AST should contain a Card JSX element");
+
+    // 3. Should contain an mdx_jsx_self_closing or mdx_jsx_element for SubmitButton
+    let has_submit = children.iter().any(|node| {
+        let name = node.get("name").and_then(|n| n.as_str()).unwrap_or("");
+        name == "SubmitButton"
+    });
+    assert!(has_submit, "AST should contain a SubmitButton component");
+
+    // Verify the message is not marked as mine (Bob is the receiver).
+    assert!(!msg.is_mine, "Bob should see the message as not his");
+
+    // No actions or title tags were sent, so those should be None.
+    assert!(
+        hypernote.actions.is_none(),
+        "actions should be None when not sent"
+    );
+    assert!(
+        hypernote.title.is_none(),
+        "title should be None when not sent"
+    );
+
+    drop(general_relay);
+    general_thread.join().unwrap();
+}

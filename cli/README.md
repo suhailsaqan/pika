@@ -32,6 +32,7 @@ That's it. No relay flags needed — sensible defaults are built in.
 | `profile` | View your Nostr profile |
 | `update-profile` | Update your Nostr profile (name, picture) |
 | `send` | Send a message or media to a group or peer |
+| `send-hypernote` | Send a hypernote (MDX + interactive components) via `--content` or `--file` |
 | `download-media` | Download and decrypt a media attachment |
 | `listen` | Stream incoming messages and invitations |
 | `groups` | List groups you belong to |

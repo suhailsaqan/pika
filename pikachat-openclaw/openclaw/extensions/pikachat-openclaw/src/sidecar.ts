@@ -80,6 +80,7 @@ type SidecarInCmd =
   | { cmd: "accept_welcome"; request_id: string; wrapper_event_id: string }
   | { cmd: "list_groups"; request_id: string }
   | { cmd: "send_message"; request_id: string; nostr_group_id: string; content: string }
+  | { cmd: "send_hypernote"; request_id: string; nostr_group_id: string; content: string; actions?: string; title?: string }
   | { cmd: "send_typing"; request_id: string; nostr_group_id: string }
   | { cmd: "accept_call"; request_id: string; call_id: string }
   | { cmd: "reject_call"; request_id: string; call_id: string; reason?: string }
@@ -323,6 +324,22 @@ export class PikachatSidecar {
   sendMessage(nostrGroupId: string, content: string): void {
     this.#sendThrottle.enqueue(() =>
       this.request({ cmd: "send_message", nostr_group_id: nostrGroupId, content } as any),
+    );
+  }
+
+  sendHypernote(
+    nostrGroupId: string,
+    content: string,
+    opts?: { actions?: string; title?: string },
+  ): void {
+    this.#sendThrottle.enqueue(() =>
+      this.request({
+        cmd: "send_hypernote",
+        nostr_group_id: nostrGroupId,
+        content,
+        actions: opts?.actions,
+        title: opts?.title,
+      } as any),
     );
   }
 

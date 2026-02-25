@@ -26,3 +26,4 @@ members = [
 mdk-core = { git = "https://github.com/marmot-protocol/mdk", rev = "d9f372743625de17f6fcd81eecd5084917a8ebb1", features = ["mip04"] }
 mdk-sqlite-storage = { git = "https://github.com/marmot-protocol/mdk", rev = "d9f372743625de17f6fcd81eecd5084917a8ebb1" }
 mdk-storage-traits = { git = "https://github.com/marmot-protocol/mdk", rev = "d9f372743625de17f6fcd81eecd5084917a8ebb1" }
+hypernote-mdx = { git = "https://github.com/futurepaul/hypernote-mdx" }

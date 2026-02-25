@@ -107,6 +107,7 @@ struct MessageGroupRow: View {
     var onLongPressMessage: ((ChatMessage, CGRect) -> Void)? = nil
     var onDownloadMedia: ((String, String) -> Void)? = nil
     var onTapImage: ((ChatMediaAttachment) -> Void)? = nil
+    var onHypernoteAction: ((String, String, String) -> Void)? = nil
 
     private let avatarSize: CGFloat = 24
     private let avatarGutterWidth: CGFloat = 28
@@ -150,7 +151,8 @@ struct MessageGroupRow: View {
                     activeReactionMessageId: $activeReactionMessageId,
                     onLongPressMessage: onLongPressMessage,
                     onDownloadMedia: onDownloadMedia,
-                    onTapImage: onTapImage
+                    onTapImage: onTapImage,
+                    onHypernoteAction: onHypernoteAction
                 )
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -173,7 +175,8 @@ struct MessageGroupRow: View {
                     activeReactionMessageId: $activeReactionMessageId,
                     onLongPressMessage: onLongPressMessage,
                     onDownloadMedia: onDownloadMedia,
-                    onTapImage: onTapImage
+                    onTapImage: onTapImage,
+                    onHypernoteAction: onHypernoteAction
                 )
                 if let delivery = group.messages.last?.delivery {
                     Text(deliveryText(delivery))
@@ -206,6 +209,7 @@ private struct MessageBubbleStack: View {
     var onLongPressMessage: ((ChatMessage, CGRect) -> Void)? = nil
     var onDownloadMedia: ((String, String) -> Void)? = nil
     var onTapImage: ((ChatMediaAttachment) -> Void)? = nil
+    var onHypernoteAction: ((String, String, String) -> Void)? = nil
 
     var body: some View {
         VStack(alignment: group.isMine ? .trailing : .leading, spacing: 2) {
@@ -220,7 +224,8 @@ private struct MessageBubbleStack: View {
                     activeReactionMessageId: $activeReactionMessageId,
                     onLongPressMessage: onLongPressMessage,
                     onDownloadMedia: onDownloadMedia,
-                    onTapImage: onTapImage
+                    onTapImage: onTapImage,
+                    onHypernoteAction: onHypernoteAction
                 )
                 .id(message.id)
             }
@@ -399,6 +404,7 @@ private struct MessageBubble: View {
     var onLongPressMessage: ((ChatMessage, CGRect) -> Void)? = nil
     var onDownloadMedia: ((String, String) -> Void)? = nil
     var onTapImage: ((ChatMediaAttachment) -> Void)? = nil
+    var onHypernoteAction: ((String, String, String) -> Void)? = nil
 
     @State private var isBeingPressed = false
     @State private var bubbleFrameRef = BubbleFrameRef()
@@ -428,7 +434,18 @@ private struct MessageBubble: View {
                 .padding(.bottom, 3)
             }
 
-            if hasMedia {
+            if let hypernote = message.hypernote {
+                HypernoteRenderer(
+                    astJson: hypernote.astJson,
+                    actions: hypernote.actions,
+                    messageId: message.id,
+                    isMine: message.isMine,
+                    defaultState: hypernote.defaultState,
+                    onAction: { actionName, messageId, formJson in
+                        onHypernoteAction?(actionName, messageId, formJson)
+                    }
+                )
+            } else if hasMedia {
                 mediaBubble(segments: segments)
             } else {
                 ForEach(segments) { segment in

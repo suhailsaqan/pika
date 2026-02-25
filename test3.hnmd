@@ -1,0 +1,8 @@
+# Sprint Review
+
+<ChecklistItem name="auth">Implement auth flow</ChecklistItem>
+<ChecklistItem name="tests">Write integration tests</ChecklistItem>
+<ChecklistItem name="deploy" checked>Deploy to staging</ChecklistItem>
+<ChecklistItem name="docs">Update API docs</ChecklistItem>
+
+<SubmitButton action="save">Save Progress</SubmitButton>

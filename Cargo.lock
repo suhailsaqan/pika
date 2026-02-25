@@ -3244,6 +3244,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "hypernote-mdx"
+version = "0.1.0"
+source = "git+https://github.com/futurepaul/hypernote-mdx#05f3fe0b5a517476eded2b68728f0ce2c1c0e830"
+dependencies = [
+ "serde_json",
+]
+
+[[package]]
 name = "iana-time-zone"
 version = "0.1.65"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5950,6 +5958,7 @@ dependencies = [
  "flume",
  "futures-util",
  "hex",
+ "hypernote-mdx",
  "image 0.25.9",
  "jni",
  "keyring-core",
