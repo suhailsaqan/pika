@@ -5837,8 +5837,10 @@ name = "pika-marmot-runtime"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "hex",
  "mdk-core 0.6.0 (git+https://github.com/marmot-protocol/mdk?rev=d9f372743625de17f6fcd81eecd5084917a8ebb1)",
  "mdk-sqlite-storage",
+ "mdk-storage-traits 0.6.0 (git+https://github.com/marmot-protocol/mdk?rev=d9f372743625de17f6fcd81eecd5084917a8ebb1)",
  "nostr-sdk",
  "serde",
  "serde_json",

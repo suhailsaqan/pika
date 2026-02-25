@@ -3,8 +3,9 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 use mdk_core::MDK;
+use mdk_core::prelude::MessageProcessingResult;
 use mdk_sqlite_storage::MdkSqliteStorage;
-use nostr_sdk::prelude::{EventId, Keys};
+use nostr_sdk::prelude::{Event, EventId, Keys, Kind, PublicKey};
 use serde::{Deserialize, Serialize};
 
 pub type PikaMdk = MDK<MdkSqliteStorage>;
@@ -92,4 +93,78 @@ pub fn persist_processed_mls_event_ids(
     let path = processed_mls_event_ids_path(state_dir);
     std::fs::write(&path, body)
         .with_context(|| format!("persist processed MLS event ids to {}", path.display()))
+}
+
+#[derive(Debug, Clone)]
+pub struct IngestedWelcome {
+    pub wrapper_event_id: EventId,
+    pub welcome_event_id: EventId,
+    pub sender: PublicKey,
+    pub sender_hex: String,
+    pub nostr_group_id_hex: String,
+    pub group_name: String,
+}
+
+pub async fn ingest_welcome_from_giftwrap<F>(
+    mdk: &PikaMdk,
+    keys: &Keys,
+    event: &Event,
+    sender_allowed: F,
+) -> Result<Option<IngestedWelcome>>
+where
+    F: Fn(&str) -> bool,
+{
+    if event.kind != Kind::GiftWrap {
+        return Ok(None);
+    }
+
+    let unwrapped = nostr_sdk::nostr::nips::nip59::extract_rumor(keys, event)
+        .await
+        .context("unwrap giftwrap rumor")?;
+    if unwrapped.rumor.kind != Kind::MlsWelcome {
+        return Ok(None);
+    }
+
+    let sender_hex = unwrapped.sender.to_hex().to_lowercase();
+    if !sender_allowed(&sender_hex) {
+        return Ok(None);
+    }
+
+    let mut rumor = unwrapped.rumor;
+    mdk.process_welcome(&event.id, &rumor)
+        .context("process welcome rumor")?;
+
+    let pending = mdk
+        .get_pending_welcomes(None)
+        .context("get pending welcomes")?;
+    let stored = pending.into_iter().find(|w| w.wrapper_event_id == event.id);
+    let (nostr_group_id_hex, group_name) = match stored {
+        Some(w) => (hex::encode(w.nostr_group_id), w.group_name),
+        None => (String::new(), String::new()),
+    };
+
+    Ok(Some(IngestedWelcome {
+        wrapper_event_id: event.id,
+        welcome_event_id: rumor.id(),
+        sender: unwrapped.sender,
+        sender_hex,
+        nostr_group_id_hex,
+        group_name,
+    }))
+}
+
+pub fn ingest_application_message(
+    mdk: &PikaMdk,
+    event: &Event,
+) -> Result<Option<mdk_storage_traits::messages::types::Message>> {
+    if event.kind != Kind::MlsGroupMessage {
+        return Ok(None);
+    }
+    match mdk
+        .process_message(event)
+        .context("process group message")?
+    {
+        MessageProcessingResult::ApplicationMessage(msg) => Ok(Some(msg)),
+        _ => Ok(None),
+    }
 }

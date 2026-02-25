@@ -2100,32 +2100,19 @@ async fn cmd_listen(cli: &Cli, timeout_sec: u64, lookback_sec: u64) -> anyhow::R
 
         // Welcome.
         if subscription_id == gift_sub.val && event.kind == Kind::GiftWrap {
-            let unwrapped = match nostr_sdk::nostr::nips::nip59::extract_rumor(&keys, &event).await
-            {
-                Ok(u) => u,
-                Err(_) => continue,
-            };
-            if unwrapped.rumor.kind != Kind::MlsWelcome {
+            let Some(welcome) =
+                mdk_util::ingest_welcome_from_giftwrap(&mdk, &keys, &event, |_| true)
+                    .await
+                    .unwrap_or_default()
+            else {
                 continue;
-            }
-            let rumor = unwrapped.rumor;
-            if mdk.process_welcome(&event.id, &rumor).is_err() {
-                continue;
-            }
-            let (ngid, group_name) = match mdk.get_pending_welcomes(None) {
-                Ok(list) => list
-                    .into_iter()
-                    .find(|w| w.wrapper_event_id == event.id)
-                    .map(|w| (hex::encode(w.nostr_group_id), w.group_name))
-                    .unwrap_or_default(),
-                Err(_) => (String::new(), String::new()),
             };
             let line = json!({
                 "type": "welcome",
-                "wrapper_event_id": event.id.to_hex(),
-                "from_pubkey": unwrapped.sender.to_hex(),
-                "nostr_group_id": ngid,
-                "group_name": group_name,
+                "wrapper_event_id": welcome.wrapper_event_id.to_hex(),
+                "from_pubkey": welcome.sender.to_hex(),
+                "nostr_group_id": welcome.nostr_group_id_hex,
+                "group_name": welcome.group_name,
             });
             println!("{}", serde_json::to_string(&line).unwrap());
             continue;
@@ -2134,8 +2121,7 @@ async fn cmd_listen(cli: &Cli, timeout_sec: u64, lookback_sec: u64) -> anyhow::R
         // Group message.
         if event.kind == Kind::MlsGroupMessage
             && group_subs.contains_key(&subscription_id)
-            && let Ok(MessageProcessingResult::ApplicationMessage(msg)) =
-                mdk.process_message(&event)
+            && let Ok(Some(msg)) = mdk_util::ingest_application_message(&mdk, &event)
         {
             let Some((ngid, mls_group_id)) = group_subs.get(&subscription_id).cloned() else {
                 continue;
