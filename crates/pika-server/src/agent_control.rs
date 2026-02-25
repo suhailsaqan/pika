@@ -646,6 +646,25 @@ impl AgentControlService {
                 ),
             );
         }
+        if provision.provider == ProviderKind::Workers {
+            statuses.push(AgentControlStatusEnvelope::v1(
+                request_id.clone(),
+                RuntimeLifecyclePhase::Failed,
+                None,
+                Some(provision.provider),
+                Some("workers provider is temporarily disabled".to_string()),
+                Value::Null,
+            ));
+            return CommandOutcome::error(
+                statuses,
+                AgentControlErrorEnvelope::v1(
+                    request_id,
+                    "provider_temporarily_disabled",
+                    Some("use provider fly or microvm while workers is frozen".to_string()),
+                    Some("provider=workers".to_string()),
+                ),
+            );
+        }
         statuses.push(AgentControlStatusEnvelope::v1(
             request_id.clone(),
             RuntimeLifecyclePhase::Provisioning,
@@ -1292,7 +1311,26 @@ impl ControlStatePersistence {
         if data.trim().is_empty() {
             return Ok(ControlState::default());
         }
-        let persisted: PersistedControlState = match serde_json::from_str(&data) {
+        let mut raw: Value = match serde_json::from_str(&data) {
+            Ok(raw) => raw,
+            Err(err) => {
+                warn!(
+                    error = %err,
+                    path = %self.path.display(),
+                    "failed to decode control state; starting with empty state"
+                );
+                return Ok(ControlState::default());
+            }
+        };
+        let migrated_protocol_values = migrate_legacy_protocol_values(&mut raw);
+        if migrated_protocol_values > 0 {
+            warn!(
+                count = migrated_protocol_values,
+                path = %self.path.display(),
+                "migrated legacy protocol values to acp while loading control state"
+            );
+        }
+        let persisted: PersistedControlState = match serde_json::from_value(raw) {
             Ok(persisted) => persisted,
             Err(err) => {
                 warn!(
@@ -1336,6 +1374,69 @@ impl ControlStatePersistence {
         std::fs::rename(&tmp_path, &self.path)
             .with_context(|| format!("persist control state {}", self.path.display()))?;
         Ok(())
+    }
+}
+
+fn migrate_legacy_protocol_values(root: &mut Value) -> usize {
+    let Some(runtimes) = root.get_mut("runtimes").and_then(Value::as_object_mut) else {
+        return 0;
+    };
+    let mut migrated = 0usize;
+    for runtime in runtimes.values_mut() {
+        let Some(descriptor) = runtime.get_mut("descriptor").and_then(Value::as_object_mut) else {
+            continue;
+        };
+        migrated += migrate_legacy_descriptor_protocols(descriptor);
+    }
+    migrated
+}
+
+fn migrate_legacy_descriptor_protocols(descriptor: &mut serde_json::Map<String, Value>) -> usize {
+    let mut migrated = 0usize;
+    if let Some(protocols) = descriptor
+        .get_mut("protocol_compatibility")
+        .and_then(Value::as_array_mut)
+    {
+        for protocol in protocols.iter_mut() {
+            let Some(raw) = protocol.as_str() else {
+                continue;
+            };
+            let Some(normalized) = normalize_legacy_protocol_name(raw) else {
+                continue;
+            };
+            if raw != normalized {
+                *protocol = Value::String(normalized.to_string());
+                migrated += 1;
+            }
+        }
+        return migrated;
+    }
+
+    let Some(raw) = descriptor
+        .get("protocol")
+        .and_then(Value::as_str)
+        .map(str::to_string)
+    else {
+        return migrated;
+    };
+    let Some(normalized) = normalize_legacy_protocol_name(&raw) else {
+        return migrated;
+    };
+    descriptor.insert(
+        "protocol_compatibility".to_string(),
+        Value::Array(vec![Value::String(normalized.to_string())]),
+    );
+    if raw != normalized {
+        migrated += 1;
+    }
+    migrated
+}
+
+fn normalize_legacy_protocol_name(raw: &str) -> Option<&'static str> {
+    if raw.eq_ignore_ascii_case("acp") || raw.eq_ignore_ascii_case("pi") {
+        Some("acp")
+    } else {
+        None
     }
 }
 
@@ -2341,7 +2442,7 @@ mod tests {
 
         for (req_id, idem, provider) in [
             ("req-1", "idem-1", ProviderKind::Fly),
-            ("req-2", "idem-2", ProviderKind::Workers),
+            ("req-2", "idem-2", ProviderKind::Microvm),
         ] {
             let out = service
                 .handle_command(
@@ -2374,7 +2475,7 @@ mod tests {
                     "req-list",
                     "idem-list",
                     AgentControlCommand::ListRuntimes(ListRuntimesCommand {
-                        provider: Some(ProviderKind::Workers),
+                        provider: Some(ProviderKind::Microvm),
                         protocol: Some(ProtocolKind::Acp),
                         lifecycle_phase: Some(RuntimeLifecyclePhase::Ready),
                         runtime_class: Some("mock".to_string()),
@@ -2395,7 +2496,7 @@ mod tests {
             .get("provider")
             .and_then(Value::as_str)
             .unwrap_or("");
-        assert_eq!(provider, "workers");
+        assert_eq!(provider, "microvm");
     }
 
     #[tokio::test]
@@ -2437,7 +2538,7 @@ mod tests {
             provision_calls: provision_calls.clone(),
             teardown_calls: teardown_calls.clone(),
             runtime_class: runtime_profile(ProviderKind::Fly).runtime_class,
-            protocol_compatibility: vec![ProtocolKind::Acp],
+            protocol_compatibility: vec![],
         });
         let service = AgentControlService::with_adapters(adapter.clone(), adapter.clone(), adapter);
         let requester = Keys::generate().public_key();
@@ -2574,7 +2675,7 @@ mod tests {
                     "req-1",
                     "idem-1",
                     AgentControlCommand::Provision(ProvisionCommand {
-                        provider: ProviderKind::Workers,
+                        provider: ProviderKind::Fly,
                         protocol: ProtocolKind::Acp,
                         name: None,
                         runtime_class: None,
@@ -2617,7 +2718,7 @@ mod tests {
         let service = AgentControlService::with_adapters(adapter.clone(), adapter.clone(), adapter);
         let requester = Keys::generate().public_key();
         let cmd = request(AgentControlCommand::Provision(ProvisionCommand {
-            provider: ProviderKind::Workers,
+            provider: ProviderKind::Fly,
             protocol: ProtocolKind::Acp,
             name: None,
             runtime_class: None,
@@ -2682,6 +2783,37 @@ mod tests {
         assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 0);
         let state = service.state.read().await;
         assert!(state.idempotency.is_empty());
+    }
+
+    #[tokio::test]
+    async fn workers_provision_is_temporarily_disabled() {
+        let calls = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let adapter = std::sync::Arc::new(MockAdapter {
+            calls: calls.clone(),
+        });
+        let service = AgentControlService::with_adapters(adapter.clone(), adapter.clone(), adapter);
+        let requester = Keys::generate().public_key();
+
+        let out = service
+            .handle_command(
+                &requester.to_hex(),
+                requester,
+                request(AgentControlCommand::Provision(ProvisionCommand {
+                    provider: ProviderKind::Workers,
+                    protocol: ProtocolKind::Acp,
+                    name: None,
+                    runtime_class: None,
+                    relay_urls: vec![],
+                    keep: false,
+                    bot_secret_key_hex: None,
+                    microvm: None,
+                })),
+            )
+            .await;
+        assert!(out.result.is_none());
+        let err = out.error.expect("workers disabled error");
+        assert_eq!(err.code, "provider_temporarily_disabled");
+        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 0);
     }
 
     #[tokio::test]
@@ -2866,6 +2998,57 @@ mod tests {
                 .expect("legacy runtime")
                 .owner_pubkey_hex,
             ""
+        );
+
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn loads_legacy_runtime_state_with_pi_protocol_value() {
+        let path = unique_temp_path("pika-agent-control-state.json");
+        let runtime_id = "runtime-legacy-pi-protocol".to_string();
+        let mut state = ControlState::default();
+        state.runtimes.insert(
+            runtime_id.clone(),
+            RuntimeRecord {
+                owner_pubkey_hex: "owner".to_string(),
+                descriptor: RuntimeDescriptor {
+                    runtime_id: runtime_id.clone(),
+                    provider: ProviderKind::Fly,
+                    lifecycle_phase: RuntimeLifecyclePhase::Ready,
+                    runtime_class: Some("fly".to_string()),
+                    region: Some("local".to_string()),
+                    capacity: json!({"slots": 1}),
+                    policy_constraints: Value::Null,
+                    protocol_compatibility: vec![ProtocolKind::Acp],
+                    bot_pubkey: Some("ab".repeat(32)),
+                    metadata: Value::Null,
+                },
+                provider_handle: ProviderHandle::Fly {
+                    machine_id: "machine-1".to_string(),
+                    volume_id: "volume-1".to_string(),
+                    app_name: "app".to_string(),
+                },
+            },
+        );
+        let mut serialized =
+            serde_json::to_value(PersistedControlState::from(&state)).expect("serialize state");
+        let protocols = serialized["runtimes"][&runtime_id]["descriptor"]["protocol_compatibility"]
+            .as_array_mut()
+            .expect("protocol_compatibility array");
+        protocols[0] = json!("pi");
+        std::fs::write(
+            &path,
+            serde_json::to_vec_pretty(&serialized).expect("serialize legacy json"),
+        )
+        .expect("write legacy state");
+
+        let persistence = ControlStatePersistence::new(path.clone());
+        let loaded = persistence.load().expect("load legacy state");
+        let runtime = loaded.runtimes.get(&runtime_id).expect("legacy runtime");
+        assert_eq!(
+            runtime.descriptor.protocol_compatibility,
+            vec![ProtocolKind::Acp]
         );
 
         let _ = std::fs::remove_file(path);

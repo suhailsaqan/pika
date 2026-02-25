@@ -326,6 +326,10 @@ enum AgentCommand {
         #[arg(long, env = "PIKA_AGENT_RUNTIME_CLASS")]
         runtime_class: Option<String>,
 
+        /// Deprecated: provisioning is ACP-only; `--brain` no longer changes behavior.
+        #[arg(long, hide = true)]
+        brain: Option<String>,
+
         #[command(flatten)]
         control: AgentControlArgs,
 
@@ -591,6 +595,7 @@ async fn main() -> anyhow::Result<()> {
                 name,
                 provider,
                 runtime_class,
+                brain,
                 control,
                 microvm,
             } => {
@@ -598,6 +603,7 @@ async fn main() -> anyhow::Result<()> {
                     name: name.as_deref(),
                     provider: *provider,
                     runtime_class: runtime_class.as_deref(),
+                    brain: brain.as_deref(),
                     microvm,
                 };
                 cmd_agent_new(&cli, control, request).await
@@ -1459,7 +1465,7 @@ async fn cmd_agent_new(
     control: &AgentControlArgs,
     request: AgentNewRequest<'_>,
 ) -> anyhow::Result<()> {
-    validate_agent_new_request(request.provider, request.microvm)?;
+    validate_agent_new_request(request.provider, request.brain, request.microvm)?;
     if control.control_mode != AgentControlMode::Remote {
         anyhow::bail!("--control-mode remote is required; local provisioning has been removed");
     }
@@ -1478,13 +1484,25 @@ struct AgentNewRequest<'a> {
     name: Option<&'a str>,
     provider: AgentProvider,
     runtime_class: Option<&'a str>,
+    brain: Option<&'a str>,
     microvm: &'a AgentNewMicrovmArgs,
 }
 
 fn validate_agent_new_request(
     provider: AgentProvider,
+    brain: Option<&str>,
     microvm: &AgentNewMicrovmArgs,
 ) -> anyhow::Result<()> {
+    if provider == AgentProvider::Workers {
+        anyhow::bail!(
+            "provider 'workers' is temporarily disabled during the marmot refactor; use --provider fly or --provider microvm"
+        );
+    }
+    if let Some(value) = brain.map(str::trim).filter(|v| !v.is_empty()) {
+        anyhow::bail!(
+            "--brain is no longer supported: provisioning is ACP-only. Remove --brain (received: {value})"
+        );
+    }
     microvm.ensure_provider_compatible(provider)?;
     Ok(())
 }
@@ -2222,6 +2240,22 @@ mod tests {
         }
     }
 
+    fn validate_agent_new_args(args: &[&str]) -> anyhow::Result<()> {
+        let cli = Cli::try_parse_from(args).expect("parse args");
+        match cli.cmd {
+            Command::Agent {
+                cmd:
+                    AgentCommand::New {
+                        provider,
+                        brain,
+                        microvm,
+                        ..
+                    },
+            } => validate_agent_new_request(provider, brain.as_deref(), &microvm),
+            _ => panic!("expected agent new command"),
+        }
+    }
+
     fn parse_agent_new_control_mode(args: &[&str]) -> AgentControlMode {
         let cli = Cli::try_parse_from(args).expect("parse args");
         match cli.cmd {
@@ -2334,9 +2368,30 @@ mod tests {
             "--spawner-url",
             "http://127.0.0.1:8080",
         ]);
-        let err = validate_agent_new_request(provider, &microvm).expect_err("should fail");
+        let err = validate_agent_new_request(provider, None, &microvm).expect_err("should fail");
         let msg = format!("{err:#}");
         assert!(msg.contains("--spawner-url"));
+        assert!(msg.contains("--provider microvm"));
+    }
+
+    #[test]
+    fn agent_new_brain_flag_is_explicitly_rejected() {
+        for value in ["pi", "acp"] {
+            let err = validate_agent_new_args(&["pikachat", "agent", "new", "--brain", value])
+                .expect_err("brain flag should be rejected");
+            let msg = format!("{err:#}");
+            assert!(msg.contains("--brain"));
+            assert!(msg.contains("ACP-only"));
+        }
+    }
+
+    #[test]
+    fn agent_new_workers_provider_is_temporarily_disabled() {
+        let err = validate_agent_new_args(&["pikachat", "agent", "new", "--provider", "workers"])
+            .expect_err("workers provider should be rejected");
+        let msg = format!("{err:#}");
+        assert!(msg.contains("temporarily disabled"));
+        assert!(msg.contains("--provider fly"));
         assert!(msg.contains("--provider microvm"));
     }
 

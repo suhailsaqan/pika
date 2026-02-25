@@ -116,7 +116,6 @@ fi
 cmd+=(
   agent new
   --provider microvm
-  --brain pi
   --control-mode remote
   --control-server-pubkey "$CONTROL_SERVER_PUBKEY"
   --spawner-url "$SPAWNER_URL"

@@ -20,6 +20,12 @@ DB_NAME="${DB_NAME:-pika_server}"
 
 mkdir -p "$LOG_DIR" "$CONTROL_STATE_DIR" "$CLI_STATE_DIR"
 
+if [ "$#" -eq 0 ]; then
+  echo "workers provider is temporarily disabled during marmot refactor."
+  echo "Pass an explicit command if you still need this local stack for manual debugging."
+  exit 1
+fi
+
 PIDS=()
 
 cleanup() {
@@ -107,10 +113,6 @@ echo "  pika-server:  $SERVER_URL"
 echo "  server pubkey: $CONTROL_PUBKEY"
 echo "  logs:         $LOG_DIR"
 echo
-
-if [ "$#" -eq 0 ]; then
-  set -- agent new --provider workers --brain pi --control-mode remote --control-server-pubkey "$CONTROL_PUBKEY"
-fi
 
 echo "Running pikachat command:"
 echo "  just cli --state-dir $CLI_STATE_DIR --relay $RELAY_WS $*"
