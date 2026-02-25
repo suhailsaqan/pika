@@ -8,9 +8,15 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Clear
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -23,6 +29,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import com.pika.app.AppManager
 import com.pika.app.rust.AppAction
@@ -31,6 +38,7 @@ import com.pika.app.ui.TestTags
 @Composable
 fun LoginScreen(manager: AppManager, padding: PaddingValues) {
     var nsec by remember { mutableStateOf("") }
+    var nsecVisible by remember { mutableStateOf(false) }
     var bunkerUri by remember { mutableStateOf("") }
     val busy = manager.state.busy
     val createBusy = busy.creatingAccount
@@ -73,12 +81,26 @@ fun LoginScreen(manager: AppManager, padding: PaddingValues) {
             singleLine = true,
             enabled = !anyBusy,
             label = { Text("nsec") },
-            visualTransformation = PasswordVisualTransformation(),
+            visualTransformation = if (nsecVisible) VisualTransformation.None else PasswordVisualTransformation(),
             keyboardOptions =
                 KeyboardOptions(
                     autoCorrect = false,
                     keyboardType = KeyboardType.Password,
                 ),
+            trailingIcon = {
+                if (nsec.isNotEmpty()) {
+                    IconButton(onClick = { nsec = "" }) {
+                        Icon(Icons.Default.Clear, contentDescription = "Clear")
+                    }
+                } else {
+                    IconButton(onClick = { nsecVisible = !nsecVisible }) {
+                        Icon(
+                            if (nsecVisible) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                            contentDescription = if (nsecVisible) "Hide" else "Show",
+                        )
+                    }
+                }
+            },
             modifier = Modifier.fillMaxWidth().testTag(TestTags.LOGIN_NSEC),
         )
 
@@ -107,6 +129,13 @@ fun LoginScreen(manager: AppManager, padding: PaddingValues) {
             singleLine = true,
             enabled = !anyBusy,
             label = { Text("bunker URI") },
+            trailingIcon = {
+                if (bunkerUri.isNotEmpty()) {
+                    IconButton(onClick = { bunkerUri = "" }) {
+                        Icon(Icons.Default.Clear, contentDescription = "Clear")
+                    }
+                }
+            },
             modifier = Modifier.fillMaxWidth().testTag(TestTags.LOGIN_BUNKER_URI),
         )
 
