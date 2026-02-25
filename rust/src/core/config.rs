@@ -74,6 +74,29 @@ pub(super) fn relay_reset_config_json(existing_json: Option<&str>) -> String {
     value.to_string()
 }
 
+fn blossom_servers_or_default(values: Option<&[String]>) -> Vec<String> {
+    if let Some(urls) = values {
+        let parsed: Vec<String> = urls
+            .iter()
+            .filter_map(|u| {
+                let t = u.trim();
+                if t.is_empty() {
+                    return None;
+                }
+                Url::parse(t).ok().map(|_| t.to_string())
+            })
+            .collect();
+        if !parsed.is_empty() {
+            return parsed;
+        }
+    }
+
+    app_default_blossom_servers()
+        .iter()
+        .filter_map(|u| Url::parse(u).ok().map(|_| (*u).to_string()))
+        .collect()
+}
+
 impl AppCore {
     pub(super) fn network_enabled(&self) -> bool {
         // Used to keep Rust tests deterministic and offline.
@@ -116,26 +139,7 @@ impl AppCore {
     }
 
     pub(super) fn blossom_servers(&self) -> Vec<String> {
-        if let Some(urls) = &self.config.blossom_servers {
-            let parsed: Vec<String> = urls
-                .iter()
-                .filter_map(|u| {
-                    let t = u.trim();
-                    if t.is_empty() {
-                        return None;
-                    }
-                    Url::parse(t).ok().map(|_| t.to_string())
-                })
-                .collect();
-            if !parsed.is_empty() {
-                return parsed;
-            }
-        }
-
-        app_default_blossom_servers()
-            .iter()
-            .filter_map(|u| Url::parse(u).ok().map(|_| (*u).to_string()))
-            .collect()
+        blossom_servers_or_default(self.config.blossom_servers.as_deref())
     }
 
     pub(super) fn all_session_relays(&self) -> Vec<RelayUrl> {
@@ -160,5 +164,86 @@ impl AppCore {
             std::env::var("PIKA_ENABLE_EXTERNAL_SIGNER").ok().as_deref(),
             Some("1") | Some("true") | Some("TRUE")
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_app_config_json_uses_shared_profile_defaults() {
+        let value: serde_json::Value =
+            serde_json::from_str(&default_app_config_json()).expect("parse config json");
+        assert_eq!(
+            value["relay_urls"],
+            serde_json::json!(app_default_message_relays())
+        );
+        assert_eq!(
+            value["key_package_relay_urls"],
+            serde_json::json!(app_default_key_package_relays())
+        );
+        assert_eq!(value["call_moq_url"], DEFAULT_CALL_MOQ_URL);
+        assert_eq!(
+            value["call_broadcast_prefix"],
+            DEFAULT_CALL_BROADCAST_PREFIX
+        );
+    }
+
+    #[test]
+    fn relay_reset_replaces_relays_and_preserves_other_fields() {
+        let existing = r#"{
+            "relay_urls": ["wss://invalid.example"],
+            "key_package_relay_urls": ["wss://invalid-kp.example"],
+            "disable_network": true
+        }"#;
+        let value: serde_json::Value =
+            serde_json::from_str(&relay_reset_config_json(Some(existing)))
+                .expect("parse reset config json");
+        assert_eq!(
+            value["relay_urls"],
+            serde_json::json!(app_default_message_relays())
+        );
+        assert_eq!(
+            value["key_package_relay_urls"],
+            serde_json::json!(app_default_key_package_relays())
+        );
+        assert_eq!(value["disable_network"], serde_json::json!(true));
+    }
+
+    #[test]
+    fn relay_reset_handles_invalid_input_json() {
+        let value: serde_json::Value = serde_json::from_str(&relay_reset_config_json(Some("{")))
+            .expect("parse reset config json");
+        assert_eq!(
+            value["relay_urls"],
+            serde_json::json!(app_default_message_relays())
+        );
+        assert_eq!(
+            value["key_package_relay_urls"],
+            serde_json::json!(app_default_key_package_relays())
+        );
+    }
+
+    #[test]
+    fn blossom_servers_or_default_falls_back_for_missing_or_invalid_values() {
+        assert_eq!(
+            blossom_servers_or_default(None),
+            app_default_blossom_servers()
+        );
+        let invalid = vec!["".to_string(), "not-a-url".to_string()];
+        assert_eq!(
+            blossom_servers_or_default(Some(&invalid)),
+            app_default_blossom_servers()
+        );
+    }
+
+    #[test]
+    fn blossom_servers_or_default_keeps_valid_values() {
+        let values = vec!["https://blossom.example.com".to_string()];
+        assert_eq!(
+            blossom_servers_or_default(Some(&values)),
+            vec!["https://blossom.example.com".to_string()]
+        );
     }
 }
