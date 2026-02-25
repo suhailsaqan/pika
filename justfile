@@ -54,6 +54,11 @@ info:
     @echo "    just agent-microvm-tunnel"
     @echo "  Local worker dev:"
     @echo "    just agent-workers"
+    @echo "  Unified pikachat wrapper (for provider/control env defaults):"
+    @echo "    just cli --help"
+    @echo "    just cli agent new --provider fly"
+    @echo "    just cli agent new --provider workers --brain pi"
+    @echo "    just cli agent new --provider microvm --brain pi"
     @echo
     @echo "RMP (new)"
     @echo "  Run iOS simulator:"
@@ -781,6 +786,20 @@ cli-build:
 cli-release:
     cargo build -p pikachat --release
 
+# Run pikachat with shared provider/control-plane defaults; forwards args verbatim.
+cli *ARGS="":
+    set -euo pipefail; \
+    if [ -f .env ]; then \
+      set -a; \
+      source .env; \
+      set +a; \
+    fi; \
+    export PIKA_AGENT_CONTROL_MODE="${PIKA_AGENT_CONTROL_MODE:-auto}"; \
+    export PIKA_MICROVM_SPAWNER_URL="${PIKA_MICROVM_SPAWNER_URL:-${SPAWNER_URL:-http://127.0.0.1:8080}}"; \
+    export PIKA_WORKERS_BASE_URL="${PIKA_WORKERS_BASE_URL:-${WORKERS_URL:-http://127.0.0.1:8787}}"; \
+    export PI_ADAPTER_BASE_URL="${PI_ADAPTER_BASE_URL:-http://127.0.0.1:8788}"; \
+    cargo run -q -p pikachat -- {{ ARGS }}
+
 # Show (or create) an identity in the given state dir.
 cli-identity STATE_DIR=".pikachat" RELAY="ws://127.0.0.1:7777":
     cargo run -p pikachat -- --state-dir {{ STATE_DIR }} --relay {{ RELAY }} identity
@@ -808,7 +827,7 @@ agent-fly-moq RELAY_EU="wss://eu.nostr.pikachat.org" RELAY_US="wss://us-east.nos
     set -a; \
     source .env; \
     set +a; \
-    cargo run -p pikachat -- --relay {{ RELAY_EU }} --relay {{ RELAY_US }} agent new
+    just cli --relay "{{ RELAY_EU }}" --relay "{{ RELAY_US }}" agent new
 
 # Run the Fly provider demo (`pikachat agent new --provider fly`).
 agent-fly RELAY_EU="wss://eu.nostr.pikachat.org" RELAY_US="wss://us-east.nostr.pikachat.org" MOQ_US="https://us-east.moq.pikachat.org/anon" MOQ_EU="https://eu.moq.pikachat.org/anon":
@@ -827,6 +846,10 @@ agent-microvm *ARGS="":
 # Open local port-forward to remote vm-spawner (`http://127.0.0.1:8080`).
 agent-microvm-tunnel:
     nix develop .#infra -c just -f infra/justfile build-vmspawner-tunnel
+
+# Run local relay + workers + pika-server control-plane stack, then forward args to `just cli`.
+agent-control-plane-local *ARGS="":
+    ./scripts/demo-agent-control-plane-local.sh {{ ARGS }}
 
 # Deploy the pika-bot Docker image to Fly.
 deploy-bot:
@@ -1016,18 +1039,13 @@ agent-cf RELAY_EU="wss://eu.nostr.pikachat.org" RELAY_US="wss://us-east.nostr.pi
       exit 1; \
     fi; \
     echo "Using worker: $PIKA_WORKERS_BASE_URL"; \
-    cargo run -p pikachat -- --relay {{ RELAY_EU }} --relay {{ RELAY_US }} agent new --provider workers --brain pi
+    just cli --relay "{{ RELAY_EU }}" --relay "{{ RELAY_US }}" agent new --provider workers --brain pi
 
 # Run `pikachat agent new --provider workers` against a Worker endpoint.
 agent-workers RELAY_EU="wss://eu.nostr.pikachat.org" RELAY_US="wss://us-east.nostr.pikachat.org" WORKERS_URL="http://127.0.0.1:8787":
     set -euo pipefail; \
-    if [ -f .env ]; then \
-      set -a; \
-      source .env; \
-      set +a; \
-    fi; \
     export PIKA_WORKERS_BASE_URL="{{ WORKERS_URL }}"; \
-    cargo run -p pikachat -- --relay {{ RELAY_EU }} --relay {{ RELAY_US }} agent new --provider workers --brain pi
+    just cli --relay "{{ RELAY_EU }}" --relay "{{ RELAY_US }}" agent new --provider workers --brain pi
 
 # Run a local mock `pi` adapter service for workers brain=pi testing.
 pi-adapter-mock HOST="127.0.0.1" PORT="8788":
