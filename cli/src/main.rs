@@ -16,9 +16,9 @@ use nostr_sdk::prelude::*;
 use pikachat::provider_control_plane::{
     AgentControlCmdEnvelope, AgentControlCommand, AgentControlErrorEnvelope,
     AgentControlResultEnvelope, AgentControlStatusEnvelope, AuthContext, CONTROL_CMD_KIND,
-    CONTROL_ERROR_KIND, CONTROL_RESULT_KIND, CONTROL_STATUS_KIND, MicrovmProvisionParams,
-    ProcessWelcomeCommand, ProtocolKind, ProviderKind, ProvisionCommand, RuntimeLifecyclePhase,
-    TeardownCommand,
+    CONTROL_ERROR_KIND, CONTROL_RESULT_KIND, CONTROL_STATUS_KIND, GetRuntimeCommand,
+    ListRuntimesCommand, MicrovmProvisionParams, ProcessWelcomeCommand, ProtocolKind, ProviderKind,
+    ProvisionCommand, RuntimeLifecyclePhase, TeardownCommand,
 };
 use serde_json::json;
 use sha2::{Digest, Sha256};
@@ -324,11 +324,55 @@ enum AgentCommand {
         #[arg(long, value_enum, env = "PIKA_AGENT_BRAIN")]
         brain: Option<AgentBrain>,
 
+        /// Runtime protocol (`pi` for MLS chat flow, `acp` for control-plane provisioning)
+        #[arg(long, value_enum, env = "PIKA_AGENT_PROTOCOL")]
+        protocol: Option<AgentProtocol>,
+
+        /// Target runtime class advertised by the server (optional routing hint)
+        #[arg(long, env = "PIKA_AGENT_RUNTIME_CLASS")]
+        runtime_class: Option<String>,
+
         #[command(flatten)]
         control: AgentControlArgs,
 
         #[command(flatten)]
         microvm: AgentNewMicrovmArgs,
+    },
+
+    /// List runtimes known to the control-plane server (filterable)
+    ListRuntimes {
+        /// Filter by provider
+        #[arg(long, value_enum)]
+        provider: Option<AgentProvider>,
+
+        /// Filter by protocol compatibility
+        #[arg(long, value_enum)]
+        protocol: Option<AgentProtocol>,
+
+        /// Filter by runtime lifecycle phase
+        #[arg(long, value_enum)]
+        phase: Option<AgentRuntimePhase>,
+
+        /// Filter by runtime class
+        #[arg(long)]
+        runtime_class: Option<String>,
+
+        /// Maximum number of runtimes to return
+        #[arg(long)]
+        limit: Option<usize>,
+
+        #[command(flatten)]
+        control: AgentControlArgs,
+    },
+
+    /// Fetch one runtime descriptor by id
+    GetRuntime {
+        /// Runtime id from provision/list results
+        #[arg(long)]
+        runtime_id: String,
+
+        #[command(flatten)]
+        control: AgentControlArgs,
     },
 }
 
@@ -343,6 +387,21 @@ enum AgentProvider {
 enum AgentBrain {
     Stub,
     Pi,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
+enum AgentProtocol {
+    Pi,
+    Acp,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
+enum AgentRuntimePhase {
+    Queued,
+    Provisioning,
+    Ready,
+    Failed,
+    Teardown,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
@@ -560,9 +619,44 @@ async fn main() -> anyhow::Result<()> {
                 name,
                 provider,
                 brain,
+                protocol,
+                runtime_class,
                 control,
                 microvm,
-            } => cmd_agent_new(&cli, name.as_deref(), *provider, *brain, control, microvm).await,
+            } => {
+                let request = AgentNewRequest {
+                    name: name.as_deref(),
+                    provider: *provider,
+                    brain: *brain,
+                    protocol: *protocol,
+                    runtime_class: runtime_class.as_deref(),
+                    microvm,
+                };
+                cmd_agent_new(&cli, control, request).await
+            }
+            AgentCommand::ListRuntimes {
+                provider,
+                protocol,
+                phase,
+                runtime_class,
+                limit,
+                control,
+            } => {
+                cmd_agent_list_runtimes(
+                    &cli,
+                    *provider,
+                    *protocol,
+                    *phase,
+                    runtime_class.as_deref(),
+                    *limit,
+                    control,
+                )
+                .await
+            }
+            AgentCommand::GetRuntime {
+                runtime_id,
+                control,
+            } => cmd_agent_get_runtime(&cli, runtime_id, control).await,
         },
     }
 }
@@ -1394,39 +1488,62 @@ async fn cmd_download_media(
 
 async fn cmd_agent_new(
     cli: &Cli,
-    name: Option<&str>,
-    provider: AgentProvider,
-    brain: Option<AgentBrain>,
     control: &AgentControlArgs,
-    microvm: &AgentNewMicrovmArgs,
+    request: AgentNewRequest<'_>,
 ) -> anyhow::Result<()> {
-    let resolved_brain = resolve_agent_new_brain(provider, brain, microvm)?;
+    let resolved_protocol = resolve_agent_new_protocol(
+        request.provider,
+        request.brain,
+        request.protocol,
+        request.microvm,
+    )?;
     if control.control_mode != AgentControlMode::Remote {
         anyhow::bail!("--control-mode remote is required; local provisioning has been removed");
     }
-    cmd_agent_new_remote(cli, name, provider, resolved_brain, control, microvm).await
+    cmd_agent_new_remote(
+        cli,
+        request.name,
+        request.provider,
+        resolved_protocol,
+        request.runtime_class,
+        control,
+        request.microvm,
+    )
+    .await
 }
 
-fn resolve_agent_new_brain(
+struct AgentNewRequest<'a> {
+    name: Option<&'a str>,
     provider: AgentProvider,
     brain: Option<AgentBrain>,
+    protocol: Option<AgentProtocol>,
+    runtime_class: Option<&'a str>,
+    microvm: &'a AgentNewMicrovmArgs,
+}
+
+fn resolve_agent_new_protocol(
+    provider: AgentProvider,
+    brain: Option<AgentBrain>,
+    protocol: Option<AgentProtocol>,
     microvm: &AgentNewMicrovmArgs,
-) -> anyhow::Result<AgentBrain> {
+) -> anyhow::Result<AgentProtocol> {
     microvm.ensure_provider_compatible(provider)?;
-    let resolved = match provider {
-        AgentProvider::Fly => brain.unwrap_or(AgentBrain::Stub),
-        AgentProvider::Workers | AgentProvider::Microvm => brain.unwrap_or(AgentBrain::Pi),
-    };
-    match provider {
-        AgentProvider::Fly if resolved != AgentBrain::Stub => anyhow::bail!(
-            "--brain {} is not supported with --provider fly (current Fly path is already pi-backed)",
-            resolved
-        ),
-        AgentProvider::Workers if resolved != AgentBrain::Pi => {
-            anyhow::bail!("--provider workers only supports --brain pi")
+    let resolved = protocol.unwrap_or(AgentProtocol::Pi);
+    if let Some(brain) = brain {
+        match brain {
+            AgentBrain::Stub if resolved != AgentProtocol::Pi => {
+                anyhow::bail!("--brain stub is only compatible with --protocol pi")
+            }
+            AgentBrain::Pi => {}
+            AgentBrain::Stub if provider != AgentProvider::Fly => {
+                anyhow::bail!("--brain stub is only supported with --provider fly")
+            }
+            AgentBrain::Stub => {}
         }
-        AgentProvider::Microvm if resolved != AgentBrain::Pi => {
-            anyhow::bail!("--provider microvm only supports --brain pi")
+    }
+    match provider {
+        AgentProvider::Fly if resolved != AgentProtocol::Pi => {
+            anyhow::bail!("--provider fly only supports --protocol pi")
         }
         _ => Ok(resolved),
     }
@@ -1637,9 +1754,10 @@ fn map_provider_kind(provider: AgentProvider) -> ProviderKind {
     }
 }
 
-fn map_protocol_kind(brain: AgentBrain) -> ProtocolKind {
-    match brain {
-        AgentBrain::Stub | AgentBrain::Pi => ProtocolKind::Pi,
+fn map_protocol_kind(protocol: AgentProtocol) -> ProtocolKind {
+    match protocol {
+        AgentProtocol::Pi => ProtocolKind::Pi,
+        AgentProtocol::Acp => ProtocolKind::Acp,
     }
 }
 
@@ -1683,7 +1801,8 @@ async fn cmd_agent_new_remote(
     cli: &Cli,
     name: Option<&str>,
     provider: AgentProvider,
-    resolved_brain: AgentBrain,
+    protocol: AgentProtocol,
+    runtime_class: Option<&str>,
     control: &AgentControlArgs,
     microvm: &AgentNewMicrovmArgs,
 ) -> anyhow::Result<()> {
@@ -1697,8 +1816,12 @@ async fn cmd_agent_new_remote(
     let provision_result = control_client
         .send_command(AgentControlCommand::Provision(ProvisionCommand {
             provider: map_provider_kind(provider),
-            protocol: map_protocol_kind(resolved_brain),
+            protocol: map_protocol_kind(protocol),
             name: name.map(str::to_string),
+            runtime_class: runtime_class
+                .map(str::trim)
+                .filter(|v| !v.is_empty())
+                .map(str::to_string),
             relay_urls: relay_urls.clone(),
             keep: microvm.keep,
             bot_secret_key_hex: None,
@@ -1710,6 +1833,23 @@ async fn cmd_agent_new_remote(
         }))
         .await?;
     let runtime = provision_result.runtime;
+    if protocol == AgentProtocol::Acp {
+        control_client.client.unsubscribe_all().await;
+        control_client.client.shutdown().await;
+        print(json!({
+            "provider": match provider {
+                AgentProvider::Fly => "fly",
+                AgentProvider::Workers => "workers",
+                AgentProvider::Microvm => "microvm",
+            },
+            "protocol": "acp",
+            "runtime_id": runtime.runtime_id,
+            "runtime_class": runtime.runtime_class,
+            "runtime": runtime,
+            "payload": provision_result.payload,
+        }));
+        return Ok(());
+    }
     let bot_pubkey_hex = runtime
         .bot_pubkey
         .clone()
@@ -1838,6 +1978,75 @@ async fn cmd_agent_new_remote(
     }
 
     session_result
+}
+
+fn map_agent_runtime_phase(phase: AgentRuntimePhase) -> RuntimeLifecyclePhase {
+    match phase {
+        AgentRuntimePhase::Queued => RuntimeLifecyclePhase::Queued,
+        AgentRuntimePhase::Provisioning => RuntimeLifecyclePhase::Provisioning,
+        AgentRuntimePhase::Ready => RuntimeLifecyclePhase::Ready,
+        AgentRuntimePhase::Failed => RuntimeLifecyclePhase::Failed,
+        AgentRuntimePhase::Teardown => RuntimeLifecyclePhase::Teardown,
+    }
+}
+
+async fn cmd_agent_list_runtimes(
+    cli: &Cli,
+    provider: Option<AgentProvider>,
+    protocol: Option<AgentProtocol>,
+    phase: Option<AgentRuntimePhase>,
+    runtime_class: Option<&str>,
+    limit: Option<usize>,
+    control: &AgentControlArgs,
+) -> anyhow::Result<()> {
+    let server_pubkey = resolve_control_server_pubkey(control)?;
+    let relay_urls = resolve_relays(cli);
+    let (keys, _mdk) = open(cli)?;
+    let control_client = RemoteControlClient::connect(&keys, &relay_urls, server_pubkey).await?;
+    let result = control_client
+        .send_command(AgentControlCommand::ListRuntimes(ListRuntimesCommand {
+            provider: provider.map(map_provider_kind),
+            protocol: protocol.map(map_protocol_kind),
+            lifecycle_phase: phase.map(map_agent_runtime_phase),
+            runtime_class: runtime_class
+                .map(str::trim)
+                .filter(|v| !v.is_empty())
+                .map(str::to_string),
+            limit,
+        }))
+        .await?;
+    control_client.client.unsubscribe_all().await;
+    control_client.client.shutdown().await;
+    print(json!({
+        "operation": "list_runtimes",
+        "count": result.payload.get("count").cloned().unwrap_or_else(|| json!(0)),
+        "runtimes": result.payload.get("runtimes").cloned().unwrap_or_else(|| json!([])),
+    }));
+    Ok(())
+}
+
+async fn cmd_agent_get_runtime(
+    cli: &Cli,
+    runtime_id: &str,
+    control: &AgentControlArgs,
+) -> anyhow::Result<()> {
+    let server_pubkey = resolve_control_server_pubkey(control)?;
+    let relay_urls = resolve_relays(cli);
+    let (keys, _mdk) = open(cli)?;
+    let control_client = RemoteControlClient::connect(&keys, &relay_urls, server_pubkey).await?;
+    let result = control_client
+        .send_command(AgentControlCommand::GetRuntime(GetRuntimeCommand {
+            runtime_id: runtime_id.to_string(),
+        }))
+        .await?;
+    control_client.client.unsubscribe_all().await;
+    control_client.client.shutdown().await;
+    print(json!({
+        "operation": "get_runtime",
+        "runtime": result.runtime,
+        "payload": result.payload,
+    }));
+    Ok(())
 }
 
 fn cmd_messages(cli: &Cli, nostr_group_id_hex: &str, limit: usize) -> anyhow::Result<()> {
@@ -2145,7 +2354,23 @@ async fn cmd_daemon(
 mod tests {
     use super::*;
 
-    fn parse_agent_new(args: &[&str]) -> (AgentProvider, Option<AgentBrain>, AgentNewMicrovmArgs) {
+    struct AgentListRuntimesParse {
+        provider: Option<AgentProvider>,
+        protocol: Option<AgentProtocol>,
+        phase: Option<AgentRuntimePhase>,
+        runtime_class: Option<String>,
+        limit: Option<usize>,
+    }
+
+    fn parse_agent_new(
+        args: &[&str],
+    ) -> (
+        AgentProvider,
+        Option<AgentBrain>,
+        Option<AgentProtocol>,
+        Option<String>,
+        AgentNewMicrovmArgs,
+    ) {
         let cli = Cli::try_parse_from(args).expect("parse args");
         match cli.cmd {
             Command::Agent {
@@ -2153,10 +2378,12 @@ mod tests {
                     AgentCommand::New {
                         provider,
                         brain,
+                        protocol,
+                        runtime_class,
                         microvm,
                         ..
                     },
-            } => (provider, brain, microvm),
+            } => (provider, brain, protocol, runtime_class, microvm),
             _ => panic!("expected agent new command"),
         }
     }
@@ -2171,9 +2398,43 @@ mod tests {
         }
     }
 
+    fn parse_agent_list_runtimes(args: &[&str]) -> AgentListRuntimesParse {
+        let cli = Cli::try_parse_from(args).expect("parse args");
+        match cli.cmd {
+            Command::Agent {
+                cmd:
+                    AgentCommand::ListRuntimes {
+                        provider,
+                        protocol,
+                        phase,
+                        runtime_class,
+                        limit,
+                        ..
+                    },
+            } => AgentListRuntimesParse {
+                provider,
+                protocol,
+                phase,
+                runtime_class,
+                limit,
+            },
+            _ => panic!("expected agent list-runtimes command"),
+        }
+    }
+
+    fn parse_agent_get_runtime(args: &[&str]) -> String {
+        let cli = Cli::try_parse_from(args).expect("parse args");
+        match cli.cmd {
+            Command::Agent {
+                cmd: AgentCommand::GetRuntime { runtime_id, .. },
+            } => runtime_id,
+            _ => panic!("expected agent get-runtime command"),
+        }
+    }
+
     #[test]
     fn agent_new_microvm_flags_parse() {
-        let (provider, brain, microvm) = parse_agent_new(&[
+        let (provider, brain, protocol, runtime_class, microvm) = parse_agent_new(&[
             "pikachat",
             "agent",
             "new",
@@ -2197,6 +2458,8 @@ mod tests {
         ]);
         assert_eq!(provider, AgentProvider::Microvm);
         assert_eq!(brain, None);
+        assert_eq!(protocol, None);
+        assert_eq!(runtime_class, None);
         assert_eq!(
             microvm.spawner_url.as_deref(),
             Some("http://127.0.0.1:8080")
@@ -2215,13 +2478,21 @@ mod tests {
 
     #[test]
     fn agent_new_existing_fly_and_workers_parse_unchanged() {
-        let (fly_provider, fly_brain, fly_microvm) =
+        let (fly_provider, fly_brain, fly_protocol, fly_runtime_class, fly_microvm) =
             parse_agent_new(&["pikachat", "agent", "new", "--provider", "fly"]);
         assert_eq!(fly_provider, AgentProvider::Fly);
         assert_eq!(fly_brain, None);
+        assert_eq!(fly_protocol, None);
+        assert_eq!(fly_runtime_class, None);
         assert!(fly_microvm.provided_flag_names().is_empty());
 
-        let (workers_provider, workers_brain, workers_microvm) = parse_agent_new(&[
+        let (
+            workers_provider,
+            workers_brain,
+            workers_protocol,
+            workers_runtime_class,
+            workers_microvm,
+        ) = parse_agent_new(&[
             "pikachat",
             "agent",
             "new",
@@ -2232,12 +2503,14 @@ mod tests {
         ]);
         assert_eq!(workers_provider, AgentProvider::Workers);
         assert_eq!(workers_brain, Some(AgentBrain::Pi));
+        assert_eq!(workers_protocol, None);
+        assert_eq!(workers_runtime_class, None);
         assert!(workers_microvm.provided_flag_names().is_empty());
     }
 
     #[test]
     fn microvm_flags_rejected_for_non_microvm_provider() {
-        let (provider, brain, microvm) = parse_agent_new(&[
+        let (provider, brain, protocol, _runtime_class, microvm) = parse_agent_new(&[
             "pikachat",
             "agent",
             "new",
@@ -2246,7 +2519,8 @@ mod tests {
             "--spawner-url",
             "http://127.0.0.1:8080",
         ]);
-        let err = resolve_agent_new_brain(provider, brain, &microvm).expect_err("should fail");
+        let err = resolve_agent_new_protocol(provider, brain, protocol, &microvm)
+            .expect_err("should fail");
         let msg = format!("{err:#}");
         assert!(msg.contains("--spawner-url"));
         assert!(msg.contains("--provider microvm"));
@@ -2263,5 +2537,58 @@ mod tests {
             let msg = err.to_string();
             assert!(msg.contains("invalid value"));
         }
+    }
+
+    #[test]
+    fn agent_new_protocol_and_runtime_class_parse() {
+        let (_provider, _brain, protocol, runtime_class, _microvm) = parse_agent_new(&[
+            "pikachat",
+            "agent",
+            "new",
+            "--provider",
+            "workers",
+            "--protocol",
+            "acp",
+            "--runtime-class",
+            "workers-us-east",
+        ]);
+        assert_eq!(protocol, Some(AgentProtocol::Acp));
+        assert_eq!(runtime_class.as_deref(), Some("workers-us-east"));
+    }
+
+    #[test]
+    fn agent_list_runtimes_parse() {
+        let parsed = parse_agent_list_runtimes(&[
+            "pikachat",
+            "agent",
+            "list-runtimes",
+            "--provider",
+            "workers",
+            "--protocol",
+            "acp",
+            "--phase",
+            "ready",
+            "--runtime-class",
+            "workers-us-east",
+            "--limit",
+            "5",
+        ]);
+        assert_eq!(parsed.provider, Some(AgentProvider::Workers));
+        assert_eq!(parsed.protocol, Some(AgentProtocol::Acp));
+        assert_eq!(parsed.phase, Some(AgentRuntimePhase::Ready));
+        assert_eq!(parsed.runtime_class.as_deref(), Some("workers-us-east"));
+        assert_eq!(parsed.limit, Some(5));
+    }
+
+    #[test]
+    fn agent_get_runtime_parse() {
+        let runtime_id = parse_agent_get_runtime(&[
+            "pikachat",
+            "agent",
+            "get-runtime",
+            "--runtime-id",
+            "runtime-123",
+        ]);
+        assert_eq!(runtime_id, "runtime-123");
     }
 }
