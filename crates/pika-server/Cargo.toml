@@ -19,8 +19,9 @@ futures = "0.3.28"
 hex = "0.4"
 nostr = "0.44"
 nostr-sdk = { version = "0.44", features = ["nip59"] }
-pikachat = { path = "../../cli" }
+pika-agent-control-plane = { path = "../pika-agent-control-plane" }
 rand = "0.8"
+reqwest = { version = "0.12", default-features = false, features = ["json", "native-tls"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 serde = "1.0"

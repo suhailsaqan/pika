@@ -1,3 +1,4 @@
+mod agent_clients;
 mod agent_control;
 mod listener;
 mod models;

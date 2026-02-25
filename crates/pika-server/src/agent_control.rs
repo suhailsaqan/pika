@@ -5,9 +5,7 @@ use std::time::Duration;
 use anyhow::Context;
 use async_trait::async_trait;
 use nostr_sdk::prelude::*;
-use pikachat::fly_machines::FlyClient;
-use pikachat::microvm_spawner::{CreateVmRequest, GuestAutostartRequest, MicrovmSpawnerClient};
-use pikachat::provider_control_plane::{
+use pika_agent_control_plane::{
     AgentControlCmdEnvelope, AgentControlCommand, AgentControlErrorEnvelope,
     AgentControlResultEnvelope, AgentControlStatusEnvelope, GetRuntimeCommand, ListRuntimesCommand,
     MicrovmProvisionParams, ProcessWelcomeCommand, ProtocolKind, ProviderKind, ProvisionCommand,
@@ -15,12 +13,17 @@ use pikachat::provider_control_plane::{
     CONTROL_ERROR_KIND, CONTROL_RESULT_KIND, CONTROL_STATUS_KIND, ERROR_SCHEMA_V1,
     RESULT_SCHEMA_V1, STATUS_SCHEMA_V1,
 };
-use pikachat::workers_agents::WorkersClient;
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tokio::sync::RwLock;
 use tracing::{error, info, warn};
+
+use crate::agent_clients::fly_machines::FlyClient;
+use crate::agent_clients::microvm_spawner::{
+    CreateVmRequest, GuestAutostartRequest, MicrovmSpawnerClient,
+};
+use crate::agent_clients::workers_agents::{CreateAgentRequest, WorkersClient};
 
 const DEFAULT_MICROVM_SPAWNER_URL: &str = "http://127.0.0.1:8080";
 const DEFAULT_MICROVM_FLAKE_REF: &str = "github:sledtools/pika";
@@ -1626,7 +1629,7 @@ impl ProviderAdapter for WorkersAdapter {
         };
 
         let mut status = workers
-            .create_agent(&pikachat::workers_agents::CreateAgentRequest {
+            .create_agent(&CreateAgentRequest {
                 name: Some(agent_name),
                 brain: "pi".to_string(),
                 relay_urls,
@@ -2107,7 +2110,7 @@ for raw_line in sys.stdin:
 #[cfg(test)]
 mod tests {
     use super::*;
-    use pikachat::provider_control_plane::AuthContext;
+    use pika_agent_control_plane::AuthContext;
 
     #[derive(Clone)]
     struct MockAdapter {

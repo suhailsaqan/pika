@@ -5798,6 +5798,14 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9b4f627cb1b25917193a259e49bdad08f671f8d9708acfd5fe0a8c1455d87220"
 
 [[package]]
+name = "pika-agent-control-plane"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "pika-desktop"
 version = "0.1.0"
 dependencies = [
@@ -5868,8 +5876,9 @@ dependencies = [
  "hex",
  "nostr",
  "nostr-sdk",
- "pikachat",
+ "pika-agent-control-plane",
  "rand 0.8.5",
+ "reqwest",
  "serde",
  "serde_json",
  "tokio",
@@ -5941,6 +5950,7 @@ dependencies = [
  "mdk-storage-traits 0.6.0 (git+https://github.com/marmot-protocol/mdk?rev=d9f372743625de17f6fcd81eecd5084917a8ebb1)",
  "nostr-blossom",
  "nostr-sdk",
+ "pika-agent-control-plane",
  "pikachat-sidecar",
  "rand 0.8.5",
  "reqwest",

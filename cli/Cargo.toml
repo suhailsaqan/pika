@@ -17,6 +17,7 @@ mdk-sqlite-storage = { workspace = true }
 mdk-storage-traits = { workspace = true }
 nostr-blossom = "0.44.0"
 nostr-sdk = { version = "0.44.1", features = ["nip59"] }
+pika-agent-control-plane = { path = "../crates/pika-agent-control-plane" }
 pikachat-sidecar = { path = "../crates/pikachat-sidecar" }
 rand = "0.8"
 reqwest = { version = "0.12", default-features = false, features = ["json", "native-tls"] }
