@@ -91,6 +91,7 @@ jobs:
 
   check:
     needs: resolve-tag
+    if: always() && needs.resolve-tag.result == 'success'
     runs-on: blacksmith-16vcpu-ubuntu-2404
     steps:
       - uses: actions/checkout@v4
@@ -131,6 +132,7 @@ jobs:
 
   build-android:
     needs: [resolve-tag, check]
+    if: always() && needs.resolve-tag.result == 'success' && needs.check.result == 'success'
     runs-on: blacksmith-16vcpu-ubuntu-2404
     steps:
       - uses: actions/checkout@v4
@@ -170,6 +172,7 @@ jobs:
 
   build-macos:
     needs: [resolve-tag, check]
+    if: always() && needs.resolve-tag.result == 'success' && needs.check.result == 'success'
     runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
@@ -193,6 +196,7 @@ jobs:
 
   publish:
     needs: [resolve-tag, build-android, build-macos]
+    if: always() && needs.resolve-tag.result == 'success' && needs.build-android.result == 'success' && needs.build-macos.result == 'success'
     runs-on: blacksmith-16vcpu-ubuntu-2404
     steps:
       - uses: actions/checkout@v4
@@ -226,6 +230,7 @@ jobs:
 
   publish-zapstore:
     needs: [resolve-tag, build-android, publish]
+    if: always() && needs.resolve-tag.result == 'success' && needs.build-android.result == 'success' && needs.publish.result == 'success'
     runs-on: blacksmith-16vcpu-ubuntu-2404
     steps:
       - uses: actions/checkout@v4
@@ -282,6 +287,7 @@ jobs:
 
   announce-release:
     needs: [resolve-tag, publish]
+    if: always() && needs.resolve-tag.result == 'success' && needs.publish.result == 'success'
     runs-on: blacksmith-16vcpu-ubuntu-2404
     steps:
       - uses: actions/checkout@v4
