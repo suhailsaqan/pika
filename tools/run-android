@@ -22,6 +22,8 @@ fi
 
 ADB="${ADB:-adb}"
 APP_ID="${PIKA_ANDROID_APP_ID:-org.pikachat.pika.dev}"
+# Base package for the activity class — applicationIdSuffix doesn't move the class.
+APP_BASE_PKG="${PIKA_ANDROID_BASE_PKG:-org.pikachat.pika}"
 SERIAL="${PIKA_ANDROID_SERIAL:-}"
 MODE="auto" # auto|emulator|device
 RELEASE=0
@@ -306,7 +308,7 @@ resolved="$("$ADB" -s "$SERIAL" shell cmd package resolve-activity --brief -a an
 if [ -n "${resolved:-}" ] && echo "$resolved" | grep -q '/'; then
   "$ADB" -s "$SERIAL" shell am start -W -n "$resolved" >/dev/null
 else
-  "$ADB" -s "$SERIAL" shell am start -W -a android.intent.action.MAIN -c android.intent.category.LAUNCHER -n "$APP_ID"/.MainActivity >/dev/null
+  "$ADB" -s "$SERIAL" shell am start -W -a android.intent.action.MAIN -c android.intent.category.LAUNCHER -n "$APP_ID"/"$APP_BASE_PKG".MainActivity >/dev/null
 fi
 
 # Confirm the process is actually running, otherwise fail with useful diagnostics.

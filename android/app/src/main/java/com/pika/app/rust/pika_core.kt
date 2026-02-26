@@ -2146,6 +2146,8 @@ data class ChatMessage (
     var `myPollVote`: kotlin.String?
     , 
     var `htmlState`: kotlin.String?
+    , 
+    var `hypernote`: HypernoteData?
     
 ){
     
@@ -2177,6 +2179,7 @@ public object FfiConverterTypeChatMessage: FfiConverterRustBuffer<ChatMessage> {
             FfiConverterSequenceTypePollTally.read(buf),
             FfiConverterOptionalString.read(buf),
             FfiConverterOptionalString.read(buf),
+            FfiConverterOptionalTypeHypernoteData.read(buf),
         )
     }
 
@@ -2195,7 +2198,8 @@ public object FfiConverterTypeChatMessage: FfiConverterRustBuffer<ChatMessage> {
             FfiConverterSequenceTypeChatMediaAttachment.allocationSize(value.`media`) +
             FfiConverterSequenceTypePollTally.allocationSize(value.`pollTally`) +
             FfiConverterOptionalString.allocationSize(value.`myPollVote`) +
-            FfiConverterOptionalString.allocationSize(value.`htmlState`)
+            FfiConverterOptionalString.allocationSize(value.`htmlState`) +
+            FfiConverterOptionalTypeHypernoteData.allocationSize(value.`hypernote`)
     )
 
     override fun write(value: ChatMessage, buf: ByteBuffer) {
@@ -2214,6 +2218,7 @@ public object FfiConverterTypeChatMessage: FfiConverterRustBuffer<ChatMessage> {
             FfiConverterSequenceTypePollTally.write(value.`pollTally`, buf)
             FfiConverterOptionalString.write(value.`myPollVote`, buf)
             FfiConverterOptionalString.write(value.`htmlState`, buf)
+            FfiConverterOptionalTypeHypernoteData.write(value.`hypernote`, buf)
     }
 }
 
@@ -2504,6 +2509,150 @@ public object FfiConverterTypeFollowListEntry: FfiConverterRustBuffer<FollowList
             FfiConverterOptionalString.write(value.`name`, buf)
             FfiConverterOptionalString.write(value.`username`, buf)
             FfiConverterOptionalString.write(value.`pictureUrl`, buf)
+    }
+}
+
+
+
+data class HypernoteData (
+    var `astJson`: kotlin.String
+    , 
+    var `declaredActions`: List<kotlin.String>
+    , 
+    var `title`: kotlin.String?
+    , 
+    var `defaultState`: kotlin.String?
+    , 
+    var `myResponse`: kotlin.String?
+    , 
+    var `responseTallies`: List<HypernoteResponseTally>
+    , 
+    var `responders`: List<HypernoteResponder>
+    
+){
+    
+
+    
+
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeHypernoteData: FfiConverterRustBuffer<HypernoteData> {
+    override fun read(buf: ByteBuffer): HypernoteData {
+        return HypernoteData(
+            FfiConverterString.read(buf),
+            FfiConverterSequenceString.read(buf),
+            FfiConverterOptionalString.read(buf),
+            FfiConverterOptionalString.read(buf),
+            FfiConverterOptionalString.read(buf),
+            FfiConverterSequenceTypeHypernoteResponseTally.read(buf),
+            FfiConverterSequenceTypeHypernoteResponder.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: HypernoteData) = (
+            FfiConverterString.allocationSize(value.`astJson`) +
+            FfiConverterSequenceString.allocationSize(value.`declaredActions`) +
+            FfiConverterOptionalString.allocationSize(value.`title`) +
+            FfiConverterOptionalString.allocationSize(value.`defaultState`) +
+            FfiConverterOptionalString.allocationSize(value.`myResponse`) +
+            FfiConverterSequenceTypeHypernoteResponseTally.allocationSize(value.`responseTallies`) +
+            FfiConverterSequenceTypeHypernoteResponder.allocationSize(value.`responders`)
+    )
+
+    override fun write(value: HypernoteData, buf: ByteBuffer) {
+            FfiConverterString.write(value.`astJson`, buf)
+            FfiConverterSequenceString.write(value.`declaredActions`, buf)
+            FfiConverterOptionalString.write(value.`title`, buf)
+            FfiConverterOptionalString.write(value.`defaultState`, buf)
+            FfiConverterOptionalString.write(value.`myResponse`, buf)
+            FfiConverterSequenceTypeHypernoteResponseTally.write(value.`responseTallies`, buf)
+            FfiConverterSequenceTypeHypernoteResponder.write(value.`responders`, buf)
+    }
+}
+
+
+
+data class HypernoteResponder (
+    var `name`: kotlin.String?
+    , 
+    var `npub`: kotlin.String
+    , 
+    var `pictureUrl`: kotlin.String?
+    
+){
+    
+
+    
+
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeHypernoteResponder: FfiConverterRustBuffer<HypernoteResponder> {
+    override fun read(buf: ByteBuffer): HypernoteResponder {
+        return HypernoteResponder(
+            FfiConverterOptionalString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterOptionalString.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: HypernoteResponder) = (
+            FfiConverterOptionalString.allocationSize(value.`name`) +
+            FfiConverterString.allocationSize(value.`npub`) +
+            FfiConverterOptionalString.allocationSize(value.`pictureUrl`)
+    )
+
+    override fun write(value: HypernoteResponder, buf: ByteBuffer) {
+            FfiConverterOptionalString.write(value.`name`, buf)
+            FfiConverterString.write(value.`npub`, buf)
+            FfiConverterOptionalString.write(value.`pictureUrl`, buf)
+    }
+}
+
+
+
+data class HypernoteResponseTally (
+    var `action`: kotlin.String
+    , 
+    var `count`: kotlin.UInt
+    
+){
+    
+
+    
+
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeHypernoteResponseTally: FfiConverterRustBuffer<HypernoteResponseTally> {
+    override fun read(buf: ByteBuffer): HypernoteResponseTally {
+        return HypernoteResponseTally(
+            FfiConverterString.read(buf),
+            FfiConverterUInt.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: HypernoteResponseTally) = (
+            FfiConverterString.allocationSize(value.`action`) +
+            FfiConverterUInt.allocationSize(value.`count`)
+    )
+
+    override fun write(value: HypernoteResponseTally, buf: ByteBuffer) {
+            FfiConverterString.write(value.`action`, buf)
+            FfiConverterUInt.write(value.`count`, buf)
     }
 }
 
@@ -3157,6 +3306,29 @@ sealed class AppAction {
         companion object
     }
     
+    data class HypernoteAction(
+        val `chatId`: kotlin.String, 
+        val `messageId`: kotlin.String, 
+        val `actionName`: kotlin.String, 
+        val `form`: Map<kotlin.String, kotlin.String>) : AppAction()
+        
+    {
+        
+
+        companion object
+    }
+    
+    data class SendHypernotePoll(
+        val `chatId`: kotlin.String, 
+        val `question`: kotlin.String, 
+        val `options`: List<kotlin.String>) : AppAction()
+        
+    {
+        
+
+        companion object
+    }
+    
     data class ArchiveChat(
         val `chatId`: kotlin.String) : AppAction()
         
@@ -3373,36 +3545,47 @@ public object FfiConverterTypeAppAction : FfiConverterRustBuffer<AppAction>{
                 FfiConverterString.read(buf),
                 FfiConverterString.read(buf),
                 )
-            36 -> AppAction.ArchiveChat(
+            36 -> AppAction.HypernoteAction(
+                FfiConverterString.read(buf),
+                FfiConverterString.read(buf),
+                FfiConverterString.read(buf),
+                FfiConverterMapStringString.read(buf),
+                )
+            37 -> AppAction.SendHypernotePoll(
+                FfiConverterString.read(buf),
+                FfiConverterString.read(buf),
+                FfiConverterSequenceString.read(buf),
+                )
+            38 -> AppAction.ArchiveChat(
                 FfiConverterString.read(buf),
                 )
-            37 -> AppAction.ReactToMessage(
+            39 -> AppAction.ReactToMessage(
                 FfiConverterString.read(buf),
                 FfiConverterString.read(buf),
                 FfiConverterString.read(buf),
                 )
-            38 -> AppAction.TypingStarted(
+            40 -> AppAction.TypingStarted(
                 FfiConverterString.read(buf),
                 )
-            39 -> AppAction.ClearToast
-            40 -> AppAction.Foregrounded
-            41 -> AppAction.NostrConnectCallback(
+            41 -> AppAction.ClearToast
+            42 -> AppAction.Foregrounded
+            43 -> AppAction.NostrConnectCallback(
                 FfiConverterString.read(buf),
                 )
-            42 -> AppAction.ReloadConfig
-            43 -> AppAction.OpenPeerProfile(
+            44 -> AppAction.ReloadConfig
+            45 -> AppAction.OpenPeerProfile(
                 FfiConverterString.read(buf),
                 )
-            44 -> AppAction.ClosePeerProfile
-            45 -> AppAction.SetPushToken(
+            46 -> AppAction.ClosePeerProfile
+            47 -> AppAction.SetPushToken(
                 FfiConverterString.read(buf),
                 )
-            46 -> AppAction.ReregisterPush
-            47 -> AppAction.RefreshFollowList
-            48 -> AppAction.FollowUser(
+            48 -> AppAction.ReregisterPush
+            49 -> AppAction.RefreshFollowList
+            50 -> AppAction.FollowUser(
                 FfiConverterString.read(buf),
                 )
-            49 -> AppAction.UnfollowUser(
+            51 -> AppAction.UnfollowUser(
                 FfiConverterString.read(buf),
                 )
             else -> throw RuntimeException("invalid enum value, something is very wrong!!")
@@ -3665,6 +3848,25 @@ public object FfiConverterTypeAppAction : FfiConverterRustBuffer<AppAction>{
                 4UL
                 + FfiConverterString.allocationSize(value.`chatId`)
                 + FfiConverterString.allocationSize(value.`name`)
+            )
+        }
+        is AppAction.HypernoteAction -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterString.allocationSize(value.`chatId`)
+                + FfiConverterString.allocationSize(value.`messageId`)
+                + FfiConverterString.allocationSize(value.`actionName`)
+                + FfiConverterMapStringString.allocationSize(value.`form`)
+            )
+        }
+        is AppAction.SendHypernotePoll -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterString.allocationSize(value.`chatId`)
+                + FfiConverterString.allocationSize(value.`question`)
+                + FfiConverterSequenceString.allocationSize(value.`options`)
             )
         }
         is AppAction.ArchiveChat -> {
@@ -3952,69 +4154,84 @@ public object FfiConverterTypeAppAction : FfiConverterRustBuffer<AppAction>{
                 FfiConverterString.write(value.`name`, buf)
                 Unit
             }
-            is AppAction.ArchiveChat -> {
+            is AppAction.HypernoteAction -> {
                 buf.putInt(36)
+                FfiConverterString.write(value.`chatId`, buf)
+                FfiConverterString.write(value.`messageId`, buf)
+                FfiConverterString.write(value.`actionName`, buf)
+                FfiConverterMapStringString.write(value.`form`, buf)
+                Unit
+            }
+            is AppAction.SendHypernotePoll -> {
+                buf.putInt(37)
+                FfiConverterString.write(value.`chatId`, buf)
+                FfiConverterString.write(value.`question`, buf)
+                FfiConverterSequenceString.write(value.`options`, buf)
+                Unit
+            }
+            is AppAction.ArchiveChat -> {
+                buf.putInt(38)
                 FfiConverterString.write(value.`chatId`, buf)
                 Unit
             }
             is AppAction.ReactToMessage -> {
-                buf.putInt(37)
+                buf.putInt(39)
                 FfiConverterString.write(value.`chatId`, buf)
                 FfiConverterString.write(value.`messageId`, buf)
                 FfiConverterString.write(value.`emoji`, buf)
                 Unit
             }
             is AppAction.TypingStarted -> {
-                buf.putInt(38)
+                buf.putInt(40)
                 FfiConverterString.write(value.`chatId`, buf)
                 Unit
             }
             is AppAction.ClearToast -> {
-                buf.putInt(39)
+                buf.putInt(41)
                 Unit
             }
             is AppAction.Foregrounded -> {
-                buf.putInt(40)
+                buf.putInt(42)
                 Unit
             }
             is AppAction.NostrConnectCallback -> {
-                buf.putInt(41)
+                buf.putInt(43)
                 FfiConverterString.write(value.`url`, buf)
                 Unit
             }
             is AppAction.ReloadConfig -> {
-                buf.putInt(42)
+                buf.putInt(44)
                 Unit
             }
             is AppAction.OpenPeerProfile -> {
-                buf.putInt(43)
+                buf.putInt(45)
                 FfiConverterString.write(value.`pubkey`, buf)
                 Unit
             }
             is AppAction.ClosePeerProfile -> {
-                buf.putInt(44)
+                buf.putInt(46)
                 Unit
             }
             is AppAction.SetPushToken -> {
-                buf.putInt(45)
+                buf.putInt(47)
                 FfiConverterString.write(value.`token`, buf)
                 Unit
             }
             is AppAction.ReregisterPush -> {
-                buf.putInt(46)
+                buf.putInt(48)
                 Unit
             }
             is AppAction.RefreshFollowList -> {
-                buf.putInt(47)
+                buf.putInt(49)
                 Unit
             }
             is AppAction.FollowUser -> {
-                buf.putInt(48)
+                buf.putInt(50)
                 FfiConverterString.write(value.`pubkey`, buf)
                 Unit
             }
             is AppAction.UnfollowUser -> {
-                buf.putInt(49)
+                buf.putInt(51)
                 FfiConverterString.write(value.`pubkey`, buf)
                 Unit
             }
@@ -5241,6 +5458,38 @@ public object FfiConverterOptionalTypeChatViewState: FfiConverterRustBuffer<Chat
 /**
  * @suppress
  */
+public object FfiConverterOptionalTypeHypernoteData: FfiConverterRustBuffer<HypernoteData?> {
+    override fun read(buf: ByteBuffer): HypernoteData? {
+        if (buf.get().toInt() == 0) {
+            return null
+        }
+        return FfiConverterTypeHypernoteData.read(buf)
+    }
+
+    override fun allocationSize(value: HypernoteData?): ULong {
+        if (value == null) {
+            return 1UL
+        } else {
+            return 1UL + FfiConverterTypeHypernoteData.allocationSize(value)
+        }
+    }
+
+    override fun write(value: HypernoteData?, buf: ByteBuffer) {
+        if (value == null) {
+            buf.put(0)
+        } else {
+            buf.put(1)
+            FfiConverterTypeHypernoteData.write(value, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
 public object FfiConverterOptionalTypePeerProfileState: FfiConverterRustBuffer<PeerProfileState?> {
     override fun read(buf: ByteBuffer): PeerProfileState? {
         if (buf.get().toInt() == 0) {
@@ -5473,6 +5722,62 @@ public object FfiConverterSequenceTypeFollowListEntry: FfiConverterRustBuffer<Li
 /**
  * @suppress
  */
+public object FfiConverterSequenceTypeHypernoteResponder: FfiConverterRustBuffer<List<HypernoteResponder>> {
+    override fun read(buf: ByteBuffer): List<HypernoteResponder> {
+        val len = buf.getInt()
+        return List<HypernoteResponder>(len) {
+            FfiConverterTypeHypernoteResponder.read(buf)
+        }
+    }
+
+    override fun allocationSize(value: List<HypernoteResponder>): ULong {
+        val sizeForLength = 4UL
+        val sizeForItems = value.map { FfiConverterTypeHypernoteResponder.allocationSize(it) }.sum()
+        return sizeForLength + sizeForItems
+    }
+
+    override fun write(value: List<HypernoteResponder>, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        value.iterator().forEach {
+            FfiConverterTypeHypernoteResponder.write(it, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterSequenceTypeHypernoteResponseTally: FfiConverterRustBuffer<List<HypernoteResponseTally>> {
+    override fun read(buf: ByteBuffer): List<HypernoteResponseTally> {
+        val len = buf.getInt()
+        return List<HypernoteResponseTally>(len) {
+            FfiConverterTypeHypernoteResponseTally.read(buf)
+        }
+    }
+
+    override fun allocationSize(value: List<HypernoteResponseTally>): ULong {
+        val sizeForLength = 4UL
+        val sizeForItems = value.map { FfiConverterTypeHypernoteResponseTally.allocationSize(it) }.sum()
+        return sizeForLength + sizeForItems
+    }
+
+    override fun write(value: List<HypernoteResponseTally>, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        value.iterator().forEach {
+            FfiConverterTypeHypernoteResponseTally.write(it, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
 public object FfiConverterSequenceTypeMemberInfo: FfiConverterRustBuffer<List<MemberInfo>> {
     override fun read(buf: ByteBuffer): List<MemberInfo> {
         val len = buf.getInt()
@@ -5631,6 +5936,45 @@ public object FfiConverterSequenceTypeScreen: FfiConverterRustBuffer<List<Screen
         buf.putInt(value.size)
         value.iterator().forEach {
             FfiConverterTypeScreen.write(it, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterMapStringString: FfiConverterRustBuffer<Map<kotlin.String, kotlin.String>> {
+    override fun read(buf: ByteBuffer): Map<kotlin.String, kotlin.String> {
+        val len = buf.getInt()
+        return buildMap<kotlin.String, kotlin.String>(len) {
+            repeat(len) {
+                val k = FfiConverterString.read(buf)
+                val v = FfiConverterString.read(buf)
+                this[k] = v
+            }
+        }
+    }
+
+    override fun allocationSize(value: Map<kotlin.String, kotlin.String>): ULong {
+        val spaceForMapSize = 4UL
+        val spaceForChildren = value.map { (k, v) ->
+            FfiConverterString.allocationSize(k) +
+            FfiConverterString.allocationSize(v)
+        }.sum()
+        return spaceForMapSize + spaceForChildren
+    }
+
+    override fun write(value: Map<kotlin.String, kotlin.String>, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        // The parens on `(k, v)` here ensure we're calling the right method,
+        // which is important for compatibility with older android devices.
+        // Ref https://blog.danlew.net/2017/03/16/kotlin-puzzler-whose-line-is-it-anyways/
+        value.forEach { (k, v) ->
+            FfiConverterString.write(k, buf)
+            FfiConverterString.write(v, buf)
         }
     }
 }
