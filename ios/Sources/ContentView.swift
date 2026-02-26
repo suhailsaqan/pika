@@ -237,8 +237,12 @@ private func screenView(
         ChatView(
             chatId: chatId,
             state: chatScreenState(from: state),
+            voiceRecording: state.voiceRecording,
             activeCall: state.activeCall,
             callEvents: state.callTimeline.filter { $0.chatId == chatId },
+            onVoiceRecordingAction: { action in
+                manager.dispatch(action)
+            },
             onSendMessage: { message, replyToMessageId in
                 manager.dispatch(
                     .sendMessage(

@@ -485,6 +485,12 @@ final class PikaUITests: XCTestCase {
         app.launch()
 
         let nostrConnectButton = app.buttons.matching(identifier: "login_nostr_connect_submit").firstMatch
+        if !nostrConnectButton.exists {
+            let advancedButton = app.buttons.matching(identifier: "Advanced").firstMatch
+            if advancedButton.waitForExistence(timeout: 5) {
+                advancedButton.tap()
+            }
+        }
         XCTAssertTrue(nostrConnectButton.waitForExistence(timeout: 10), "Missing Nostr Connect login button")
         nostrConnectButton.tap()
         dismissSystemOpenAppAlertIfPresent()

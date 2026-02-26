@@ -29,6 +29,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.pika.app.AppManager
@@ -37,6 +38,7 @@ import com.pika.app.rust.AuthState
 import com.pika.app.rust.ChatSummary
 import com.pika.app.rust.Screen
 import com.pika.app.ui.Avatar
+import com.pika.app.ui.TestTags
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.GroupAdd
@@ -61,12 +63,17 @@ fun ChatListScreen(manager: AppManager, padding: PaddingValues) {
                     TopAppBarDefaults.topAppBarColors(
                         containerColor = Color.Transparent,
                     ),
-                actions = {
+                navigationIcon = {
                     if (myNpub != null) {
-                        IconButton(onClick = { showMyProfile = true }) {
-                            Icon(Icons.Default.Person, contentDescription = "Profile")
+                        IconButton(
+                            onClick = { showMyProfile = true },
+                            modifier = Modifier.testTag(TestTags.CHATLIST_MY_PROFILE),
+                        ) {
+                            Icon(Icons.Default.Person, contentDescription = "My profile")
                         }
                     }
+                },
+                actions = {
                     IconButton(onClick = { manager.dispatch(AppAction.PushScreen(Screen.NewChat)) }) {
                         Icon(Icons.Default.Add, contentDescription = "New Chat")
                     }

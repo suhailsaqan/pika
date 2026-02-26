@@ -93,6 +93,8 @@ final class MockCore: AppCore, @unchecked Sendable {
     private let stateValue: AppState
     private(set) var dispatchedActions: [AppAction] = []
     weak var reconciler: AppReconciler?
+    private(set) var videoFrameReceiver: VideoFrameReceiver?
+    private(set) var sentVideoFrames: [Data] = []
 
     init(state: AppState) {
         self.stateValue = state
@@ -108,6 +110,14 @@ final class MockCore: AppCore, @unchecked Sendable {
 
     func state() -> AppState {
         stateValue
+    }
+
+    func setVideoFrameReceiver(receiver: VideoFrameReceiver) {
+        videoFrameReceiver = receiver
+    }
+
+    func sendVideoFrame(payload: Data) {
+        sentVideoFrames.append(payload)
     }
 }
 

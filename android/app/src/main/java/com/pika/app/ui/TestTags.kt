@@ -14,6 +14,12 @@ object TestTags {
     const val NEWCHAT_SCAN_QR = "newchat_scan_qr"
     const val NEWCHAT_PASTE = "newchat_paste"
 
+    const val CHATLIST_MY_PROFILE = "chatlist_my_profile"
+    const val MYPROFILE_SHEET_LIST = "myprofile_sheet_list"
+    const val MYPROFILE_COPY_NPUB = "myprofile_copy_npub"
+    const val MYPROFILE_LOGOUT = "myprofile_logout"
+    const val MYPROFILE_LOGOUT_CONFIRM = "myprofile_logout_confirm"
+
     const val CHAT_MESSAGE_LIST = "chat_message_list"
     const val CHAT_MESSAGE_INPUT = "chat_message_input"
     const val CHAT_SEND = "chat_send"

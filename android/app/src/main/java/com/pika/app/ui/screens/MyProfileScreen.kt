@@ -42,6 +42,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
@@ -55,6 +56,7 @@ import com.pika.app.AppManager
 import com.pika.app.rust.AppAction
 import com.pika.app.ui.Avatar
 import com.pika.app.ui.QrCode
+import com.pika.app.ui.TestTags
 import android.util.Base64
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -128,7 +130,9 @@ fun MyProfileSheet(
         sheetState = sheetState,
     ) {
         LazyColumn(
-            modifier = Modifier.padding(horizontal = 20.dp),
+            modifier = Modifier
+                .padding(horizontal = 20.dp)
+                .testTag(TestTags.MYPROFILE_SHEET_LIST),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             // Photo section
@@ -202,7 +206,7 @@ fun MyProfileSheet(
                     )
                     IconButton(onClick = {
                         copyValue(npub, "npub")
-                    }) {
+                    }, modifier = Modifier.testTag(TestTags.MYPROFILE_COPY_NPUB)) {
                         Icon(Icons.Default.ContentCopy, contentDescription = "Copy npub", modifier = Modifier.size(18.dp))
                     }
                 }
@@ -345,7 +349,9 @@ fun MyProfileSheet(
                     colors = ButtonDefaults.buttonColors(
                         containerColor = MaterialTheme.colorScheme.error,
                     ),
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag(TestTags.MYPROFILE_LOGOUT),
                 ) {
                     Text("Log out")
                 }
@@ -365,11 +371,14 @@ fun MyProfileSheet(
             title = { Text("Log out?") },
             text = { Text("You can log back in with your nsec.") },
             confirmButton = {
-                TextButton(onClick = {
-                    manager.logout()
-                    showLogoutConfirm = false
-                    onDismiss()
-                }) {
+                TextButton(
+                    onClick = {
+                        manager.logout()
+                        showLogoutConfirm = false
+                        onDismiss()
+                    },
+                    modifier = Modifier.testTag(TestTags.MYPROFILE_LOGOUT_CONFIRM),
+                ) {
                     Text("Log out", color = MaterialTheme.colorScheme.error)
                 }
             },
