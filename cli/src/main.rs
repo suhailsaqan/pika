@@ -1461,7 +1461,7 @@ async fn cmd_send_hypernote(
     }
 
     let (keys, mdk) = open(cli)?;
-    let mut seen_mls_event_ids = load_processed_mls_event_ids(&cli.state_dir);
+    let mut seen_mls_event_ids = mdk_util::load_processed_mls_event_ids(&cli.state_dir);
     let relays = relay_util::parse_relay_urls(&resolve_relays(cli))?;
 
     // Resolve target group (reuse the same logic as cmd_send for --group / --to).
@@ -1540,7 +1540,7 @@ async fn cmd_send_hypernote(
         .context("create message")?;
     relay_util::publish_and_confirm(&client, &relays, &msg_event, "send_hypernote").await?;
     client.shutdown().await;
-    persist_processed_mls_event_ids(&cli.state_dir, &seen_mls_event_ids)?;
+    mdk_util::persist_processed_mls_event_ids(&cli.state_dir, &seen_mls_event_ids)?;
 
     print(json!({
         "event_id": msg_event.id.to_hex(),
