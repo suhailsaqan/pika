@@ -15,8 +15,34 @@ private struct HypernoteAstNode: Decodable {
 
 private struct HypernoteAstAttribute: Decodable {
     let name: String
-    let type: String
+    let type: String?
     var value: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case name
+        case type
+        case value
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        name = try container.decode(String.self, forKey: .name)
+        type = try container.decodeIfPresent(String.self, forKey: .type)
+
+        if let stringValue = try? container.decode(String.self, forKey: .value) {
+            value = stringValue
+        } else if let boolValue = try? container.decode(Bool.self, forKey: .value) {
+            value = boolValue ? "true" : "false"
+        } else if let intValue = try? container.decode(Int.self, forKey: .value) {
+            value = String(intValue)
+        } else if let doubleValue = try? container.decode(Double.self, forKey: .value) {
+            value = String(doubleValue)
+        } else if (try? container.decodeNil(forKey: .value)) == true {
+            value = nil
+        } else {
+            value = nil
+        }
+    }
 }
 
 // MARK: - Renderer
