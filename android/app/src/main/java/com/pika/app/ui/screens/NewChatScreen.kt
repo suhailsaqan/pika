@@ -44,9 +44,9 @@ import com.pika.app.AppManager
 import com.pika.app.rust.AppAction
 import com.pika.app.rust.AuthState
 import com.pika.app.rust.FollowListEntry
+import com.pika.app.rust.isValidPeerKey
+import com.pika.app.rust.normalizePeerKey
 import com.pika.app.ui.Avatar
-import com.pika.app.ui.PeerKeyNormalizer
-import com.pika.app.ui.PeerKeyValidator
 import com.pika.app.ui.TestTags
 
 @Composable
@@ -56,8 +56,8 @@ fun NewChatScreen(manager: AppManager, padding: PaddingValues) {
     var npub by remember { mutableStateOf("") }
     var showScanner by remember { mutableStateOf(false) }
     var searchText by remember { mutableStateOf("") }
-    val peer = PeerKeyNormalizer.normalize(npub)
-    val isValidPeer = PeerKeyValidator.isValidPeer(peer)
+    val peer = normalizePeerKey(npub)
+    val isValidPeer = isValidPeerKey(peer)
     val isLoading = manager.state.busy.creatingChat
     val isFetchingFollows = manager.state.busy.fetchingFollowList
     val followList = manager.state.followList
@@ -129,7 +129,7 @@ fun NewChatScreen(manager: AppManager, padding: PaddingValues) {
                     TextButton(
                         onClick = {
                             val raw = clipboard.getText()?.text.orEmpty()
-                            npub = PeerKeyNormalizer.normalize(raw)
+                            npub = normalizePeerKey(raw)
                         },
                         enabled = !isLoading,
                         modifier = Modifier.testTag(TestTags.NEWCHAT_PASTE),

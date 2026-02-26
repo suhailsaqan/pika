@@ -46,10 +46,10 @@ import androidx.compose.material.icons.filled.Person
 @OptIn(ExperimentalMaterial3Api::class)
 fun ChatListScreen(manager: AppManager, padding: PaddingValues) {
     var showMyProfile by remember { mutableStateOf(false) }
-    val (myNpub, myPubkey) =
+    val myNpub =
         when (val a = manager.state.auth) {
-            is AuthState.LoggedIn -> a.npub to a.pubkey
-            else -> null to null
+            is AuthState.LoggedIn -> a.npub
+            else -> null
         }
 
     Scaffold(
@@ -84,7 +84,6 @@ fun ChatListScreen(manager: AppManager, padding: PaddingValues) {
             items(manager.state.chatList, key = { it.chatId }) { chat ->
                 ChatRow(
                     chat = chat,
-                    selfPubkey = myPubkey,
                     onClick = { manager.dispatch(AppAction.OpenChat(chat.chatId)) },
                 )
             }
@@ -101,12 +100,8 @@ fun ChatListScreen(manager: AppManager, padding: PaddingValues) {
 }
 
 @Composable
-private fun ChatRow(chat: ChatSummary, selfPubkey: String?, onClick: () -> Unit) {
-    val title = chatTitle(chat, selfPubkey)
-    val peer = if (!chat.isGroup) {
-        chat.members.firstOrNull { selfPubkey == null || it.pubkey != selfPubkey }
-            ?: chat.members.firstOrNull()
-    } else null
+private fun ChatRow(chat: ChatSummary, onClick: () -> Unit) {
+    val peer = if (!chat.isGroup) chat.members.firstOrNull() else null
     Row(
         modifier =
             Modifier
@@ -124,7 +119,7 @@ private fun ChatRow(chat: ChatSummary, selfPubkey: String?, onClick: () -> Unit)
             },
         ) {
             Avatar(
-                name = peer?.name ?: chat.groupName,
+                name = peer?.name ?: chat.displayName,
                 npub = peer?.npub ?: chat.chatId,
                 pictureUrl = peer?.pictureUrl,
             )
@@ -132,14 +127,24 @@ private fun ChatRow(chat: ChatSummary, selfPubkey: String?, onClick: () -> Unit)
 
         Column(modifier = Modifier.weight(1f)) {
             Text(
-                text = title,
+                text = chat.displayName,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 style = MaterialTheme.typography.titleMedium,
             )
+            chat.subtitle?.let { subtitle ->
+                Spacer(modifier = Modifier.height(2.dp))
+                Text(
+                    text = subtitle,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
             Spacer(modifier = Modifier.height(2.dp))
             Text(
-                text = chat.lastMessage ?: "No messages yet",
+                text = chat.lastMessagePreview,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 style = MaterialTheme.typography.bodyMedium,
@@ -147,14 +152,4 @@ private fun ChatRow(chat: ChatSummary, selfPubkey: String?, onClick: () -> Unit)
             )
         }
     }
-}
-
-private fun chatTitle(chat: ChatSummary, selfPubkey: String?): String {
-    if (chat.isGroup) {
-        return chat.groupName?.trim().takeIf { !it.isNullOrBlank() } ?: "Group chat"
-    }
-    val peer =
-        chat.members.firstOrNull { selfPubkey == null || it.pubkey != selfPubkey }
-            ?: chat.members.firstOrNull()
-    return peer?.name?.trim().takeIf { !it.isNullOrBlank() } ?: peer?.npub ?: "Chat"
 }

@@ -31,7 +31,6 @@ class AppManager private constructor(context: Context) : AppReconciler {
     private val amberClient = AmberSignerClient(appContext)
     private val signerRequestLock = Any()
     private val audioFocus = AndroidAudioFocusManager(appContext)
-    private val prefs = appContext.getSharedPreferences("pika_prefs", Context.MODE_PRIVATE)
     private val rust: FfiApp
     private var lastRevApplied: ULong = 0UL
     private val listening = AtomicBoolean(false)
@@ -58,6 +57,8 @@ class AppManager private constructor(context: Context) : AppReconciler {
             activeCall = null,
             callTimeline = emptyList(),
             toast = null,
+            developerMode = false,
+            voiceRecording = null,
         ),
     )
         private set
@@ -163,15 +164,14 @@ class AppManager private constructor(context: Context) : AppReconciler {
         rust.dispatch(AppAction.Logout)
     }
 
-    fun isDeveloperModeEnabled(): Boolean = prefs.getBoolean(DEVELOPER_MODE_ENABLED_KEY, false)
+    fun isDeveloperModeEnabled(): Boolean = state.developerMode
 
     fun enableDeveloperMode() {
-        prefs.edit().putBoolean(DEVELOPER_MODE_ENABLED_KEY, true).apply()
+        rust.dispatch(AppAction.EnableDeveloperMode)
     }
 
     fun wipeLocalDataForDeveloperTools() {
         secureStore.clear()
-        prefs.edit().remove(DEVELOPER_MODE_ENABLED_KEY).apply()
         rust.dispatch(AppAction.WipeLocalData)
     }
 
@@ -455,8 +455,6 @@ class AppManager private constructor(context: Context) : AppReconciler {
             "$NOSTR_CONNECT_CALLBACK_SCHEME://$NOSTR_CONNECT_CALLBACK_HOST"
 
         private val CALLBACK_QUERY_REGEX = Regex("(^|[?&])callback=", RegexOption.IGNORE_CASE)
-        private const val DEVELOPER_MODE_ENABLED_KEY = "developer_mode_enabled"
-
         internal fun withNostrConnectCallback(raw: String): String {
             val trimmed = raw.trim()
             if (!trimmed.startsWith("nostrconnect://", ignoreCase = true)) {

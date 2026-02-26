@@ -31,11 +31,9 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Badge
 import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
@@ -74,6 +72,7 @@ import com.pika.app.AppManager
 import com.pika.app.rust.AppAction
 import com.pika.app.rust.ChatMessage
 import com.pika.app.rust.MessageDeliveryState
+import com.pika.app.rust.MessageSegment
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.ArrowDownward
@@ -83,16 +82,12 @@ import androidx.compose.material.icons.filled.Reply
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.unit.IntOffset
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
 import kotlin.math.roundToInt
 import com.pika.app.rust.Screen
 import com.pika.app.ui.theme.PikaBlue
 import com.pika.app.ui.TestTags
 import dev.jeziellago.compose.markdowntext.MarkdownText
 import kotlinx.coroutines.launch
-import org.json.JSONObject
 
 // Represents an item in the chat timeline: either a message or the unread divider.
 private sealed class ChatListItem {
@@ -127,11 +122,7 @@ fun ChatScreen(
         derivedStateOf { listState.isNearBottomForReverseLayout() }
     }
 
-    // Capture unread count once when this chat is first opened, so we know where to draw
-    // the "NEW MESSAGES" divider and can scroll to it on entry.
-    val capturedUnreadCount = remember(chat.chatId) {
-        manager.state.chatList.find { it.chatId == chatId }?.unreadCount?.toInt() ?: 0
-    }
+    val firstUnreadMessageId = chat.firstUnreadMessageId
 
     // Track new messages arriving while the user is scrolled up.
     var newMessageCount by remember(chat.chatId) { mutableIntStateOf(0) }
@@ -151,13 +142,19 @@ fun ChatScreen(
     val reversed = remember(chat.messages) { chat.messages.asReversed() }
     val reversedIndexById =
         remember(reversed) { reversed.mapIndexed { index, message -> message.id to index }.toMap() }
+    val unreadDividerIndex = remember(reversed, firstUnreadMessageId) {
+        val firstUnreadIndex =
+            firstUnreadMessageId?.let { id ->
+                reversed.indexOfFirst { it.id == id }.takeIf { it >= 0 }
+            } ?: return@remember null
+        if (firstUnreadIndex in 0 until reversed.lastIndex) firstUnreadIndex + 1 else null
+    }
 
     // Build the display list, inserting the "NEW MESSAGES" divider between read and unread.
-    val listItems: List<ChatListItem> = remember(reversed, capturedUnreadCount) {
+    val listItems: List<ChatListItem> = remember(reversed, unreadDividerIndex) {
         buildList {
             for ((i, msg) in reversed.withIndex()) {
-                // Insert divider before the first read message (i.e. after all unread messages).
-                if (i == capturedUnreadCount && capturedUnreadCount > 0 && capturedUnreadCount < reversed.size) {
+                if (unreadDividerIndex != null && i == unreadDividerIndex) {
                     add(ChatListItem.NewMessagesDivider)
                 }
                 add(ChatListItem.Message(msg))
@@ -167,11 +164,9 @@ fun ChatScreen(
 
     // On chat open: if there are unreads, scroll to the divider; otherwise scroll to newest.
     LaunchedEffect(chat.chatId) {
-        if (capturedUnreadCount > 0 && reversed.isNotEmpty()) {
+        if (unreadDividerIndex != null && listItems.isNotEmpty()) {
             shouldStickToBottom = false
-            // Scroll so the divider is visible (it sits at index capturedUnreadCount in listItems).
-            val dividerIndex = minOf(capturedUnreadCount, listItems.size - 1)
-            listState.scrollToItem(dividerIndex)
+            listState.scrollToItem(unreadDividerIndex)
         } else if (chat.messages.isNotEmpty()) {
             listState.scrollToItem(0)
         }
@@ -311,9 +306,6 @@ fun ChatScreen(
                                 MessageBubble(
                                     message = msg,
                                     messagesById = messagesById,
-                                    onSendMessage = { text ->
-                                        manager.dispatch(AppAction.SendMessage(chat.chatId, text, null, null))
-                                    },
                                     onReplyTo = { replyMessage ->
                                         replyDraft = replyMessage
                                     },
@@ -429,57 +421,6 @@ private fun chatTitle(chat: com.pika.app.rust.ChatViewState, selfPubkey: String?
     return peer?.name?.trim().takeIf { !it.isNullOrBlank() } ?: peer?.npub ?: "Chat"
 }
 
-// Parsed segment of a message: either markdown text or a pika-* custom block.
-private sealed class MessageSegment {
-    data class Markdown(val text: String) : MessageSegment()
-    data class PikaPrompt(val title: String, val options: List<String>) : MessageSegment()
-    data class PikaHtml(val html: String) : MessageSegment()
-}
-
-private fun parseMessageSegments(content: String): List<MessageSegment> {
-    val segments = mutableListOf<MessageSegment>()
-    val pattern = Regex("```pika-([\\w-]+)(?:[ \\t]+(\\S+))?\\n([\\s\\S]*?)```")
-    var lastEnd = 0
-
-    for (match in pattern.findAll(content)) {
-        val before = content.substring(lastEnd, match.range.first)
-        if (before.isNotBlank()) segments.add(MessageSegment.Markdown(before))
-
-        val blockType = match.groupValues[1]
-        val blockBody = match.groupValues[3].trim()
-
-        when (blockType) {
-            "prompt" -> {
-                try {
-                    val json = JSONObject(blockBody)
-                    val title = json.getString("title")
-                    val optionsArray = json.getJSONArray("options")
-                    val options = (0 until optionsArray.length()).map { optionsArray.getString(it) }
-                    segments.add(MessageSegment.PikaPrompt(title, options))
-                } catch (_: Exception) {
-                    segments.add(MessageSegment.Markdown("```$blockType\n$blockBody\n```"))
-                }
-            }
-            "html" -> {
-                segments.add(MessageSegment.PikaHtml(blockBody))
-            }
-            "html-update", "prompt-response" -> {
-                // Consumed by Rust core; silently drop if one slips through.
-            }
-            else -> {
-                segments.add(MessageSegment.Markdown("```$blockType\n$blockBody\n```"))
-            }
-        }
-
-        lastEnd = match.range.last + 1
-    }
-
-    val tail = content.substring(lastEnd)
-    if (tail.isNotBlank()) segments.add(MessageSegment.Markdown(tail))
-
-    return segments
-}
-
 @Composable
 private fun NewMessagesDividerRow() {
     Row(
@@ -510,7 +451,6 @@ private fun NewMessagesDividerRow() {
 private fun MessageBubble(
     message: ChatMessage,
     messagesById: Map<String, ChatMessage>,
-    onSendMessage: (String) -> Unit,
     onReplyTo: (ChatMessage) -> Unit,
     onJumpToMessage: (String) -> Unit,
 ) {
@@ -518,7 +458,15 @@ private fun MessageBubble(
     val bubbleColor = if (isMine) PikaBlue else MaterialTheme.colorScheme.surfaceVariant
     val textColor = if (isMine) Color.White else MaterialTheme.colorScheme.onSurfaceVariant
     val align = if (isMine) Alignment.End else Alignment.Start
-    val segments = remember(message.displayContent) { parseMessageSegments(message.displayContent) }
+    val segments = remember(message.segments, message.displayContent) {
+        if (message.segments.isNotEmpty()) {
+            message.segments
+        } else if (message.displayContent.isBlank()) {
+            emptyList()
+        } else {
+            listOf(MessageSegment.Markdown(text = message.displayContent))
+        }
+    }
     val ctx = LocalContext.current
     val clipboardManager = LocalClipboardManager.current
     val haptic = LocalHapticFeedback.current
@@ -526,9 +474,7 @@ private fun MessageBubble(
     val replyTarget = remember(message.replyToMessageId, messagesById) {
         message.replyToMessageId?.let { messagesById[it] }
     }
-    val formattedTime = remember(message.timestamp) {
-        SimpleDateFormat("MMM d, h:mm a", Locale.getDefault()).format(Date(message.timestamp * 1000L))
-    }
+    val formattedTime = message.displayTimestamp
     // Swipe-to-reply state
     val swipeOffset = remember { Animatable(0f) }
     val swipeThreshold = 80f
@@ -665,14 +611,6 @@ private fun MessageBubble(
                         )
                     }
                 }
-                is MessageSegment.PikaPrompt -> {
-                    PikaPromptCard(
-                        title = segment.title,
-                        options = segment.options,
-                        message = message,
-                        onSelect = onSendMessage,
-                    )
-                }
                 is MessageSegment.PikaHtml -> {
                     Box(
                         modifier =
@@ -808,61 +746,6 @@ private fun ReplyComposerPreview(
         }
         TextButton(onClick = onClear) {
             Text("Cancel")
-        }
-    }
-}
-
-@Composable
-private fun PikaPromptCard(title: String, options: List<String>, message: ChatMessage, onSelect: (String) -> Unit) {
-    val hasVoted = message.myPollVote != null
-    Column(
-        modifier =
-            Modifier
-                .clip(RoundedCornerShape(16.dp))
-                .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
-                .padding(12.dp)
-                .widthIn(max = 280.dp),
-        verticalArrangement = Arrangement.spacedBy(6.dp),
-    ) {
-        Text(
-            text = title,
-            style = MaterialTheme.typography.titleSmall,
-            color = MaterialTheme.colorScheme.onSurface,
-        )
-        for (option in options) {
-            val tally = message.pollTally.firstOrNull { it.option == option }
-            val isMyVote = message.myPollVote == option
-            TextButton(
-                onClick = {
-                    val response = "```pika-prompt-response\n{\"prompt_id\":\"${message.id}\",\"selected\":\"$option\"}\n```"
-                    onSelect(response)
-                },
-                enabled = !hasVoted,
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(10.dp),
-                colors =
-                    ButtonDefaults.textButtonColors(
-                        containerColor = if (isMyVote) PikaBlue.copy(alpha = 0.25f) else PikaBlue.copy(alpha = 0.1f),
-                        contentColor = PikaBlue,
-                        disabledContainerColor = if (isMyVote) PikaBlue.copy(alpha = 0.25f) else PikaBlue.copy(alpha = 0.1f),
-                        disabledContentColor = PikaBlue.copy(alpha = 0.7f),
-                    ),
-            ) {
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Text(option)
-                    if (tally != null) {
-                        Text("${tally.count}", style = MaterialTheme.typography.titleSmall)
-                    }
-                }
-            }
-            if (tally != null && tally.voterNames.isNotEmpty()) {
-                Text(
-                    text = tally.voterNames.joinToString(", "),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(start = 12.dp),
-                )
-            }
         }
     }
 }

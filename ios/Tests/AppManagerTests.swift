@@ -15,7 +15,9 @@ final class AppManagerTests: XCTestCase {
             peerProfile: nil,
             activeCall: nil,
             callTimeline: [],
-            toast: toast
+            toast: toast,
+            developerMode: false,
+            voiceRecording: nil
         )
     }
 

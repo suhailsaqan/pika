@@ -265,6 +265,7 @@ mod tests {
             members: vec![],
             is_admin: false,
             messages: vec![],
+            first_unread_message_id: None,
             can_load_older: false,
             typing_members: vec![],
         });

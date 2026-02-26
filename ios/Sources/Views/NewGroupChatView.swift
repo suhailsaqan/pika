@@ -150,8 +150,8 @@ struct NewGroupChatView: View {
         }
         .sheet(isPresented: $showScanner) {
             QrScannerSheet { scanned in
-                let normalized = PeerKeyValidator.normalize(scanned)
-                if PeerKeyValidator.isValidPeer(normalized) && !selectedNpubs.contains(normalized) {
+                let normalized = normalizePeerKey(input: scanned)
+                if isValidPeerKey(input: normalized) && !selectedNpubs.contains(normalized) {
                     selectedNpubs.append(normalized)
                 } else {
                     npubInput = scanned
@@ -227,7 +227,7 @@ struct NewGroupChatView: View {
 
             Button {
                 let raw = UIPasteboard.general.string ?? ""
-                npubInput = PeerKeyValidator.normalize(raw)
+                npubInput = normalizePeerKey(input: raw)
             } label: {
                 Image(systemName: "doc.on.clipboard")
             }
@@ -246,7 +246,7 @@ struct NewGroupChatView: View {
                 addManualMember()
             }
             .fontWeight(.medium)
-            .disabled(!PeerKeyValidator.isValidPeer(PeerKeyValidator.normalize(npubInput)) || isLoading)
+            .disabled(!isValidPeerKey(input: normalizePeerKey(input: npubInput)) || isLoading)
             .accessibilityIdentifier(TestIds.newGroupAddMember)
         }
     }
@@ -260,8 +260,8 @@ struct NewGroupChatView: View {
     }
 
     private func addManualMember() {
-        let normalized = PeerKeyValidator.normalize(npubInput)
-        guard PeerKeyValidator.isValidPeer(normalized) else { return }
+        let normalized = normalizePeerKey(input: npubInput)
+        guard isValidPeerKey(input: normalized) else { return }
         if !selectedNpubs.contains(normalized) {
             selectedNpubs.append(normalized)
         }

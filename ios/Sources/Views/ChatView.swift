@@ -322,6 +322,8 @@ struct ChatView: View {
                                             }
                                         }
                                     )
+                                case .unreadDivider:
+                                    UnreadDividerRow()
                                 case .callEvent(let event):
                                     CallTimelineEventRow(event: event)
                                 }
@@ -468,14 +470,22 @@ struct ChatView: View {
         let membersByPubkey = Dictionary(uniqueKeysWithValues: chat.members.map { ($0.pubkey, $0) })
         var rows: [ChatTimelineRow] = []
         rows.reserveCapacity(entries.count)
+        var insertedUnreadDivider = false
 
         for entry in entries {
             switch entry {
             case .callEvent(_, let event):
                 rows.append(.callEvent(event))
             case .message(_, let message):
+                let isFirstUnread = chat.firstUnreadMessageId == message.id
+                if isFirstUnread, !insertedUnreadDivider, !rows.isEmpty {
+                    rows.append(.unreadDivider)
+                    insertedUnreadDivider = true
+                }
+
                 if let lastIndex = rows.indices.last,
                    case .messageGroup(var group) = rows[lastIndex],
+                   !isFirstUnread,
                    group.senderPubkey == message.senderPubkey,
                    group.isMine == message.isMine {
                     group.messages.append(message)
@@ -536,12 +546,15 @@ struct ChatView: View {
 
     private enum ChatTimelineRow: Identifiable {
         case messageGroup(GroupedChatMessage)
+        case unreadDivider
         case callEvent(CallTimelineEvent)
 
         var id: String {
             switch self {
             case .messageGroup(let group):
                 return "msg:\(group.id)"
+            case .unreadDivider:
+                return "unread-divider"
             case .callEvent(let event):
                 return "call:\(event.id)"
             }
@@ -1082,6 +1095,19 @@ private struct EmojiPickerSheet: View {
     }
 }
 
+private struct UnreadDividerRow: View {
+    var body: some View {
+        HStack(spacing: 10) {
+            Divider()
+            Text("NEW MESSAGES")
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(.blue)
+            Divider()
+        }
+        .padding(.vertical, 8)
+    }
+}
+
 private struct BottomVisibleKey: PreferenceKey {
     static var defaultValue: CGFloat? = nil
     static func reduce(value: inout CGFloat?, nextValue: () -> CGFloat?) {
@@ -1116,11 +1142,10 @@ private struct FloatingInputBarModifier<Bar: View>: ViewModifier {
 }
 
 // Extracted to MessageBubbleViews.swift:
-// PikaPrompt, MessageSegment, parseMessageSegments,
 // GroupedChatMessage, GroupedBubblePosition,
 // MessageGroupRow, MessageBubbleStack, MessageBubble,
 // MediaAttachmentView, ReplyPreviewCard, deliveryText,
-// PikaPromptView, PikaHtmlView, PikaWebView, Theme extensions
+// PikaHtmlView, PikaWebView, Theme extensions
 
 #if DEBUG
 private enum ChatViewPreviewData {

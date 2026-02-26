@@ -44,8 +44,8 @@ struct QrScannerSheet: View {
         switch authStatus {
         case .authorized:
             QrScannerView { raw in
-                let normalized = PeerKeyValidator.normalize(raw)
-                if PeerKeyValidator.isValidPeer(normalized) {
+                let normalized = normalizePeerKey(input: raw)
+                if isValidPeerKey(input: normalized) {
                     onScanned(normalized)
                     dismiss()
                 } else {
@@ -161,4 +161,3 @@ private final class QrScannerViewController: UIViewController, AVCaptureMetadata
         onCode?(value)
     }
 }
-

@@ -77,7 +77,7 @@ fun MyProfileSheet(
     var showWipeConfirm by remember { mutableStateOf(false) }
     var isLoadingPhoto by remember { mutableStateOf(false) }
     var buildNumberTapCount by remember { mutableStateOf(0) }
-    var developerModeEnabled by remember { mutableStateOf(manager.isDeveloperModeEnabled()) }
+    val developerModeEnabled = manager.state.developerMode
 
     val nsec = remember { manager.getNsec() }
 
@@ -277,7 +277,6 @@ fun MyProfileSheet(
                                 val remaining = 7 - buildNumberTapCount
                                 if (remaining <= 0) {
                                     manager.enableDeveloperMode()
-                                    developerModeEnabled = true
                                     Toast.makeText(ctx, "Developer mode enabled", Toast.LENGTH_SHORT).show()
                                 } else {
                                     val noun = if (remaining == 1) "tap" else "taps"
@@ -390,7 +389,6 @@ fun MyProfileSheet(
             confirmButton = {
                 TextButton(onClick = {
                     manager.wipeLocalDataForDeveloperTools()
-                    developerModeEnabled = manager.isDeveloperModeEnabled()
                     showWipeConfirm = false
                     onDismiss()
                 }) {

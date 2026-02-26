@@ -105,21 +105,18 @@ final class KeychainAuthStore: AuthStore {
 @MainActor
 @Observable
 final class AppManager: AppReconciler {
-    private static let developerModeEnabledKey = "developer_mode_enabled"
     private static let migrationSentinelName = ".migrated_to_app_group"
     private(set) var core: AppCore
     var state: AppState
     private var lastRevApplied: UInt64
     private let authStore: AuthStore
-    private let userDefaults: UserDefaults
     /// True while we're waiting for a stored session to be restored by Rust.
     var isRestoringSession: Bool = false
     private let callAudioSession = CallAudioSessionCoordinator()
 
-    init(core: AppCore, authStore: AuthStore, userDefaults: UserDefaults = .standard) {
+    init(core: AppCore, authStore: AuthStore) {
         self.core = core
         self.authStore = authStore
-        self.userDefaults = userDefaults
 
         let initial = core.state()
         self.state = initial
@@ -285,16 +282,15 @@ final class AppManager: AppReconciler {
     }
 
     var isDeveloperModeEnabled: Bool {
-        userDefaults.bool(forKey: Self.developerModeEnabledKey)
+        state.developerMode
     }
 
     func enableDeveloperMode() {
-        userDefaults.set(true, forKey: Self.developerModeEnabledKey)
+        dispatch(.enableDeveloperMode)
     }
 
     func wipeLocalDataForDeveloperTools() {
         authStore.clear()
-        userDefaults.removeObject(forKey: Self.developerModeEnabledKey)
         ensureMigrationSentinelExists()
         dispatch(.wipeLocalData)
     }

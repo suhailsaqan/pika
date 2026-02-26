@@ -138,13 +138,13 @@ struct GroupInfoView: View {
                                 .accessibilityIdentifier(TestIds.groupInfoAddNpub)
 
                             Button("Add") {
-                                let normalized = PeerKeyValidator.normalize(npubInput)
-                                guard PeerKeyValidator.isValidPeer(normalized) else { return }
+                                let normalized = normalizePeerKey(input: npubInput)
+                                guard isValidPeerKey(input: normalized) else { return }
                                 onAddMembers([normalized])
                                 npubInput = ""
                             }
                             .buttonStyle(.bordered)
-                            .disabled(!PeerKeyValidator.isValidPeer(PeerKeyValidator.normalize(npubInput)))
+                            .disabled(!isValidPeerKey(input: normalizePeerKey(input: npubInput)))
                             .accessibilityIdentifier(TestIds.groupInfoAddButton)
                         }
                     }

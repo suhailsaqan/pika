@@ -102,7 +102,7 @@ struct CallScreenView: View {
                         .foregroundStyle(.white.opacity(0.86))
                 }
 
-                if let duration = callDurationText(startedAt: call.startedAt), call.isLive {
+                if let duration = call.durationDisplay, call.isLive {
                     Text(duration)
                         .font(.title3.monospacedDigit().weight(.medium))
                         .foregroundStyle(.white.opacity(0.9))
@@ -188,7 +188,7 @@ struct CallScreenView: View {
                     Spacer()
 
                     VStack(alignment: .trailing, spacing: 4) {
-                        if let duration = callDurationText(startedAt: call.startedAt), call.isLive {
+                        if let duration = call.durationDisplay, call.isLive {
                             Text(duration)
                                 .font(.callout.monospacedDigit().weight(.medium))
                                 .foregroundStyle(.white)
@@ -502,6 +502,7 @@ private struct CallControlButton: View {
             shouldAutoPresentCallScreen: true,
             shouldEnableProximityLock: true,
             startedAt: Int64(Date().timeIntervalSince1970) - 95,
+            durationDisplay: "01:35",
             isMuted: false,
             isVideoCall: false,
             isCameraEnabled: false,
@@ -539,6 +540,7 @@ private struct CallControlButton: View {
             shouldAutoPresentCallScreen: true,
             shouldEnableProximityLock: false,
             startedAt: Int64(Date().timeIntervalSince1970) - 30,
+            durationDisplay: "00:30",
             isMuted: false,
             isVideoCall: true,
             isCameraEnabled: true,

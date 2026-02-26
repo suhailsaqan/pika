@@ -141,8 +141,8 @@ struct NewChatView: View {
 
     @ViewBuilder
     private func manualEntryContent(isLoading: Bool) -> some View {
-        let peer = PeerKeyValidator.normalize(npubInput)
-        let isValidPeer = PeerKeyValidator.isValidPeer(peer)
+        let peer = normalizePeerKey(input: npubInput)
+        let isValidPeer = isValidPeerKey(input: peer)
 
         HStack(spacing: 8) {
             TextField("npub1… or hex pubkey", text: $npubInput)
@@ -153,7 +153,7 @@ struct NewChatView: View {
 
             Button {
                 let raw = UIPasteboard.general.string ?? ""
-                npubInput = PeerKeyValidator.normalize(raw)
+                npubInput = normalizePeerKey(input: raw)
             } label: {
                 Image(systemName: "doc.on.clipboard")
             }

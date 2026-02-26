@@ -77,6 +77,9 @@ pub enum InternalEvent {
         groups: Vec<String>,
     },
     Toast(String),
+    ToastAutoDismiss {
+        token: u64,
+    },
 
     // Async CreateChat fetch result (1:1)
     PeerKeyPackageFetched {
@@ -178,6 +181,12 @@ pub enum InternalEvent {
         video_tx: u64,
         video_rx: u64,
         video_rx_decrypt_fail: u64,
+    },
+    CallDurationTick {
+        token: u64,
+    },
+    VoiceRecordingDurationTick {
+        token: u64,
     },
 
     // Video frame sent from platform (camera capture → H.264 NALUs).
