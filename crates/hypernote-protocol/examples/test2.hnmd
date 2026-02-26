@@ -1,0 +1,12 @@
+```hnmd
+{"title": "Send Payment", "state": {"recipient": "npub1example..."}}
+```
+# Send Payment
+
+<Card>
+<TextInput name="recipient" placeholder="npub or lightning address" />
+<TextInput name="amount" placeholder="Amount in sats" />
+<TextInput name="memo" placeholder="Memo (optional)" />
+</Card>
+
+<SubmitButton action="send" variant="danger">Send Sats</SubmitButton>

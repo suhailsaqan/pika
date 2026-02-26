@@ -18,6 +18,7 @@ use std::sync::{Arc, Mutex, RwLock};
 use std::time::Duration;
 
 use flume::Sender;
+use hypernote_protocol as hn;
 
 use crate::actions::AppAction;
 use crate::bunker_signer::{
@@ -103,6 +104,9 @@ const IOS_MIGRATION_SENTINEL: &str = ".migrated_to_app_group";
 
 const TYPING_INDICATOR_KIND: Kind = Kind::Custom(20_067);
 pub(crate) const CALL_SIGNAL_KIND: Kind = Kind::Custom(10);
+pub(crate) const HYPERNOTE_KIND: Kind = Kind::Custom(hn::HYPERNOTE_KIND);
+pub(crate) const HYPERNOTE_ACTION_RESPONSE_KIND: Kind =
+    Kind::Custom(hn::HYPERNOTE_ACTION_RESPONSE_KIND);
 
 const LOCAL_OUTBOX_MAX_PER_CHAT: usize = 8;
 const NOSTR_CONNECT_LOGIN_TIMEOUT_SECS: u64 = 95;
@@ -217,6 +221,7 @@ struct LocalOutgoing {
     reply_to_message_id: Option<String>,
     seq: u64,
     media: Vec<ChatMediaAttachment>,
+    kind: Kind,
 }
 
 #[derive(Debug, Clone)]
@@ -3118,6 +3123,7 @@ impl AppCore {
                 let mut is_typing_indicator = false;
                 let mut is_call_signal_kind = false;
                 let mut is_reaction = false;
+                let mut is_hypernote_response = false;
 
                 let mls_group_id: Option<GroupId> = match &result {
                     MessageProcessingResult::ApplicationMessage(msg) => {
@@ -3140,6 +3146,15 @@ impl AppCore {
                             Kind::ChatMessage | Kind::Reaction => {
                                 if msg.kind == Kind::Reaction {
                                     is_reaction = true;
+                                }
+                                app_sender = Some(msg.pubkey);
+                                app_content = Some(msg.content.clone());
+                            }
+                            kind if kind == HYPERNOTE_KIND
+                                || kind == HYPERNOTE_ACTION_RESPONSE_KIND =>
+                            {
+                                if msg.kind == HYPERNOTE_ACTION_RESPONSE_KIND {
+                                    is_hypernote_response = true;
                                 }
                                 app_sender = Some(msg.pubkey);
                                 app_content = Some(msg.content.clone());
@@ -3212,10 +3227,13 @@ impl AppCore {
                             let current =
                                 self.state.current_chat.as_ref().map(|c| c.chat_id.as_str());
                             let is_call_signal = is_call_signal_kind;
-                            if current != Some(chat_id.as_str()) && !is_call_signal && !is_reaction
+                            if current != Some(chat_id.as_str())
+                                && !is_call_signal
+                                && !is_reaction
+                                && !is_hypernote_response
                             {
                                 *self.unread_counts.entry(chat_id.clone()).or_insert(0) += 1;
-                            } else if is_app_message && !is_call_signal {
+                            } else if is_app_message && !is_call_signal && !is_hypernote_response {
                                 self.loaded_count
                                     .entry(chat_id.clone())
                                     .and_modify(|n| *n += 1)
@@ -3363,6 +3381,55 @@ impl AppCore {
                 self.emit_auth();
                 self.wipe_local_data();
                 self.handle_auth_transition(false);
+            }
+            AppAction::HypernoteAction {
+                chat_id,
+                message_id,
+                action_name,
+                form,
+            } => {
+                if !self.is_logged_in() {
+                    self.toast("Please log in first");
+                    return;
+                }
+
+                // Always send actions as kind-9468 response payloads.
+                // Signed action publishing has been removed from hypernote v1.
+                let payload = hn::build_action_response_payload(&action_name, &form);
+                let mut tags = Vec::new();
+                if let Ok(eid) = EventId::parse(&message_id) {
+                    tags.push(Tag::event(eid));
+                }
+                self.publish_chat_message_with_tags(
+                    chat_id,
+                    payload.to_string(),
+                    HYPERNOTE_ACTION_RESPONSE_KIND,
+                    tags,
+                    Some(message_id),
+                    vec![],
+                );
+            }
+            AppAction::SendHypernotePoll {
+                chat_id,
+                question,
+                options,
+            } => {
+                if !self.is_logged_in() {
+                    self.toast("Please log in first");
+                    return;
+                }
+                let Some(content) = hn::build_poll_hypernote(&question, &options) else {
+                    self.toast("Poll needs a question and at least two options");
+                    return;
+                };
+                self.publish_chat_message_with_tags(
+                    chat_id,
+                    content,
+                    HYPERNOTE_KIND,
+                    vec![],
+                    None,
+                    vec![],
+                );
             }
             AppAction::ArchiveChat { chat_id } => {
                 self.archived_chats.insert(chat_id.clone());

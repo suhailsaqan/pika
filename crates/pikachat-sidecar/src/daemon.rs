@@ -5,6 +5,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
 use anyhow::{Context, anyhow};
+use hypernote_protocol as hn;
 use mdk_core::encrypted_media::crypto::{DEFAULT_SCHEME_VERSION, derive_encryption_key};
 use mdk_core::encrypted_media::types::{MediaProcessingOptions, MediaReference};
 use mdk_core::prelude::*;
@@ -63,11 +64,41 @@ enum InCmd {
         #[serde(default)]
         request_id: Option<String>,
     },
+    HypernoteCatalog {
+        #[serde(default)]
+        request_id: Option<String>,
+    },
     SendMessage {
         #[serde(default)]
         request_id: Option<String>,
         nostr_group_id: String,
         content: String,
+    },
+    SendHypernote {
+        #[serde(default)]
+        request_id: Option<String>,
+        nostr_group_id: String,
+        content: String,
+        #[serde(default)]
+        title: Option<String>,
+        #[serde(default)]
+        state: Option<String>,
+    },
+    React {
+        #[serde(default)]
+        request_id: Option<String>,
+        nostr_group_id: String,
+        event_id: String,
+        emoji: String,
+    },
+    SubmitHypernoteAction {
+        #[serde(default)]
+        request_id: Option<String>,
+        nostr_group_id: String,
+        event_id: String,
+        action: String,
+        #[serde(default)]
+        form: HashMap<String, String>,
     },
     SendMedia {
         #[serde(default)]
@@ -199,7 +230,9 @@ enum OutMsg {
         nostr_group_id: String,
         from_pubkey: String,
         content: String,
+        kind: u16,
         created_at: u64,
+        event_id: String,
         message_id: String,
         #[serde(skip_serializing_if = "Vec::is_empty")]
         media: Vec<MediaAttachmentOut>,
@@ -2618,7 +2651,9 @@ pub async fn daemon_main(
                                                             nostr_group_id: event_h_tag_hex(ev).unwrap_or_else(|| nostr_group_id_hex.clone()),
                                                             from_pubkey: msg.pubkey.to_hex().to_lowercase(),
                                                             content: msg.content,
+                                                            kind: msg.kind.as_u16(),
                                                             created_at: msg.created_at.as_secs(),
+                                                            event_id: msg.id.to_hex(),
                                                             message_id: msg.id.to_hex(),
                                                             media,
                                                         }).ok();
@@ -2664,6 +2699,11 @@ pub async fn daemon_main(
                             }
                         }
                     }
+                    InCmd::HypernoteCatalog { request_id } => {
+                        let _ = out_tx.send(out_ok(request_id, Some(json!({
+                            "catalog": hn::hypernote_catalog_value(),
+                        }))));
+                    }
                     InCmd::SendMessage { request_id, nostr_group_id, content } => {
                         let mls_group_id = match resolve_group(&mdk, &nostr_group_id) {
                             Ok(id) => id,
@@ -2679,6 +2719,170 @@ pub async fn daemon_main(
                             }
                             Err(e) => {
                                 let _ = out_tx.send(out_error(request_id, "publish_failed", format!("{e:#}")));
+                            }
+                        }
+                    }
+                    InCmd::SendHypernote {
+                        request_id,
+                        nostr_group_id,
+                        content,
+                        title,
+                        state,
+                    } => {
+                        let mls_group_id = match resolve_group(&mdk, &nostr_group_id) {
+                            Ok(id) => id,
+                            Err(e) => {
+                                out_tx.send(out_error(request_id, "bad_group_id", format!("{e:#}"))).ok();
+                                continue;
+                            }
+                        };
+                        let mut tags = Vec::new();
+                        if let Some(ref t) = title {
+                            tags.push(Tag::custom(TagKind::custom("title"), vec![t.clone()]));
+                        }
+                        if let Some(ref s) = state {
+                            tags.push(Tag::custom(TagKind::custom("state"), vec![s.clone()]));
+                        }
+                        let rumor = EventBuilder::new(Kind::Custom(hn::HYPERNOTE_KIND), content)
+                            .tags(tags)
+                            .build(keys.public_key());
+                        match sign_and_publish(&client, &relay_urls, &mdk, &keys, &mls_group_id, rumor, "daemon_send_hypernote").await {
+                            Ok(ev) => {
+                                let _ = out_tx.send(out_ok(request_id, Some(json!({"event_id": ev.id.to_hex()}))));
+                            }
+                            Err(e) => {
+                                let _ = out_tx.send(out_error(request_id, "publish_failed", format!("{e:#}")));
+                            }
+                        }
+                    }
+                    InCmd::React {
+                        request_id,
+                        nostr_group_id,
+                        event_id,
+                        emoji,
+                    } => {
+                        let mls_group_id = match resolve_group(&mdk, &nostr_group_id) {
+                            Ok(id) => id,
+                            Err(e) => {
+                                out_tx
+                                    .send(out_error(request_id, "bad_group_id", format!("{e:#}")))
+                                    .ok();
+                                continue;
+                            }
+                        };
+                        let target = match EventId::from_hex(event_id.trim()) {
+                            Ok(id) => id,
+                            Err(_) => {
+                                out_tx
+                                    .send(out_error(
+                                        request_id,
+                                        "bad_event_id",
+                                        "event_id must be hex",
+                                    ))
+                                    .ok();
+                                continue;
+                            }
+                        };
+                        let emoji = emoji.trim();
+                        if emoji.is_empty() {
+                            out_tx
+                                .send(out_error(request_id, "bad_emoji", "emoji is required"))
+                                .ok();
+                            continue;
+                        }
+                        let rumor = EventBuilder::new(Kind::Reaction, emoji)
+                            .tags(vec![Tag::event(target)])
+                            .build(keys.public_key());
+                        match sign_and_publish(
+                            &client,
+                            &relay_urls,
+                            &mdk,
+                            &keys,
+                            &mls_group_id,
+                            rumor,
+                            "daemon_react",
+                        )
+                        .await
+                        {
+                            Ok(ev) => {
+                                let _ = out_tx.send(out_ok(
+                                    request_id,
+                                    Some(json!({"event_id": ev.id.to_hex()})),
+                                ));
+                            }
+                            Err(e) => {
+                                let _ =
+                                    out_tx.send(out_error(request_id, "publish_failed", format!("{e:#}")));
+                            }
+                        }
+                    }
+                    InCmd::SubmitHypernoteAction {
+                        request_id,
+                        nostr_group_id,
+                        event_id,
+                        action,
+                        form,
+                    } => {
+                        let mls_group_id = match resolve_group(&mdk, &nostr_group_id) {
+                            Ok(id) => id,
+                            Err(e) => {
+                                out_tx
+                                    .send(out_error(request_id, "bad_group_id", format!("{e:#}")))
+                                    .ok();
+                                continue;
+                            }
+                        };
+                        let target = match EventId::from_hex(event_id.trim()) {
+                            Ok(id) => id,
+                            Err(_) => {
+                                out_tx
+                                    .send(out_error(
+                                        request_id,
+                                        "bad_event_id",
+                                        "event_id must be hex",
+                                    ))
+                                    .ok();
+                                continue;
+                            }
+                        };
+                        let action = action.trim();
+                        if action.is_empty() {
+                            out_tx
+                                .send(out_error(
+                                    request_id,
+                                    "bad_action",
+                                    "action is required",
+                                ))
+                                .ok();
+                            continue;
+                        }
+                        let payload = hn::build_action_response_payload(action, &form).to_string();
+                        let rumor = EventBuilder::new(
+                            Kind::Custom(hn::HYPERNOTE_ACTION_RESPONSE_KIND),
+                            payload,
+                        )
+                        .tags(vec![Tag::event(target)])
+                        .build(keys.public_key());
+                        match sign_and_publish(
+                            &client,
+                            &relay_urls,
+                            &mdk,
+                            &keys,
+                            &mls_group_id,
+                            rumor,
+                            "daemon_submit_hypernote_action",
+                        )
+                        .await
+                        {
+                            Ok(ev) => {
+                                let _ = out_tx.send(out_ok(
+                                    request_id,
+                                    Some(json!({"event_id": ev.id.to_hex()})),
+                                ));
+                            }
+                            Err(e) => {
+                                let _ =
+                                    out_tx.send(out_error(request_id, "publish_failed", format!("{e:#}")));
                             }
                         }
                     }
@@ -3918,7 +4122,9 @@ pub async fn daemon_main(
                                 nostr_group_id,
                                 from_pubkey: sender_hex,
                                 content: msg.content,
+                                kind: msg.kind.as_u16(),
                                 created_at: msg.created_at.as_secs(),
+                                event_id: msg.id.to_hex(),
                                 message_id: msg.id.to_hex(),
                                 media,
                             }).ok();
@@ -4307,6 +4513,79 @@ mod tests {
         }
     }
 
+    #[test]
+    fn deserialize_hypernote_catalog_cmd() {
+        let json = r#"{"cmd":"hypernote_catalog","request_id":"r2"}"#;
+        let cmd: InCmd = serde_json::from_str(json).expect("deserialize");
+        match cmd {
+            InCmd::HypernoteCatalog { request_id } => {
+                assert_eq!(request_id.as_deref(), Some("r2"));
+            }
+            other => panic!("expected HypernoteCatalog, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn deserialize_react_cmd() {
+        let json = r#"{
+            "cmd": "react",
+            "request_id": "r3",
+            "nostr_group_id": "aa",
+            "event_id": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            "emoji": "🧇"
+        }"#;
+        let cmd: InCmd = serde_json::from_str(json).expect("deserialize");
+        match cmd {
+            InCmd::React {
+                request_id,
+                nostr_group_id,
+                event_id,
+                emoji,
+            } => {
+                assert_eq!(request_id.as_deref(), Some("r3"));
+                assert_eq!(nostr_group_id, "aa");
+                assert_eq!(
+                    event_id,
+                    "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+                );
+                assert_eq!(emoji, "🧇");
+            }
+            other => panic!("expected React, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn deserialize_submit_hypernote_action_cmd() {
+        let json = r#"{
+            "cmd": "submit_hypernote_action",
+            "request_id": "r4",
+            "nostr_group_id": "aa",
+            "event_id": "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210",
+            "action": "vote_yes",
+            "form": {"note":"ship it"}
+        }"#;
+        let cmd: InCmd = serde_json::from_str(json).expect("deserialize");
+        match cmd {
+            InCmd::SubmitHypernoteAction {
+                request_id,
+                nostr_group_id,
+                event_id,
+                action,
+                form,
+            } => {
+                assert_eq!(request_id.as_deref(), Some("r4"));
+                assert_eq!(nostr_group_id, "aa");
+                assert_eq!(
+                    event_id,
+                    "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210"
+                );
+                assert_eq!(action, "vote_yes");
+                assert_eq!(form.get("note").map(String::as_str), Some("ship it"));
+            }
+            other => panic!("expected SubmitHypernoteAction, got {other:?}"),
+        }
+    }
+
     // ── OutMsg serialization tests ─────────────────────────────────────
 
     #[test]
@@ -4315,13 +4594,17 @@ mod tests {
             nostr_group_id: "aabb".into(),
             from_pubkey: "cc".into(),
             content: "hello".into(),
+            kind: Kind::ChatMessage.as_u16(),
             created_at: 123,
+            event_id: "ee".into(),
             message_id: "dd".into(),
             media: vec![],
         };
         let json = serde_json::to_value(&msg).unwrap();
         assert_eq!(json["type"], "message_received");
         assert_eq!(json["content"], "hello");
+        assert_eq!(json["kind"], Kind::ChatMessage.as_u16());
+        assert_eq!(json["event_id"], "ee");
         // Empty media vec should be omitted
         assert!(json.get("media").is_none());
     }
@@ -4332,7 +4615,9 @@ mod tests {
             nostr_group_id: "aabb".into(),
             from_pubkey: "cc".into(),
             content: "look at this".into(),
+            kind: Kind::ChatMessage.as_u16(),
             created_at: 456,
+            event_id: "ee".into(),
             message_id: "dd".into(),
             media: vec![MediaAttachmentOut {
                 url: "https://blossom.example.com/abc123".into(),
@@ -4347,6 +4632,8 @@ mod tests {
             }],
         };
         let json = serde_json::to_value(&msg).unwrap();
+        assert_eq!(json["kind"], Kind::ChatMessage.as_u16());
+        assert_eq!(json["event_id"], "ee");
         let media = json["media"].as_array().expect("media should be array");
         assert_eq!(media.len(), 1);
         assert_eq!(media[0]["url"], "https://blossom.example.com/abc123");
@@ -4362,7 +4649,9 @@ mod tests {
             nostr_group_id: "aabb".into(),
             from_pubkey: "cc".into(),
             content: "".into(),
+            kind: Kind::ChatMessage.as_u16(),
             created_at: 0,
+            event_id: "ee".into(),
             message_id: "dd".into(),
             media: vec![MediaAttachmentOut {
                 url: "https://example.com/file".into(),

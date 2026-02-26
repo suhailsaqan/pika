@@ -287,6 +287,21 @@ private func screenView(
                     filename: filename,
                     caption: caption
                 ))
+            },
+            onHypernoteAction: { chatId, actionName, messageId, form in
+                manager.dispatch(.hypernoteAction(
+                    chatId: chatId,
+                    messageId: messageId,
+                    actionName: actionName,
+                    form: form
+                ))
+            },
+            onSendPoll: { chatId, question, options in
+                manager.dispatch(.sendHypernotePoll(
+                    chatId: chatId,
+                    question: question,
+                    options: options
+                ))
             }
         )
         .onAppear {

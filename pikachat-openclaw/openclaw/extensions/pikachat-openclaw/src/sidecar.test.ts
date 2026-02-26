@@ -47,6 +47,38 @@ describe("SidecarInCmd send_media shape", () => {
   });
 });
 
+describe("SidecarInCmd reaction/hypernote-action shapes", () => {
+  it("serializes react command", () => {
+    const cmd = {
+      cmd: "react",
+      request_id: "r3",
+      nostr_group_id: "aabbccdd",
+      event_id: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+      emoji: "🧇",
+    };
+    const parsed = JSON.parse(JSON.stringify(cmd));
+    assert.equal(parsed.cmd, "react");
+    assert.equal(parsed.event_id, "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef");
+    assert.equal(parsed.emoji, "🧇");
+  });
+
+  it("serializes submit_hypernote_action command", () => {
+    const cmd = {
+      cmd: "submit_hypernote_action",
+      request_id: "r4",
+      nostr_group_id: "aabbccdd",
+      event_id: "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210",
+      action: "vote_yes",
+      form: { reason: "ship_it" },
+    };
+    const parsed = JSON.parse(JSON.stringify(cmd));
+    assert.equal(parsed.cmd, "submit_hypernote_action");
+    assert.equal(parsed.event_id, "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210");
+    assert.equal(parsed.action, "vote_yes");
+    assert.equal(parsed.form.reason, "ship_it");
+  });
+});
+
 describe("SidecarOutMsg message_received with media", () => {
   it("parses message_received with media array", () => {
     const msg = {
@@ -54,7 +86,9 @@ describe("SidecarOutMsg message_received with media", () => {
       nostr_group_id: "aabb",
       from_pubkey: "cc",
       content: "look at this",
+      kind: 1,
       created_at: 1234567890,
+      event_id: "ee",
       message_id: "dd",
       media: [
         {
@@ -73,6 +107,8 @@ describe("SidecarOutMsg message_received with media", () => {
     const parsed = JSON.parse(json);
     assert.equal(parsed.type, "message_received");
     assert.equal(parsed.content, "look at this");
+    assert.equal(parsed.kind, 1);
+    assert.equal(parsed.event_id, "ee");
     assert.ok(Array.isArray(parsed.media));
     assert.equal(parsed.media.length, 1);
     assert.equal(parsed.media[0].url, "https://blossom.example.com/abc123");
@@ -87,12 +123,16 @@ describe("SidecarOutMsg message_received with media", () => {
       nostr_group_id: "aabb",
       from_pubkey: "cc",
       content: "hello",
+      kind: 9468,
       created_at: 1234567890,
+      event_id: "ee",
       message_id: "dd",
     };
     const json = JSON.stringify(msg);
     const parsed = JSON.parse(json);
     assert.equal(parsed.type, "message_received");
+    assert.equal(parsed.kind, 9468);
+    assert.equal(parsed.event_id, "ee");
     assert.equal(parsed.media, undefined);
   });
 
@@ -102,7 +142,9 @@ describe("SidecarOutMsg message_received with media", () => {
       nostr_group_id: "aabb",
       from_pubkey: "cc",
       content: "",
+      kind: 1,
       created_at: 0,
+      event_id: "ee",
       message_id: "dd",
       media: [
         {
