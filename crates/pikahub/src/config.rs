@@ -26,6 +26,10 @@ impl ProfileName {
         matches!(self, Self::Relay | Self::RelayBot | Self::Backend)
     }
 
+    pub fn needs_moq(self) -> bool {
+        matches!(self, Self::Backend)
+    }
+
     pub fn needs_server(self) -> bool {
         matches!(self, Self::Backend)
     }
@@ -63,12 +67,18 @@ impl std::fmt::Display for ProfileName {
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct OverlayConfig {
     pub relay: Option<RelayOverlay>,
+    pub moq: Option<MoqOverlay>,
     pub server: Option<ServerOverlay>,
     pub bot: Option<BotOverlay>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct RelayOverlay {
+    pub port: Option<u16>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct MoqOverlay {
     pub port: Option<u16>,
 }
 
@@ -87,6 +97,7 @@ pub struct BotOverlay {
 pub struct ResolvedConfig {
     pub profile: ProfileName,
     pub relay_port: u16,
+    pub moq_port: u16,
     pub server_port: u16,
     pub state_dir: PathBuf,
     #[allow(dead_code)]
@@ -104,6 +115,7 @@ impl ResolvedConfig {
         overlay: Option<OverlayConfig>,
         ephemeral: bool,
         relay_port_cli: Option<u16>,
+        moq_port_cli: Option<u16>,
         server_port_cli: Option<u16>,
         state_dir_cli: Option<PathBuf>,
     ) -> Result<Self> {
@@ -114,6 +126,11 @@ impl ResolvedConfig {
         let relay_port = relay_port_cli
             .or(overlay.relay.as_ref().and_then(|r| r.port))
             .unwrap_or(DEFAULT_RELAY_PORT);
+
+        // moq-relay always gets a free UDP port (default 0) since it uses QUIC.
+        let moq_port = moq_port_cli
+            .or(overlay.moq.as_ref().and_then(|m| m.port))
+            .unwrap_or(0);
 
         // pika-server doesn't support port 0 natively, so pre-pick a free port.
         let server_port = server_port_cli
@@ -151,6 +168,7 @@ impl ResolvedConfig {
         Ok(Self {
             profile,
             relay_port,
+            moq_port,
             server_port,
             state_dir,
             ephemeral,
@@ -262,21 +280,25 @@ mod tests {
     fn profile_component_needs() {
         assert!(!ProfileName::Relay.needs_postgres());
         assert!(ProfileName::Relay.needs_relay());
+        assert!(!ProfileName::Relay.needs_moq());
         assert!(!ProfileName::Relay.needs_server());
         assert!(!ProfileName::Relay.needs_bot());
 
         assert!(ProfileName::Backend.needs_postgres());
         assert!(ProfileName::Backend.needs_relay());
+        assert!(ProfileName::Backend.needs_moq());
         assert!(ProfileName::Backend.needs_server());
         assert!(!ProfileName::Backend.needs_bot());
 
         assert!(!ProfileName::RelayBot.needs_postgres());
         assert!(ProfileName::RelayBot.needs_relay());
+        assert!(!ProfileName::RelayBot.needs_moq());
         assert!(!ProfileName::RelayBot.needs_server());
         assert!(ProfileName::RelayBot.needs_bot());
 
         assert!(ProfileName::Postgres.needs_postgres());
         assert!(!ProfileName::Postgres.needs_relay());
+        assert!(!ProfileName::Postgres.needs_moq());
         assert!(!ProfileName::Postgres.needs_server());
         assert!(!ProfileName::Postgres.needs_bot());
     }

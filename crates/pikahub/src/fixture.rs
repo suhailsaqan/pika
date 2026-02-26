@@ -6,7 +6,7 @@ use tokio::signal;
 use tracing::{error, info, warn};
 
 use crate::component::{
-    Bot, Postgres, Relay, Server, get_process_fingerprint, kill_pid, kill_pid_safe,
+    Bot, MoqRelay, Postgres, Relay, Server, get_process_fingerprint, kill_pid, kill_pid_safe,
 };
 use crate::config::ResolvedConfig;
 use crate::health;
@@ -37,6 +37,7 @@ fn kill_stale_manifest(state_dir: &Path) {
 struct RunningFixture {
     postgres: Option<Postgres>,
     relay: Option<Relay>,
+    moq: Option<MoqRelay>,
     server: Option<Server>,
     bot: Option<Bot>,
 }
@@ -58,6 +59,14 @@ impl RunningFixture {
             kill_pid(pid);
         }
         self.server = None;
+
+        if let Some(ref mut moq) = self.moq
+            && let Some(pid) = moq.pid()
+        {
+            info!("[moq] Stopping (pid={pid})...");
+            kill_pid(pid);
+        }
+        self.moq = None;
 
         if let Some(ref mut relay) = self.relay
             && let Some(pid) = relay.pid()
@@ -83,6 +92,7 @@ pub async fn up_foreground(config: &ResolvedConfig) -> Result<()> {
     let mut fixture = RunningFixture {
         postgres: None,
         relay: None,
+        moq: None,
         server: None,
         bot: None,
     };
@@ -122,6 +132,7 @@ pub async fn up_background(config: &ResolvedConfig) -> Result<()> {
     let mut fixture = RunningFixture {
         postgres: None,
         relay: None,
+        moq: None,
         server: None,
         bot: None,
     };
@@ -160,6 +171,10 @@ async fn start_components(
         fixture.relay = Some(Relay::start(config, state_dir).await?);
     }
 
+    if config.profile.needs_moq() {
+        fixture.moq = Some(MoqRelay::start(config, state_dir).await?);
+    }
+
     if config.profile.needs_server() {
         let db_url = fixture
             .postgres
@@ -180,6 +195,7 @@ async fn start_components(
 
 fn build_manifest(config: &ResolvedConfig, fixture: &RunningFixture) -> Manifest {
     let relay_pid = fixture.relay.as_ref().and_then(|r| r.pid());
+    let moq_pid = fixture.moq.as_ref().and_then(|m| m.pid());
     let server_pid = fixture.server.as_ref().and_then(|s| s.pid());
     let bot_pid = fixture.bot.as_ref().and_then(|b| b.pid());
 
@@ -188,6 +204,9 @@ fn build_manifest(config: &ResolvedConfig, fixture: &RunningFixture) -> Manifest
         relay_url: fixture.relay.as_ref().map(|r| r.url.clone()),
         relay_pid,
         relay_start_time: relay_pid.and_then(get_process_fingerprint),
+        moq_url: fixture.moq.as_ref().map(|m| m.url.clone()),
+        moq_pid,
+        moq_start_time: moq_pid.and_then(get_process_fingerprint),
         server_url: fixture.server.as_ref().map(|s| s.url.clone()),
         server_pid,
         server_start_time: server_pid.and_then(get_process_fingerprint),
@@ -209,6 +228,9 @@ fn print_summary(config: &ResolvedConfig, manifest: &Manifest) {
     eprintln!();
     if let Some(ref url) = manifest.relay_url {
         eprintln!("  Relay:     {url}");
+    }
+    if let Some(ref url) = manifest.moq_url {
+        eprintln!("  MoQ:       {url}");
     }
     if let Some(ref url) = manifest.server_url {
         eprintln!("  Server:    {url}");
@@ -280,6 +302,10 @@ pub async fn status(state_dir: &Path, json: bool) -> Result<()> {
         let tag = pid_status_tag(m.relay_pid, m.relay_start_time.as_deref());
         eprintln!("Relay:     {url} (pid={}, {tag})", m.relay_pid.unwrap_or(0));
     }
+    if let Some(ref url) = m.moq_url {
+        let tag = pid_status_tag(m.moq_pid, m.moq_start_time.as_deref());
+        eprintln!("MoQ:       {url} (pid={}, {tag})", m.moq_pid.unwrap_or(0));
+    }
     if let Some(ref url) = m.server_url {
         let tag = pid_status_tag(m.server_pid, m.server_start_time.as_deref());
         eprintln!(
@@ -318,6 +344,7 @@ pub async fn logs(state_dir: &Path, follow: bool, component: Option<&str>) -> Re
         Some(name) => vec![(name, state_dir.join(format!("{name}.log")))],
         None => vec![
             ("relay", state_dir.join("relay.log")),
+            ("moq", state_dir.join("moq.log")),
             ("server", state_dir.join("server.log")),
             ("bot", state_dir.join("bot.log")),
         ],
@@ -443,7 +470,7 @@ pub async fn nuke(state_dir: &Path) -> Result<()> {
     }
 
     // 3. Kill any remaining pikahub-related processes.
-    for pattern in ["pika-relay", "pika-server", "pikachat.*bot"] {
+    for pattern in ["pika-relay", "moq-relay", "pika-server", "pikachat.*bot"] {
         let _ = std::process::Command::new("pkill")
             .args(["-f", pattern])
             .stdout(StdStdio::null())

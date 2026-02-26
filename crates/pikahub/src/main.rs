@@ -41,6 +41,9 @@ enum Command {
         relay_port: Option<u16>,
 
         #[arg(long)]
+        moq_port: Option<u16>,
+
+        #[arg(long)]
         server_port: Option<u16>,
 
         #[arg(long)]
@@ -114,6 +117,7 @@ async fn main() -> Result<()> {
             ephemeral,
             background,
             relay_port,
+            moq_port,
             server_port,
             state_dir,
         } => {
@@ -137,6 +141,7 @@ async fn main() -> Result<()> {
                 overlay,
                 ephemeral,
                 relay_port,
+                moq_port,
                 server_port,
                 state_dir,
             )?;

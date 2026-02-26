@@ -267,6 +267,66 @@ fn find_or_build_relay(workspace_root: &Path) -> Result<PathBuf> {
     Ok(target_bin)
 }
 
+pub struct MoqRelay {
+    pub child: Child,
+    pub url: String,
+}
+
+impl MoqRelay {
+    pub async fn start(config: &ResolvedConfig, state_dir: &Path) -> Result<Self> {
+        let requested_port = config.moq_port;
+        let log_path = state_dir.join("moq.log");
+
+        // Pick a free UDP port when port is 0.
+        let port = if requested_port == 0 {
+            let sock = std::net::UdpSocket::bind("127.0.0.1:0")
+                .context("bind UDP socket for moq-relay port discovery")?;
+            let p = sock.local_addr()?.port();
+            drop(sock);
+            p
+        } else {
+            requested_port
+        };
+
+        let url = format!("https://127.0.0.1:{port}/anon");
+
+        info!("[moq] Starting moq-relay on port {port}...");
+        let log_file = std::fs::File::create(&log_path)?;
+        let stderr_file = log_file.try_clone()?;
+
+        let mut child = Command::new("moq-relay")
+            .arg("--server-bind")
+            .arg(format!("127.0.0.1:{port}"))
+            .arg("--tls-generate")
+            .arg("127.0.0.1")
+            .arg("--auth-public")
+            .arg("anon")
+            .arg("--log-level")
+            .arg("info")
+            .stdout(StdStdio::from(log_file))
+            .stderr(StdStdio::from(stderr_file))
+            .kill_on_drop(true)
+            .spawn()
+            .context("spawn moq-relay (is moq-relay on PATH?)")?;
+
+        // moq-relay has no HTTP health endpoint (QUIC only). Give it a moment
+        // to bind, then check it hasn't exited early.
+        tokio::time::sleep(Duration::from_millis(500)).await;
+
+        if let Some(status) = child.try_wait()? {
+            let log_tail = std::fs::read_to_string(&log_path).unwrap_or_default();
+            bail!("moq-relay exited early (status {status}):\n{log_tail}");
+        }
+
+        info!("[moq] Ready ({url})");
+        Ok(Self { child, url })
+    }
+
+    pub fn pid(&self) -> Option<u32> {
+        self.child.id()
+    }
+}
+
 pub struct Server {
     pub child: Child,
     pub url: String,
