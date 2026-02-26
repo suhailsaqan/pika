@@ -179,16 +179,38 @@ impl Relay {
         if requested_port != 0 {
             cmd.env("SERVICE_URL", format!("http://localhost:{requested_port}"));
         }
-        let child = cmd
+        let mut child = cmd
             .spawn()
             .with_context(|| format!("spawn relay binary: {}", relay_bin.display()))?;
 
         // The relay prints "PIKA_RELAY_PORT=<N>" to its log, which tells us
         // the actual port (important when requested_port is 0).
-        let port_line =
-            health::wait_for_log_line(&log_path, "PIKA_RELAY_PORT=", Duration::from_secs(15))
-                .await
-                .context("relay did not report its port")?;
+        // Poll the log, but also check whether the child exited early (e.g.
+        // bind failure) so we can surface the real error immediately.
+        let port_line = {
+            let deadline = tokio::time::Instant::now() + Duration::from_secs(15);
+            loop {
+                if let Some(status) = child.try_wait()? {
+                    let log_tail = std::fs::read_to_string(&log_path).unwrap_or_default();
+                    bail!("relay exited early (status {status}):\n{log_tail}");
+                }
+                if log_path.exists() {
+                    let content = tokio::fs::read_to_string(&log_path)
+                        .await
+                        .unwrap_or_default();
+                    if let Some(line) = content.lines().find(|l| l.contains("PIKA_RELAY_PORT=")) {
+                        break line.to_string();
+                    }
+                }
+                if tokio::time::Instant::now() >= deadline {
+                    bail!(
+                        "relay did not report its port within 15 s; log:\n{}",
+                        std::fs::read_to_string(&log_path).unwrap_or_default()
+                    );
+                }
+                tokio::time::sleep(Duration::from_millis(250)).await;
+            }
+        };
 
         let port: u16 = port_line
             .split("PIKA_RELAY_PORT=")

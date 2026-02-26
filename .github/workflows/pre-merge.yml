@@ -25,6 +25,7 @@ jobs:
       agent_contracts: ${{ steps.filter.outputs.agent_contracts || 'true' }}
       rmp: ${{ steps.filter.outputs.rmp || 'true' }}
       notifications: ${{ steps.filter.outputs.notifications || 'true' }}
+      fixture: ${{ steps.filter.outputs.fixture || 'true' }}
     steps:
       - uses: dorny/paths-filter@v3
         if: github.event_name == 'pull_request'
@@ -105,6 +106,17 @@ jobs:
               - '.github/workflows/pre-merge.yml'
               - 'crates/pika-notifications/**'
               - 'crates/pika-server/**'
+            fixture:
+              - 'Cargo.toml'
+              - 'Cargo.lock'
+              - 'flake.nix'
+              - 'flake.lock'
+              - 'nix/**'
+              - 'justfile'
+              - '.github/workflows/pre-merge.yml'
+              - 'crates/pika-fixture/**'
+              - 'crates/pika-marmot-runtime/**'
+              - 'cmd/pika-relay/**'
 
   check-pika:
     needs: [detect-changes]
@@ -253,9 +265,38 @@ jobs:
 
       - run: nix develop .#default -c just pre-merge-notifications
 
+  check-fixture:
+    needs: [detect-changes]
+    if: needs.detect-changes.outputs.fixture == 'true'
+    runs-on: blacksmith-16vcpu-ubuntu-2404
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: useblacksmith/stickydisk@v1
+        with:
+          key: ${{ github.repository }}-nix-v1-${{ runner.os }}
+          path: /nix
+      - name: Fix /nix ownership
+        run: |
+          if [ -d /nix ] && [ "$(stat -c %u /nix)" != "$(id -u)" ]; then
+            sudo chown -R "$(id -u):$(id -g)" /nix
+          fi
+      - uses: nixbuild/nix-quick-install-action@v30
+
+      - uses: useblacksmith/stickydisk@v1
+        with:
+          key: ${{ github.repository }}-cargo-home-v1-${{ runner.os }}
+          path: ~/.cargo
+      - uses: useblacksmith/stickydisk@v1
+        with:
+          key: ${{ github.repository }}-cargo-target-v1-${{ runner.os }}
+          path: target
+
+      - run: nix develop .#default -c just pre-merge-fixture
+
   pre-merge:
     if: always() && (github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'pre-merge'))
-    needs: [detect-changes, check-pika, check-pikachat, check-agent-contracts, check-rmp, check-notifications]
+    needs: [detect-changes, check-pika, check-pikachat, check-agent-contracts, check-rmp, check-notifications, check-fixture]
     runs-on: ubuntu-latest
     steps:
       - name: Evaluate lane results
@@ -267,9 +308,10 @@ jobs:
           echo "  agent_contracts=${{ needs.detect-changes.outputs.agent_contracts }}"
           echo "  rmp=${{ needs.detect-changes.outputs.rmp }}"
           echo "  notifications=${{ needs.detect-changes.outputs.notifications }}"
+          echo "  fixture=${{ needs.detect-changes.outputs.fixture }}"
 
           echo "Blocking deterministic lanes:"
-          for lane in pika pikachat agent-contracts rmp notifications; do
+          for lane in pika pikachat agent-contracts rmp notifications fixture; do
             result=""
             case "$lane" in
               pika)          result="${{ needs.check-pika.result }}" ;;
@@ -277,6 +319,7 @@ jobs:
               agent-contracts) result="${{ needs.check-agent-contracts.result }}" ;;
               rmp)           result="${{ needs.check-rmp.result }}" ;;
               notifications) result="${{ needs.check-notifications.result }}" ;;
+              fixture)       result="${{ needs.check-fixture.result }}" ;;
             esac
             if [[ "$result" == "success" || "$result" == "skipped" ]]; then
               echo "check-$lane: $result (ok)"
