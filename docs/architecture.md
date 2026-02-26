@@ -9,6 +9,9 @@ read_when:
 
 Pika is an MLS-encrypted messaging app for iOS and Android, built on the Marmot protocol over Nostr.
 
+For the canonical Rust Multiplatform model (including native adapter windows), see `docs/rmp.md`.
+This page is the topology overview.
+
 ## Components
 
 - **Rust core** (`rust/`) — MLS state machine, Nostr transport, UniFFI bindings
@@ -59,3 +62,8 @@ iOS/Android never "fetches" chat data; it only renders `AppState`.
 
 Long-ish operation state that affects UX lives in Rust as `AppState.busy` (e.g. `creating_chat`, `logging_in`).
 This avoids iOS/Android heuristics like "stop spinner when a toast appears" and keeps UI purely reactive to Rust state.
+
+## Related Docs
+
+- `docs/rmp.md` — Rust Multiplatform ownership model + adapter window pattern
+- `docs/state.md` — `AppState`/`AppUpdate` details
