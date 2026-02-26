@@ -402,7 +402,8 @@ e2e-real-moq:
 e2e-local-pikachat-daemon:
     set -euo pipefail; \
     cargo build -p pikachat; \
-    PIKACHAT_BIN="$PWD/target/debug/pikachat" \
+    TARGET_ROOT="$(cargo metadata --no-deps --format-version 1 | python3 -c 'import json,sys; print(json.load(sys.stdin)["target_directory"])')"; \
+    PIKACHAT_BIN="$TARGET_ROOT/debug/pikachat" \
       PIKA_E2E_LOCAL=1 \
       cargo test -p pika_core --test e2e_local_pikachat_daemon_call -- --ignored --nocapture
 
@@ -421,7 +422,8 @@ gen-kotlin: rust-build-host
     mkdir -p android/app/src/main/java/com/pika/app/rust
     set -euo pipefail; \
     PROFILE="${PIKA_RUST_PROFILE:-release}"; \
-    TARGET_DIR="target/$PROFILE"; \
+    TARGET_ROOT="$(cargo metadata --no-deps --format-version 1 | python3 -c 'import json,sys; print(json.load(sys.stdin)["target_directory"])')"; \
+    TARGET_DIR="$TARGET_ROOT/$PROFILE"; \
     LIB=""; \
     for cand in "$TARGET_DIR/libpika_core.dylib" "$TARGET_DIR/libpika_core.so" "$TARGET_DIR/libpika_core.dll"; do \
       if [ -f "$cand" ]; then LIB="$cand"; break; fi; \
@@ -562,7 +564,8 @@ ios-gen-swift: rust-build-host
     mkdir -p ios/Bindings ios/NSEBindings
     set -euo pipefail; \
     PROFILE="${PIKA_RUST_PROFILE:-release}"; \
-    TARGET_DIR="target/$PROFILE"; \
+    TARGET_ROOT="$(cargo metadata --no-deps --format-version 1 | python3 -c 'import json,sys; print(json.load(sys.stdin)["target_directory"])')"; \
+    TARGET_DIR="$TARGET_ROOT/$PROFILE"; \
     LIB=""; \
     for cand in "$TARGET_DIR/libpika_core.dylib" "$TARGET_DIR/libpika_core.so" "$TARGET_DIR/libpika_core.dll"; do \
       if [ -f "$cand" ]; then LIB="$cand"; break; fi; \
@@ -576,7 +579,8 @@ ios-gen-swift: rust-build-host
     python3 -c 'from pathlib import Path; import re; p=Path("ios/Bindings/pika_core.swift"); data=p.read_text(encoding="utf-8").replace("\r\n","\n").replace("\r","\n"); data=re.sub(r"[ \t]+$", "", data, flags=re.M); data=data.rstrip("\n")+"\n"; p.write_text(data, encoding="utf-8")'
     set -euo pipefail; \
     PROFILE="${PIKA_RUST_PROFILE:-release}"; \
-    TARGET_DIR="target/$PROFILE"; \
+    TARGET_ROOT="$(cargo metadata --no-deps --format-version 1 | python3 -c 'import json,sys; print(json.load(sys.stdin)["target_directory"])')"; \
+    TARGET_DIR="$TARGET_ROOT/$PROFILE"; \
     NSE_LIB=""; \
     for cand in "$TARGET_DIR/libpika_nse.dylib" "$TARGET_DIR/libpika_nse.so" "$TARGET_DIR/libpika_nse.dll"; do \
       if [ -f "$cand" ]; then NSE_LIB="$cand"; break; fi; \
