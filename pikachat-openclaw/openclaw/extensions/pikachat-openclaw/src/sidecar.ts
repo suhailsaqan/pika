@@ -26,6 +26,7 @@ type SidecarOutMsg =
       content: string;
       kind: number;
       created_at: number;
+      event_id: string;
       message_id: string;
       media?: Array<{
         url: string;
@@ -83,6 +84,15 @@ type SidecarInCmd =
   | { cmd: "hypernote_catalog"; request_id: string }
   | { cmd: "send_message"; request_id: string; nostr_group_id: string; content: string }
   | { cmd: "send_hypernote"; request_id: string; nostr_group_id: string; content: string; title?: string; state?: string }
+  | { cmd: "react"; request_id: string; nostr_group_id: string; event_id: string; emoji: string }
+  | {
+      cmd: "submit_hypernote_action";
+      request_id: string;
+      nostr_group_id: string;
+      event_id: string;
+      action: string;
+      form?: Record<string, string>;
+    }
   | { cmd: "send_typing"; request_id: string; nostr_group_id: string }
   | { cmd: "accept_call"; request_id: string; call_id: string }
   | { cmd: "reject_call"; request_id: string; call_id: string; reason?: string }
@@ -345,6 +355,34 @@ export class PikachatSidecar {
         content,
         title: opts?.title,
         state: opts?.state,
+      } as any),
+    );
+  }
+
+  sendReaction(nostrGroupId: string, eventId: string, emoji: string): void {
+    this.#sendThrottle.enqueue(() =>
+      this.request({
+        cmd: "react",
+        nostr_group_id: nostrGroupId,
+        event_id: eventId,
+        emoji,
+      } as any),
+    );
+  }
+
+  submitHypernoteAction(
+    nostrGroupId: string,
+    eventId: string,
+    action: string,
+    form?: Record<string, string>,
+  ): void {
+    this.#sendThrottle.enqueue(() =>
+      this.request({
+        cmd: "submit_hypernote_action",
+        nostr_group_id: nostrGroupId,
+        event_id: eventId,
+        action,
+        form,
       } as any),
     );
   }

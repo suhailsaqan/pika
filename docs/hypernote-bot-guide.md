@@ -75,6 +75,35 @@ Response:
 }
 ```
 
+### `react`
+
+Publish an emoji reaction (kind `7`) to a target message event:
+
+```json
+{
+  "cmd": "react",
+  "request_id": "optional-correlation-id",
+  "nostr_group_id": "<hex group id>",
+  "event_id": "<target event id hex>",
+  "emoji": "🧇"
+}
+```
+
+### `submit_hypernote_action`
+
+Submit a hypernote action response (kind `9468`) to a target hypernote:
+
+```json
+{
+  "cmd": "submit_hypernote_action",
+  "request_id": "optional-correlation-id",
+  "nostr_group_id": "<hex group id>",
+  "event_id": "<target hypernote event id hex>",
+  "action": "vote_yes",
+  "form": { "note": "ship it" }
+}
+```
+
 ## CLI Commands
 
 - Send hypernote:
@@ -174,6 +203,7 @@ Optional first line metadata JSON inside the block:
 ```
 
 The sidecar `message_received` event now includes `kind`, enabling explicit handling for `9468` action responses.
+`message_received` also includes `event_id` (raw Nostr event id hex), so bots can target reactions and hypernote action submissions without scraping message text.
 
 ## Recommended Agent Prompting
 

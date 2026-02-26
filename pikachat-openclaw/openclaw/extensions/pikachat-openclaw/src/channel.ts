@@ -410,6 +410,7 @@ async function dispatchInboundToAgent(params: {
   accountId: string;
   chatId: string;
   senderId: string;
+  eventId?: string;
   text: string;
   isOwner: boolean;
   isGroupChat: boolean;
@@ -467,6 +468,7 @@ async function dispatchInboundToAgent(params: {
     SenderName: senderName,
     SenderUsername: hexToNpub(senderId.toLowerCase()),
     SenderTag: isOwner ? "owner" : "friend",
+    EventId: params.eventId,
     CommandAuthorized: isOwner,
     WasMentioned: params.wasMentioned ?? !isGroupChat,
     ...(isGroupChat ? {
@@ -1336,6 +1338,7 @@ export const pikachatPlugin: ChannelPlugin<ResolvedPikachatAccount> = {
                 runtime,
                 accountId: resolved.accountId,
                 senderId: ev.from_pubkey,
+                eventId: ev.event_id,
                 chatId: ev.nostr_group_id,
                 text: messageText,
                 isOwner: senderIsOwner,
@@ -1370,6 +1373,7 @@ export const pikachatPlugin: ChannelPlugin<ResolvedPikachatAccount> = {
                 runtime,
                 accountId: resolved.accountId,
                 senderId: ev.from_pubkey,
+                eventId: ev.event_id,
                 chatId: ev.nostr_group_id,
                 text: messageText,
                 isOwner: senderIsOwner,
