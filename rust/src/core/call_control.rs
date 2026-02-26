@@ -600,23 +600,42 @@ impl AppCore {
     }
 
     fn update_call_status(&mut self, status: CallStatus) {
+        let should_tick = matches!(status, CallStatus::Active);
         let previous = self.state.active_call.clone();
+        let mut should_tick_after_update: Option<bool> = None;
         if let Some(call) = self.state.active_call.as_mut() {
             call.set_status(status);
-            self.emit_call_state_with_previous(previous);
+            call.refresh_duration_display(now_seconds());
+            should_tick_after_update = Some(should_tick && call.started_at.is_some());
         }
+        let Some(should_tick_after_update) = should_tick_after_update else {
+            return;
+        };
+        if should_tick_after_update {
+            self.ensure_call_duration_ticks();
+        } else {
+            self.cancel_call_duration_ticks();
+        }
+        self.emit_call_state_with_previous(previous);
     }
 
     fn end_call_local(&mut self, reason: String) {
         let previous = self.state.active_call.clone();
+        let mut should_emit = false;
         if let Some(call) = self.state.active_call.as_mut() {
             call.set_status(CallStatus::Ended {
                 reason: reason.clone(),
             });
+            call.refresh_duration_display(now_seconds());
             self.call_runtime.on_call_ended(&call.call_id);
             self.call_session_params = None;
-            self.emit_call_state_with_previous(previous);
+            should_emit = true;
         }
+        if !should_emit {
+            return;
+        }
+        self.cancel_call_duration_ticks();
+        self.emit_call_state_with_previous(previous);
     }
 
     pub(super) fn handle_start_call_action(&mut self, chat_id: &str) {
@@ -654,6 +673,7 @@ impl AppCore {
 
         if !network_enabled {
             let previous = self.state.active_call.clone();
+            self.cancel_call_duration_ticks();
             self.state.active_call = Some(crate::state::CallState::new(
                 call_id.clone(),
                 chat_id.to_string(),
@@ -696,6 +716,7 @@ impl AppCore {
         };
 
         let previous = self.state.active_call.clone();
+        self.cancel_call_duration_ticks();
         self.state.active_call = Some(crate::state::CallState::new(
             call_id.clone(),
             chat_id.to_string(),
@@ -974,6 +995,7 @@ impl AppCore {
                 let is_video_call = session.tracks.iter().any(|t| t.name == "video0");
                 self.call_session_params = Some(session);
                 let previous = self.state.active_call.clone();
+                self.cancel_call_duration_ticks();
                 self.state.active_call = Some(crate::state::CallState::new(
                     call_id,
                     chat_id.to_string(),

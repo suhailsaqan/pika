@@ -39,7 +39,6 @@ fun PikaApp(manager: AppManager) {
     LaunchedEffect(state.toast) {
         val msg = state.toast ?: return@LaunchedEffect
         snackbarHostState.showSnackbar(message = msg)
-        manager.dispatch(AppAction.ClearToast)
     }
 
     LaunchedEffect(state.activeCall?.callId, state.activeCall?.status) {

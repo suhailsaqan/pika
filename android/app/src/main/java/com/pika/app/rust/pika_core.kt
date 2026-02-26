@@ -738,6 +738,10 @@ internal object IntegrityCheckingUniffiLib {
         uniffiCheckContractApiVersion(this)
         uniffiCheckApiChecksums(this)
     }
+    external fun uniffi_pika_core_checksum_func_is_valid_peer_key(
+    ): Short
+    external fun uniffi_pika_core_checksum_func_normalize_peer_key(
+    ): Short
     external fun uniffi_pika_core_checksum_method_ffiapp_dispatch(
     ): Short
     external fun uniffi_pika_core_checksum_method_ffiapp_listen_for_updates(
@@ -815,6 +819,10 @@ internal object UniffiLib {
     ): Unit
     external fun uniffi_pika_core_fn_init_callback_vtable_externalsignerbridge(`vtable`: UniffiVTableCallbackInterfaceExternalSignerBridge,
     ): Unit
+    external fun uniffi_pika_core_fn_func_is_valid_peer_key(`input`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): Byte
+    external fun uniffi_pika_core_fn_func_normalize_peer_key(`input`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
     external fun ffi_pika_core_rustbuffer_alloc(`size`: Long,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
     external fun ffi_pika_core_rustbuffer_from_bytes(`bytes`: ForeignBytes.ByValue,uniffi_out_err: UniffiRustCallStatus, 
@@ -934,6 +942,12 @@ private fun uniffiCheckContractApiVersion(lib: IntegrityCheckingUniffiLib) {
 }
 @Suppress("UNUSED_PARAMETER")
 private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
+    if (lib.uniffi_pika_core_checksum_func_is_valid_peer_key() != 5026.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_pika_core_checksum_func_normalize_peer_key() != 28439.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_pika_core_checksum_method_ffiapp_dispatch() != 60985.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
@@ -1259,6 +1273,52 @@ public object FfiConverterLong: FfiConverter<Long, Long> {
 
     override fun write(value: Long, buf: ByteBuffer) {
         buf.putLong(value)
+    }
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterFloat: FfiConverter<Float, Float> {
+    override fun lift(value: Float): Float {
+        return value
+    }
+
+    override fun read(buf: ByteBuffer): Float {
+        return buf.getFloat()
+    }
+
+    override fun lower(value: Float): Float {
+        return value
+    }
+
+    override fun allocationSize(value: Float) = 4UL
+
+    override fun write(value: Float, buf: ByteBuffer) {
+        buf.putFloat(value)
+    }
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterDouble: FfiConverter<Double, Double> {
+    override fun lift(value: Double): Double {
+        return value
+    }
+
+    override fun read(buf: ByteBuffer): Double {
+        return buf.getDouble()
+    }
+
+    override fun lower(value: Double): Double {
+        return value
+    }
+
+    override fun allocationSize(value: Double) = 8UL
+
+    override fun write(value: Double, buf: ByteBuffer) {
+        buf.putDouble(value)
     }
 }
 
@@ -1715,6 +1775,10 @@ data class AppState (
     var `callTimeline`: List<CallTimelineEvent>
     , 
     var `toast`: kotlin.String?
+    , 
+    var `developerMode`: kotlin.Boolean
+    , 
+    var `voiceRecording`: VoiceRecordingState?
     
 ){
     
@@ -1743,6 +1807,8 @@ public object FfiConverterTypeAppState: FfiConverterRustBuffer<AppState> {
             FfiConverterOptionalTypeCallState.read(buf),
             FfiConverterSequenceTypeCallTimelineEvent.read(buf),
             FfiConverterOptionalString.read(buf),
+            FfiConverterBoolean.read(buf),
+            FfiConverterOptionalTypeVoiceRecordingState.read(buf),
         )
     }
 
@@ -1758,7 +1824,9 @@ public object FfiConverterTypeAppState: FfiConverterRustBuffer<AppState> {
             FfiConverterOptionalTypePeerProfileState.allocationSize(value.`peerProfile`) +
             FfiConverterOptionalTypeCallState.allocationSize(value.`activeCall`) +
             FfiConverterSequenceTypeCallTimelineEvent.allocationSize(value.`callTimeline`) +
-            FfiConverterOptionalString.allocationSize(value.`toast`)
+            FfiConverterOptionalString.allocationSize(value.`toast`) +
+            FfiConverterBoolean.allocationSize(value.`developerMode`) +
+            FfiConverterOptionalTypeVoiceRecordingState.allocationSize(value.`voiceRecording`)
     )
 
     override fun write(value: AppState, buf: ByteBuffer) {
@@ -1774,6 +1842,8 @@ public object FfiConverterTypeAppState: FfiConverterRustBuffer<AppState> {
             FfiConverterOptionalTypeCallState.write(value.`activeCall`, buf)
             FfiConverterSequenceTypeCallTimelineEvent.write(value.`callTimeline`, buf)
             FfiConverterOptionalString.write(value.`toast`, buf)
+            FfiConverterBoolean.write(value.`developerMode`, buf)
+            FfiConverterOptionalTypeVoiceRecordingState.write(value.`voiceRecording`, buf)
     }
 }
 
@@ -1919,6 +1989,8 @@ data class CallState (
     , 
     var `startedAt`: kotlin.Long?
     , 
+    var `durationDisplay`: kotlin.String?
+    , 
     var `isMuted`: kotlin.Boolean
     , 
     var `isVideoCall`: kotlin.Boolean
@@ -1950,6 +2022,7 @@ public object FfiConverterTypeCallState: FfiConverterRustBuffer<CallState> {
             FfiConverterBoolean.read(buf),
             FfiConverterBoolean.read(buf),
             FfiConverterOptionalLong.read(buf),
+            FfiConverterOptionalString.read(buf),
             FfiConverterBoolean.read(buf),
             FfiConverterBoolean.read(buf),
             FfiConverterBoolean.read(buf),
@@ -1966,6 +2039,7 @@ public object FfiConverterTypeCallState: FfiConverterRustBuffer<CallState> {
             FfiConverterBoolean.allocationSize(value.`shouldAutoPresentCallScreen`) +
             FfiConverterBoolean.allocationSize(value.`shouldEnableProximityLock`) +
             FfiConverterOptionalLong.allocationSize(value.`startedAt`) +
+            FfiConverterOptionalString.allocationSize(value.`durationDisplay`) +
             FfiConverterBoolean.allocationSize(value.`isMuted`) +
             FfiConverterBoolean.allocationSize(value.`isVideoCall`) +
             FfiConverterBoolean.allocationSize(value.`isCameraEnabled`) +
@@ -1981,6 +2055,7 @@ public object FfiConverterTypeCallState: FfiConverterRustBuffer<CallState> {
             FfiConverterBoolean.write(value.`shouldAutoPresentCallScreen`, buf)
             FfiConverterBoolean.write(value.`shouldEnableProximityLock`, buf)
             FfiConverterOptionalLong.write(value.`startedAt`, buf)
+            FfiConverterOptionalString.write(value.`durationDisplay`, buf)
             FfiConverterBoolean.write(value.`isMuted`, buf)
             FfiConverterBoolean.write(value.`isVideoCall`, buf)
             FfiConverterBoolean.write(value.`isCameraEnabled`, buf)
@@ -2133,6 +2208,8 @@ data class ChatMessage (
     , 
     var `timestamp`: kotlin.Long
     , 
+    var `displayTimestamp`: kotlin.String
+    , 
     var `isMine`: kotlin.Boolean
     , 
     var `delivery`: MessageDeliveryState
@@ -2141,11 +2218,11 @@ data class ChatMessage (
     , 
     var `media`: List<ChatMediaAttachment>
     , 
-    var `pollTally`: List<PollTally>
-    , 
-    var `myPollVote`: kotlin.String?
+    var `segments`: List<MessageSegment>
     , 
     var `htmlState`: kotlin.String?
+    , 
+    var `hypernote`: HypernoteData?
     
 ){
     
@@ -2170,13 +2247,14 @@ public object FfiConverterTypeChatMessage: FfiConverterRustBuffer<ChatMessage> {
             FfiConverterOptionalString.read(buf),
             FfiConverterSequenceTypeMention.read(buf),
             FfiConverterLong.read(buf),
+            FfiConverterString.read(buf),
             FfiConverterBoolean.read(buf),
             FfiConverterTypeMessageDeliveryState.read(buf),
             FfiConverterSequenceTypeReactionSummary.read(buf),
             FfiConverterSequenceTypeChatMediaAttachment.read(buf),
-            FfiConverterSequenceTypePollTally.read(buf),
+            FfiConverterSequenceTypeMessageSegment.read(buf),
             FfiConverterOptionalString.read(buf),
-            FfiConverterOptionalString.read(buf),
+            FfiConverterOptionalTypeHypernoteData.read(buf),
         )
     }
 
@@ -2189,13 +2267,14 @@ public object FfiConverterTypeChatMessage: FfiConverterRustBuffer<ChatMessage> {
             FfiConverterOptionalString.allocationSize(value.`replyToMessageId`) +
             FfiConverterSequenceTypeMention.allocationSize(value.`mentions`) +
             FfiConverterLong.allocationSize(value.`timestamp`) +
+            FfiConverterString.allocationSize(value.`displayTimestamp`) +
             FfiConverterBoolean.allocationSize(value.`isMine`) +
             FfiConverterTypeMessageDeliveryState.allocationSize(value.`delivery`) +
             FfiConverterSequenceTypeReactionSummary.allocationSize(value.`reactions`) +
             FfiConverterSequenceTypeChatMediaAttachment.allocationSize(value.`media`) +
-            FfiConverterSequenceTypePollTally.allocationSize(value.`pollTally`) +
-            FfiConverterOptionalString.allocationSize(value.`myPollVote`) +
-            FfiConverterOptionalString.allocationSize(value.`htmlState`)
+            FfiConverterSequenceTypeMessageSegment.allocationSize(value.`segments`) +
+            FfiConverterOptionalString.allocationSize(value.`htmlState`) +
+            FfiConverterOptionalTypeHypernoteData.allocationSize(value.`hypernote`)
     )
 
     override fun write(value: ChatMessage, buf: ByteBuffer) {
@@ -2207,13 +2286,14 @@ public object FfiConverterTypeChatMessage: FfiConverterRustBuffer<ChatMessage> {
             FfiConverterOptionalString.write(value.`replyToMessageId`, buf)
             FfiConverterSequenceTypeMention.write(value.`mentions`, buf)
             FfiConverterLong.write(value.`timestamp`, buf)
+            FfiConverterString.write(value.`displayTimestamp`, buf)
             FfiConverterBoolean.write(value.`isMine`, buf)
             FfiConverterTypeMessageDeliveryState.write(value.`delivery`, buf)
             FfiConverterSequenceTypeReactionSummary.write(value.`reactions`, buf)
             FfiConverterSequenceTypeChatMediaAttachment.write(value.`media`, buf)
-            FfiConverterSequenceTypePollTally.write(value.`pollTally`, buf)
-            FfiConverterOptionalString.write(value.`myPollVote`, buf)
+            FfiConverterSequenceTypeMessageSegment.write(value.`segments`, buf)
             FfiConverterOptionalString.write(value.`htmlState`, buf)
+            FfiConverterOptionalTypeHypernoteData.write(value.`hypernote`, buf)
     }
 }
 
@@ -2231,6 +2311,12 @@ data class ChatSummary (
     var `lastMessage`: kotlin.String?
     , 
     var `lastMessageAt`: kotlin.Long?
+    , 
+    var `displayName`: kotlin.String
+    , 
+    var `subtitle`: kotlin.String?
+    , 
+    var `lastMessagePreview`: kotlin.String
     , 
     var `unreadCount`: kotlin.UInt
     
@@ -2255,6 +2341,9 @@ public object FfiConverterTypeChatSummary: FfiConverterRustBuffer<ChatSummary> {
             FfiConverterSequenceTypeMemberInfo.read(buf),
             FfiConverterOptionalString.read(buf),
             FfiConverterOptionalLong.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterOptionalString.read(buf),
+            FfiConverterString.read(buf),
             FfiConverterUInt.read(buf),
         )
     }
@@ -2266,6 +2355,9 @@ public object FfiConverterTypeChatSummary: FfiConverterRustBuffer<ChatSummary> {
             FfiConverterSequenceTypeMemberInfo.allocationSize(value.`members`) +
             FfiConverterOptionalString.allocationSize(value.`lastMessage`) +
             FfiConverterOptionalLong.allocationSize(value.`lastMessageAt`) +
+            FfiConverterString.allocationSize(value.`displayName`) +
+            FfiConverterOptionalString.allocationSize(value.`subtitle`) +
+            FfiConverterString.allocationSize(value.`lastMessagePreview`) +
             FfiConverterUInt.allocationSize(value.`unreadCount`)
     )
 
@@ -2276,6 +2368,9 @@ public object FfiConverterTypeChatSummary: FfiConverterRustBuffer<ChatSummary> {
             FfiConverterSequenceTypeMemberInfo.write(value.`members`, buf)
             FfiConverterOptionalString.write(value.`lastMessage`, buf)
             FfiConverterOptionalLong.write(value.`lastMessageAt`, buf)
+            FfiConverterString.write(value.`displayName`, buf)
+            FfiConverterOptionalString.write(value.`subtitle`, buf)
+            FfiConverterString.write(value.`lastMessagePreview`, buf)
             FfiConverterUInt.write(value.`unreadCount`, buf)
     }
 }
@@ -2294,6 +2389,8 @@ data class ChatViewState (
     var `isAdmin`: kotlin.Boolean
     , 
     var `messages`: List<ChatMessage>
+    , 
+    var `firstUnreadMessageId`: kotlin.String?
     , 
     var `canLoadOlder`: kotlin.Boolean
     , 
@@ -2320,6 +2417,7 @@ public object FfiConverterTypeChatViewState: FfiConverterRustBuffer<ChatViewStat
             FfiConverterSequenceTypeMemberInfo.read(buf),
             FfiConverterBoolean.read(buf),
             FfiConverterSequenceTypeChatMessage.read(buf),
+            FfiConverterOptionalString.read(buf),
             FfiConverterBoolean.read(buf),
             FfiConverterSequenceTypeTypingMember.read(buf),
         )
@@ -2332,6 +2430,7 @@ public object FfiConverterTypeChatViewState: FfiConverterRustBuffer<ChatViewStat
             FfiConverterSequenceTypeMemberInfo.allocationSize(value.`members`) +
             FfiConverterBoolean.allocationSize(value.`isAdmin`) +
             FfiConverterSequenceTypeChatMessage.allocationSize(value.`messages`) +
+            FfiConverterOptionalString.allocationSize(value.`firstUnreadMessageId`) +
             FfiConverterBoolean.allocationSize(value.`canLoadOlder`) +
             FfiConverterSequenceTypeTypingMember.allocationSize(value.`typingMembers`)
     )
@@ -2343,6 +2442,7 @@ public object FfiConverterTypeChatViewState: FfiConverterRustBuffer<ChatViewStat
             FfiConverterSequenceTypeMemberInfo.write(value.`members`, buf)
             FfiConverterBoolean.write(value.`isAdmin`, buf)
             FfiConverterSequenceTypeChatMessage.write(value.`messages`, buf)
+            FfiConverterOptionalString.write(value.`firstUnreadMessageId`, buf)
             FfiConverterBoolean.write(value.`canLoadOlder`, buf)
             FfiConverterSequenceTypeTypingMember.write(value.`typingMembers`, buf)
     }
@@ -2504,6 +2604,150 @@ public object FfiConverterTypeFollowListEntry: FfiConverterRustBuffer<FollowList
             FfiConverterOptionalString.write(value.`name`, buf)
             FfiConverterOptionalString.write(value.`username`, buf)
             FfiConverterOptionalString.write(value.`pictureUrl`, buf)
+    }
+}
+
+
+
+data class HypernoteData (
+    var `astJson`: kotlin.String
+    , 
+    var `declaredActions`: List<kotlin.String>
+    , 
+    var `title`: kotlin.String?
+    , 
+    var `defaultState`: kotlin.String?
+    , 
+    var `myResponse`: kotlin.String?
+    , 
+    var `responseTallies`: List<HypernoteResponseTally>
+    , 
+    var `responders`: List<HypernoteResponder>
+    
+){
+    
+
+    
+
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeHypernoteData: FfiConverterRustBuffer<HypernoteData> {
+    override fun read(buf: ByteBuffer): HypernoteData {
+        return HypernoteData(
+            FfiConverterString.read(buf),
+            FfiConverterSequenceString.read(buf),
+            FfiConverterOptionalString.read(buf),
+            FfiConverterOptionalString.read(buf),
+            FfiConverterOptionalString.read(buf),
+            FfiConverterSequenceTypeHypernoteResponseTally.read(buf),
+            FfiConverterSequenceTypeHypernoteResponder.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: HypernoteData) = (
+            FfiConverterString.allocationSize(value.`astJson`) +
+            FfiConverterSequenceString.allocationSize(value.`declaredActions`) +
+            FfiConverterOptionalString.allocationSize(value.`title`) +
+            FfiConverterOptionalString.allocationSize(value.`defaultState`) +
+            FfiConverterOptionalString.allocationSize(value.`myResponse`) +
+            FfiConverterSequenceTypeHypernoteResponseTally.allocationSize(value.`responseTallies`) +
+            FfiConverterSequenceTypeHypernoteResponder.allocationSize(value.`responders`)
+    )
+
+    override fun write(value: HypernoteData, buf: ByteBuffer) {
+            FfiConverterString.write(value.`astJson`, buf)
+            FfiConverterSequenceString.write(value.`declaredActions`, buf)
+            FfiConverterOptionalString.write(value.`title`, buf)
+            FfiConverterOptionalString.write(value.`defaultState`, buf)
+            FfiConverterOptionalString.write(value.`myResponse`, buf)
+            FfiConverterSequenceTypeHypernoteResponseTally.write(value.`responseTallies`, buf)
+            FfiConverterSequenceTypeHypernoteResponder.write(value.`responders`, buf)
+    }
+}
+
+
+
+data class HypernoteResponder (
+    var `name`: kotlin.String?
+    , 
+    var `npub`: kotlin.String
+    , 
+    var `pictureUrl`: kotlin.String?
+    
+){
+    
+
+    
+
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeHypernoteResponder: FfiConverterRustBuffer<HypernoteResponder> {
+    override fun read(buf: ByteBuffer): HypernoteResponder {
+        return HypernoteResponder(
+            FfiConverterOptionalString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterOptionalString.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: HypernoteResponder) = (
+            FfiConverterOptionalString.allocationSize(value.`name`) +
+            FfiConverterString.allocationSize(value.`npub`) +
+            FfiConverterOptionalString.allocationSize(value.`pictureUrl`)
+    )
+
+    override fun write(value: HypernoteResponder, buf: ByteBuffer) {
+            FfiConverterOptionalString.write(value.`name`, buf)
+            FfiConverterString.write(value.`npub`, buf)
+            FfiConverterOptionalString.write(value.`pictureUrl`, buf)
+    }
+}
+
+
+
+data class HypernoteResponseTally (
+    var `action`: kotlin.String
+    , 
+    var `count`: kotlin.UInt
+    
+){
+    
+
+    
+
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeHypernoteResponseTally: FfiConverterRustBuffer<HypernoteResponseTally> {
+    override fun read(buf: ByteBuffer): HypernoteResponseTally {
+        return HypernoteResponseTally(
+            FfiConverterString.read(buf),
+            FfiConverterUInt.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: HypernoteResponseTally) = (
+            FfiConverterString.allocationSize(value.`action`) +
+            FfiConverterUInt.allocationSize(value.`count`)
+    )
+
+    override fun write(value: HypernoteResponseTally, buf: ByteBuffer) {
+            FfiConverterString.write(value.`action`, buf)
+            FfiConverterUInt.write(value.`count`, buf)
     }
 }
 
@@ -2711,49 +2955,6 @@ public object FfiConverterTypePeerProfileState: FfiConverterRustBuffer<PeerProfi
 
 
 
-data class PollTally (
-    var `option`: kotlin.String
-    , 
-    var `count`: kotlin.UInt
-    , 
-    var `voterNames`: List<kotlin.String>
-    
-){
-    
-
-    
-
-    
-    companion object
-}
-
-/**
- * @suppress
- */
-public object FfiConverterTypePollTally: FfiConverterRustBuffer<PollTally> {
-    override fun read(buf: ByteBuffer): PollTally {
-        return PollTally(
-            FfiConverterString.read(buf),
-            FfiConverterUInt.read(buf),
-            FfiConverterSequenceString.read(buf),
-        )
-    }
-
-    override fun allocationSize(value: PollTally) = (
-            FfiConverterString.allocationSize(value.`option`) +
-            FfiConverterUInt.allocationSize(value.`count`) +
-            FfiConverterSequenceString.allocationSize(value.`voterNames`)
-    )
-
-    override fun write(value: PollTally, buf: ByteBuffer) {
-            FfiConverterString.write(value.`option`, buf)
-            FfiConverterUInt.write(value.`count`, buf)
-            FfiConverterSequenceString.write(value.`voterNames`, buf)
-    }
-}
-
-
-
 data class ReactionSummary (
     var `emoji`: kotlin.String
     , 
@@ -2868,6 +3069,54 @@ public object FfiConverterTypeTypingMember: FfiConverterRustBuffer<TypingMember>
     override fun write(value: TypingMember, buf: ByteBuffer) {
             FfiConverterString.write(value.`pubkey`, buf)
             FfiConverterOptionalString.write(value.`name`, buf)
+    }
+}
+
+
+
+data class VoiceRecordingState (
+    var `phase`: VoiceRecordingPhase
+    , 
+    var `durationSecs`: kotlin.Double
+    , 
+    var `levels`: List<kotlin.Float>
+    , 
+    var `transcript`: kotlin.String
+    
+){
+    
+
+    
+
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeVoiceRecordingState: FfiConverterRustBuffer<VoiceRecordingState> {
+    override fun read(buf: ByteBuffer): VoiceRecordingState {
+        return VoiceRecordingState(
+            FfiConverterTypeVoiceRecordingPhase.read(buf),
+            FfiConverterDouble.read(buf),
+            FfiConverterSequenceFloat.read(buf),
+            FfiConverterString.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: VoiceRecordingState) = (
+            FfiConverterTypeVoiceRecordingPhase.allocationSize(value.`phase`) +
+            FfiConverterDouble.allocationSize(value.`durationSecs`) +
+            FfiConverterSequenceFloat.allocationSize(value.`levels`) +
+            FfiConverterString.allocationSize(value.`transcript`)
+    )
+
+    override fun write(value: VoiceRecordingState, buf: ByteBuffer) {
+            FfiConverterTypeVoiceRecordingPhase.write(value.`phase`, buf)
+            FfiConverterDouble.write(value.`durationSecs`, buf)
+            FfiConverterSequenceFloat.write(value.`levels`, buf)
+            FfiConverterString.write(value.`transcript`, buf)
     }
 }
 
@@ -3157,6 +3406,29 @@ sealed class AppAction {
         companion object
     }
     
+    data class HypernoteAction(
+        val `chatId`: kotlin.String, 
+        val `messageId`: kotlin.String, 
+        val `actionName`: kotlin.String, 
+        val `form`: Map<kotlin.String, kotlin.String>) : AppAction()
+        
+    {
+        
+
+        companion object
+    }
+    
+    data class SendHypernotePoll(
+        val `chatId`: kotlin.String, 
+        val `question`: kotlin.String, 
+        val `options`: List<kotlin.String>) : AppAction()
+        
+    {
+        
+
+        companion object
+    }
+    
     data class ArchiveChat(
         val `chatId`: kotlin.String) : AppAction()
         
@@ -3188,6 +3460,42 @@ sealed class AppAction {
     
     object ClearToast : AppAction()
     
+    
+    object EnableDeveloperMode : AppAction()
+    
+    
+    object VoiceRecordingStart : AppAction()
+    
+    
+    object VoiceRecordingPause : AppAction()
+    
+    
+    object VoiceRecordingResume : AppAction()
+    
+    
+    object VoiceRecordingStop : AppAction()
+    
+    
+    object VoiceRecordingCancel : AppAction()
+    
+    
+    data class VoiceRecordingAudioLevel(
+        val `level`: kotlin.Float) : AppAction()
+        
+    {
+        
+
+        companion object
+    }
+    
+    data class VoiceRecordingTranscript(
+        val `text`: kotlin.String) : AppAction()
+        
+    {
+        
+
+        companion object
+    }
     
     object Foregrounded : AppAction()
     
@@ -3373,36 +3681,59 @@ public object FfiConverterTypeAppAction : FfiConverterRustBuffer<AppAction>{
                 FfiConverterString.read(buf),
                 FfiConverterString.read(buf),
                 )
-            36 -> AppAction.ArchiveChat(
+            36 -> AppAction.HypernoteAction(
+                FfiConverterString.read(buf),
+                FfiConverterString.read(buf),
+                FfiConverterString.read(buf),
+                FfiConverterMapStringString.read(buf),
+                )
+            37 -> AppAction.SendHypernotePoll(
+                FfiConverterString.read(buf),
+                FfiConverterString.read(buf),
+                FfiConverterSequenceString.read(buf),
+                )
+            38 -> AppAction.ArchiveChat(
                 FfiConverterString.read(buf),
                 )
-            37 -> AppAction.ReactToMessage(
+            39 -> AppAction.ReactToMessage(
                 FfiConverterString.read(buf),
                 FfiConverterString.read(buf),
                 FfiConverterString.read(buf),
                 )
-            38 -> AppAction.TypingStarted(
+            40 -> AppAction.TypingStarted(
                 FfiConverterString.read(buf),
                 )
-            39 -> AppAction.ClearToast
-            40 -> AppAction.Foregrounded
-            41 -> AppAction.NostrConnectCallback(
+            41 -> AppAction.ClearToast
+            42 -> AppAction.EnableDeveloperMode
+            43 -> AppAction.VoiceRecordingStart
+            44 -> AppAction.VoiceRecordingPause
+            45 -> AppAction.VoiceRecordingResume
+            46 -> AppAction.VoiceRecordingStop
+            47 -> AppAction.VoiceRecordingCancel
+            48 -> AppAction.VoiceRecordingAudioLevel(
+                FfiConverterFloat.read(buf),
+                )
+            49 -> AppAction.VoiceRecordingTranscript(
                 FfiConverterString.read(buf),
                 )
-            42 -> AppAction.ReloadConfig
-            43 -> AppAction.OpenPeerProfile(
+            50 -> AppAction.Foregrounded
+            51 -> AppAction.NostrConnectCallback(
                 FfiConverterString.read(buf),
                 )
-            44 -> AppAction.ClosePeerProfile
-            45 -> AppAction.SetPushToken(
+            52 -> AppAction.ReloadConfig
+            53 -> AppAction.OpenPeerProfile(
                 FfiConverterString.read(buf),
                 )
-            46 -> AppAction.ReregisterPush
-            47 -> AppAction.RefreshFollowList
-            48 -> AppAction.FollowUser(
+            54 -> AppAction.ClosePeerProfile
+            55 -> AppAction.SetPushToken(
                 FfiConverterString.read(buf),
                 )
-            49 -> AppAction.UnfollowUser(
+            56 -> AppAction.ReregisterPush
+            57 -> AppAction.RefreshFollowList
+            58 -> AppAction.FollowUser(
+                FfiConverterString.read(buf),
+                )
+            59 -> AppAction.UnfollowUser(
                 FfiConverterString.read(buf),
                 )
             else -> throw RuntimeException("invalid enum value, something is very wrong!!")
@@ -3667,6 +3998,25 @@ public object FfiConverterTypeAppAction : FfiConverterRustBuffer<AppAction>{
                 + FfiConverterString.allocationSize(value.`name`)
             )
         }
+        is AppAction.HypernoteAction -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterString.allocationSize(value.`chatId`)
+                + FfiConverterString.allocationSize(value.`messageId`)
+                + FfiConverterString.allocationSize(value.`actionName`)
+                + FfiConverterMapStringString.allocationSize(value.`form`)
+            )
+        }
+        is AppAction.SendHypernotePoll -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterString.allocationSize(value.`chatId`)
+                + FfiConverterString.allocationSize(value.`question`)
+                + FfiConverterSequenceString.allocationSize(value.`options`)
+            )
+        }
         is AppAction.ArchiveChat -> {
             // Add the size for the Int that specifies the variant plus the size needed for all fields
             (
@@ -3694,6 +4044,56 @@ public object FfiConverterTypeAppAction : FfiConverterRustBuffer<AppAction>{
             // Add the size for the Int that specifies the variant plus the size needed for all fields
             (
                 4UL
+            )
+        }
+        is AppAction.EnableDeveloperMode -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+            )
+        }
+        is AppAction.VoiceRecordingStart -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+            )
+        }
+        is AppAction.VoiceRecordingPause -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+            )
+        }
+        is AppAction.VoiceRecordingResume -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+            )
+        }
+        is AppAction.VoiceRecordingStop -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+            )
+        }
+        is AppAction.VoiceRecordingCancel -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+            )
+        }
+        is AppAction.VoiceRecordingAudioLevel -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterFloat.allocationSize(value.`level`)
+            )
+        }
+        is AppAction.VoiceRecordingTranscript -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterString.allocationSize(value.`text`)
             )
         }
         is AppAction.Foregrounded -> {
@@ -3952,69 +4352,118 @@ public object FfiConverterTypeAppAction : FfiConverterRustBuffer<AppAction>{
                 FfiConverterString.write(value.`name`, buf)
                 Unit
             }
-            is AppAction.ArchiveChat -> {
+            is AppAction.HypernoteAction -> {
                 buf.putInt(36)
+                FfiConverterString.write(value.`chatId`, buf)
+                FfiConverterString.write(value.`messageId`, buf)
+                FfiConverterString.write(value.`actionName`, buf)
+                FfiConverterMapStringString.write(value.`form`, buf)
+                Unit
+            }
+            is AppAction.SendHypernotePoll -> {
+                buf.putInt(37)
+                FfiConverterString.write(value.`chatId`, buf)
+                FfiConverterString.write(value.`question`, buf)
+                FfiConverterSequenceString.write(value.`options`, buf)
+                Unit
+            }
+            is AppAction.ArchiveChat -> {
+                buf.putInt(38)
                 FfiConverterString.write(value.`chatId`, buf)
                 Unit
             }
             is AppAction.ReactToMessage -> {
-                buf.putInt(37)
+                buf.putInt(39)
                 FfiConverterString.write(value.`chatId`, buf)
                 FfiConverterString.write(value.`messageId`, buf)
                 FfiConverterString.write(value.`emoji`, buf)
                 Unit
             }
             is AppAction.TypingStarted -> {
-                buf.putInt(38)
+                buf.putInt(40)
                 FfiConverterString.write(value.`chatId`, buf)
                 Unit
             }
             is AppAction.ClearToast -> {
-                buf.putInt(39)
+                buf.putInt(41)
+                Unit
+            }
+            is AppAction.EnableDeveloperMode -> {
+                buf.putInt(42)
+                Unit
+            }
+            is AppAction.VoiceRecordingStart -> {
+                buf.putInt(43)
+                Unit
+            }
+            is AppAction.VoiceRecordingPause -> {
+                buf.putInt(44)
+                Unit
+            }
+            is AppAction.VoiceRecordingResume -> {
+                buf.putInt(45)
+                Unit
+            }
+            is AppAction.VoiceRecordingStop -> {
+                buf.putInt(46)
+                Unit
+            }
+            is AppAction.VoiceRecordingCancel -> {
+                buf.putInt(47)
+                Unit
+            }
+            is AppAction.VoiceRecordingAudioLevel -> {
+                buf.putInt(48)
+                FfiConverterFloat.write(value.`level`, buf)
+                Unit
+            }
+            is AppAction.VoiceRecordingTranscript -> {
+                buf.putInt(49)
+                FfiConverterString.write(value.`text`, buf)
                 Unit
             }
             is AppAction.Foregrounded -> {
-                buf.putInt(40)
+                buf.putInt(50)
                 Unit
             }
             is AppAction.NostrConnectCallback -> {
-                buf.putInt(41)
+                buf.putInt(51)
                 FfiConverterString.write(value.`url`, buf)
                 Unit
             }
             is AppAction.ReloadConfig -> {
-                buf.putInt(42)
+                buf.putInt(52)
                 Unit
             }
             is AppAction.OpenPeerProfile -> {
-                buf.putInt(43)
+                buf.putInt(53)
                 FfiConverterString.write(value.`pubkey`, buf)
                 Unit
             }
             is AppAction.ClosePeerProfile -> {
-                buf.putInt(44)
+                buf.putInt(54)
                 Unit
             }
             is AppAction.SetPushToken -> {
-                buf.putInt(45)
+                buf.putInt(55)
                 FfiConverterString.write(value.`token`, buf)
                 Unit
             }
             is AppAction.ReregisterPush -> {
-                buf.putInt(46)
+                buf.putInt(56)
                 Unit
             }
             is AppAction.RefreshFollowList -> {
-                buf.putInt(47)
+                buf.putInt(57)
                 Unit
             }
             is AppAction.FollowUser -> {
-                buf.putInt(48)
+                buf.putInt(58)
                 FfiConverterString.write(value.`pubkey`, buf)
                 Unit
             }
             is AppAction.UnfollowUser -> {
-                buf.putInt(49)
+                buf.putInt(59)
                 FfiConverterString.write(value.`pubkey`, buf)
                 Unit
             }
@@ -4585,6 +5034,93 @@ public object FfiConverterTypeMessageDeliveryState : FfiConverterRustBuffer<Mess
 
 
 
+sealed class MessageSegment {
+    
+    data class Markdown(
+        val `text`: kotlin.String) : MessageSegment()
+        
+    {
+        
+
+        companion object
+    }
+    
+    data class PikaHtml(
+        val `id`: kotlin.String?, 
+        val `html`: kotlin.String) : MessageSegment()
+        
+    {
+        
+
+        companion object
+    }
+    
+
+    
+
+    
+    
+
+
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeMessageSegment : FfiConverterRustBuffer<MessageSegment>{
+    override fun read(buf: ByteBuffer): MessageSegment {
+        return when(buf.getInt()) {
+            1 -> MessageSegment.Markdown(
+                FfiConverterString.read(buf),
+                )
+            2 -> MessageSegment.PikaHtml(
+                FfiConverterOptionalString.read(buf),
+                FfiConverterString.read(buf),
+                )
+            else -> throw RuntimeException("invalid enum value, something is very wrong!!")
+        }
+    }
+
+    override fun allocationSize(value: MessageSegment) = when(value) {
+        is MessageSegment.Markdown -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterString.allocationSize(value.`text`)
+            )
+        }
+        is MessageSegment.PikaHtml -> {
+            // Add the size for the Int that specifies the variant plus the size needed for all fields
+            (
+                4UL
+                + FfiConverterOptionalString.allocationSize(value.`id`)
+                + FfiConverterString.allocationSize(value.`html`)
+            )
+        }
+    }
+
+    override fun write(value: MessageSegment, buf: ByteBuffer) {
+        when(value) {
+            is MessageSegment.Markdown -> {
+                buf.putInt(1)
+                FfiConverterString.write(value.`text`, buf)
+                Unit
+            }
+            is MessageSegment.PikaHtml -> {
+                buf.putInt(2)
+                FfiConverterOptionalString.write(value.`id`, buf)
+                FfiConverterString.write(value.`html`, buf)
+                Unit
+            }
+        }.let { /* this makes the `when` an expression, which ensures it is exhaustive */ }
+    }
+}
+
+
+
+
+
 sealed class Screen {
     
     object Login : Screen()
@@ -4717,6 +5253,42 @@ public object FfiConverterTypeScreen : FfiConverterRustBuffer<Screen>{
                 Unit
             }
         }.let { /* this makes the `when` an expression, which ensures it is exhaustive */ }
+    }
+}
+
+
+
+
+
+
+enum class VoiceRecordingPhase {
+    
+    IDLE,
+    RECORDING,
+    PAUSED,
+    DONE;
+
+    
+
+
+    companion object
+}
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeVoiceRecordingPhase: FfiConverterRustBuffer<VoiceRecordingPhase> {
+    override fun read(buf: ByteBuffer) = try {
+        VoiceRecordingPhase.values()[buf.getInt() - 1]
+    } catch (e: IndexOutOfBoundsException) {
+        throw RuntimeException("invalid enum value, something is very wrong!!", e)
+    }
+
+    override fun allocationSize(value: VoiceRecordingPhase) = 4UL
+
+    override fun write(value: VoiceRecordingPhase, buf: ByteBuffer) {
+        buf.putInt(value.ordinal + 1)
     }
 }
 
@@ -5241,6 +5813,38 @@ public object FfiConverterOptionalTypeChatViewState: FfiConverterRustBuffer<Chat
 /**
  * @suppress
  */
+public object FfiConverterOptionalTypeHypernoteData: FfiConverterRustBuffer<HypernoteData?> {
+    override fun read(buf: ByteBuffer): HypernoteData? {
+        if (buf.get().toInt() == 0) {
+            return null
+        }
+        return FfiConverterTypeHypernoteData.read(buf)
+    }
+
+    override fun allocationSize(value: HypernoteData?): ULong {
+        if (value == null) {
+            return 1UL
+        } else {
+            return 1UL + FfiConverterTypeHypernoteData.allocationSize(value)
+        }
+    }
+
+    override fun write(value: HypernoteData?, buf: ByteBuffer) {
+        if (value == null) {
+            buf.put(0)
+        } else {
+            buf.put(1)
+            FfiConverterTypeHypernoteData.write(value, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
 public object FfiConverterOptionalTypePeerProfileState: FfiConverterRustBuffer<PeerProfileState?> {
     override fun read(buf: ByteBuffer): PeerProfileState? {
         if (buf.get().toInt() == 0) {
@@ -5273,6 +5877,38 @@ public object FfiConverterOptionalTypePeerProfileState: FfiConverterRustBuffer<P
 /**
  * @suppress
  */
+public object FfiConverterOptionalTypeVoiceRecordingState: FfiConverterRustBuffer<VoiceRecordingState?> {
+    override fun read(buf: ByteBuffer): VoiceRecordingState? {
+        if (buf.get().toInt() == 0) {
+            return null
+        }
+        return FfiConverterTypeVoiceRecordingState.read(buf)
+    }
+
+    override fun allocationSize(value: VoiceRecordingState?): ULong {
+        if (value == null) {
+            return 1UL
+        } else {
+            return 1UL + FfiConverterTypeVoiceRecordingState.allocationSize(value)
+        }
+    }
+
+    override fun write(value: VoiceRecordingState?, buf: ByteBuffer) {
+        if (value == null) {
+            buf.put(0)
+        } else {
+            buf.put(1)
+            FfiConverterTypeVoiceRecordingState.write(value, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
 public object FfiConverterOptionalTypeExternalSignerErrorKind: FfiConverterRustBuffer<ExternalSignerErrorKind?> {
     override fun read(buf: ByteBuffer): ExternalSignerErrorKind? {
         if (buf.get().toInt() == 0) {
@@ -5295,6 +5931,34 @@ public object FfiConverterOptionalTypeExternalSignerErrorKind: FfiConverterRustB
         } else {
             buf.put(1)
             FfiConverterTypeExternalSignerErrorKind.write(value, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterSequenceFloat: FfiConverterRustBuffer<List<kotlin.Float>> {
+    override fun read(buf: ByteBuffer): List<kotlin.Float> {
+        val len = buf.getInt()
+        return List<kotlin.Float>(len) {
+            FfiConverterFloat.read(buf)
+        }
+    }
+
+    override fun allocationSize(value: List<kotlin.Float>): ULong {
+        val sizeForLength = 4UL
+        val sizeForItems = value.map { FfiConverterFloat.allocationSize(it) }.sum()
+        return sizeForLength + sizeForItems
+    }
+
+    override fun write(value: List<kotlin.Float>, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        value.iterator().forEach {
+            FfiConverterFloat.write(it, buf)
         }
     }
 }
@@ -5473,6 +6137,62 @@ public object FfiConverterSequenceTypeFollowListEntry: FfiConverterRustBuffer<Li
 /**
  * @suppress
  */
+public object FfiConverterSequenceTypeHypernoteResponder: FfiConverterRustBuffer<List<HypernoteResponder>> {
+    override fun read(buf: ByteBuffer): List<HypernoteResponder> {
+        val len = buf.getInt()
+        return List<HypernoteResponder>(len) {
+            FfiConverterTypeHypernoteResponder.read(buf)
+        }
+    }
+
+    override fun allocationSize(value: List<HypernoteResponder>): ULong {
+        val sizeForLength = 4UL
+        val sizeForItems = value.map { FfiConverterTypeHypernoteResponder.allocationSize(it) }.sum()
+        return sizeForLength + sizeForItems
+    }
+
+    override fun write(value: List<HypernoteResponder>, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        value.iterator().forEach {
+            FfiConverterTypeHypernoteResponder.write(it, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterSequenceTypeHypernoteResponseTally: FfiConverterRustBuffer<List<HypernoteResponseTally>> {
+    override fun read(buf: ByteBuffer): List<HypernoteResponseTally> {
+        val len = buf.getInt()
+        return List<HypernoteResponseTally>(len) {
+            FfiConverterTypeHypernoteResponseTally.read(buf)
+        }
+    }
+
+    override fun allocationSize(value: List<HypernoteResponseTally>): ULong {
+        val sizeForLength = 4UL
+        val sizeForItems = value.map { FfiConverterTypeHypernoteResponseTally.allocationSize(it) }.sum()
+        return sizeForLength + sizeForItems
+    }
+
+    override fun write(value: List<HypernoteResponseTally>, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        value.iterator().forEach {
+            FfiConverterTypeHypernoteResponseTally.write(it, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
 public object FfiConverterSequenceTypeMemberInfo: FfiConverterRustBuffer<List<MemberInfo>> {
     override fun read(buf: ByteBuffer): List<MemberInfo> {
         val len = buf.getInt()
@@ -5519,34 +6239,6 @@ public object FfiConverterSequenceTypeMention: FfiConverterRustBuffer<List<Menti
         buf.putInt(value.size)
         value.iterator().forEach {
             FfiConverterTypeMention.write(it, buf)
-        }
-    }
-}
-
-
-
-
-/**
- * @suppress
- */
-public object FfiConverterSequenceTypePollTally: FfiConverterRustBuffer<List<PollTally>> {
-    override fun read(buf: ByteBuffer): List<PollTally> {
-        val len = buf.getInt()
-        return List<PollTally>(len) {
-            FfiConverterTypePollTally.read(buf)
-        }
-    }
-
-    override fun allocationSize(value: List<PollTally>): ULong {
-        val sizeForLength = 4UL
-        val sizeForItems = value.map { FfiConverterTypePollTally.allocationSize(it) }.sum()
-        return sizeForLength + sizeForItems
-    }
-
-    override fun write(value: List<PollTally>, buf: ByteBuffer) {
-        buf.putInt(value.size)
-        value.iterator().forEach {
-            FfiConverterTypePollTally.write(it, buf)
         }
     }
 }
@@ -5613,6 +6305,34 @@ public object FfiConverterSequenceTypeTypingMember: FfiConverterRustBuffer<List<
 /**
  * @suppress
  */
+public object FfiConverterSequenceTypeMessageSegment: FfiConverterRustBuffer<List<MessageSegment>> {
+    override fun read(buf: ByteBuffer): List<MessageSegment> {
+        val len = buf.getInt()
+        return List<MessageSegment>(len) {
+            FfiConverterTypeMessageSegment.read(buf)
+        }
+    }
+
+    override fun allocationSize(value: List<MessageSegment>): ULong {
+        val sizeForLength = 4UL
+        val sizeForItems = value.map { FfiConverterTypeMessageSegment.allocationSize(it) }.sum()
+        return sizeForLength + sizeForItems
+    }
+
+    override fun write(value: List<MessageSegment>, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        value.iterator().forEach {
+            FfiConverterTypeMessageSegment.write(it, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
 public object FfiConverterSequenceTypeScreen: FfiConverterRustBuffer<List<Screen>> {
     override fun read(buf: ByteBuffer): List<Screen> {
         val len = buf.getInt()
@@ -5634,4 +6354,63 @@ public object FfiConverterSequenceTypeScreen: FfiConverterRustBuffer<List<Screen
         }
     }
 }
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterMapStringString: FfiConverterRustBuffer<Map<kotlin.String, kotlin.String>> {
+    override fun read(buf: ByteBuffer): Map<kotlin.String, kotlin.String> {
+        val len = buf.getInt()
+        return buildMap<kotlin.String, kotlin.String>(len) {
+            repeat(len) {
+                val k = FfiConverterString.read(buf)
+                val v = FfiConverterString.read(buf)
+                this[k] = v
+            }
+        }
+    }
+
+    override fun allocationSize(value: Map<kotlin.String, kotlin.String>): ULong {
+        val spaceForMapSize = 4UL
+        val spaceForChildren = value.map { (k, v) ->
+            FfiConverterString.allocationSize(k) +
+            FfiConverterString.allocationSize(v)
+        }.sum()
+        return spaceForMapSize + spaceForChildren
+    }
+
+    override fun write(value: Map<kotlin.String, kotlin.String>, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        // The parens on `(k, v)` here ensure we're calling the right method,
+        // which is important for compatibility with older android devices.
+        // Ref https://blog.danlew.net/2017/03/16/kotlin-puzzler-whose-line-is-it-anyways/
+        value.forEach { (k, v) ->
+            FfiConverterString.write(k, buf)
+            FfiConverterString.write(v, buf)
+        }
+    }
+} fun `isValidPeerKey`(`input`: kotlin.String): kotlin.Boolean {
+            return FfiConverterBoolean.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_pika_core_fn_func_is_valid_peer_key(
+    
+        FfiConverterString.lower(`input`),_status)
+}
+    )
+    }
+    
+ fun `normalizePeerKey`(`input`: kotlin.String): kotlin.String {
+            return FfiConverterString.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_pika_core_fn_func_normalize_peer_key(
+    
+        FfiConverterString.lower(`input`),_status)
+}
+    )
+    }
+    
+
 

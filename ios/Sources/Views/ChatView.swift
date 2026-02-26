@@ -7,8 +7,10 @@ import UniformTypeIdentifiers
 struct ChatView: View {
     let chatId: String
     let state: ChatScreenState
+    let voiceRecording: VoiceRecordingState?
     let activeCall: CallState?
     let callEvents: [CallTimelineEvent]
+    let onVoiceRecordingAction: @MainActor (AppAction) -> Void
     let onSendMessage: @MainActor (String, String?) -> Void
     let onStartCall: @MainActor () -> Void
     let onStartVideoCall: @MainActor () -> Void
@@ -38,7 +40,7 @@ struct ChatView: View {
     @State private var replyDraftMessage: ChatMessage?
     @State private var fullscreenImageAttachment: ChatMediaAttachment?
     @State private var showPollComposer = false
-    @State private var voiceRecorder = VoiceRecorder()
+    @State private var voiceRecorder: VoiceRecorder
     @State private var showMicPermissionDenied = false
     @FocusState private var isInputFocused: Bool
 
@@ -49,8 +51,10 @@ struct ChatView: View {
     init(
         chatId: String,
         state: ChatScreenState,
+        voiceRecording: VoiceRecordingState? = nil,
         activeCall: CallState?,
         callEvents: [CallTimelineEvent],
+        onVoiceRecordingAction: @escaping @MainActor (AppAction) -> Void = { _ in },
         onSendMessage: @escaping @MainActor (String, String?) -> Void,
         onStartCall: @escaping @MainActor () -> Void,
         onStartVideoCall: @escaping @MainActor () -> Void,
@@ -66,8 +70,10 @@ struct ChatView: View {
     ) {
         self.chatId = chatId
         self.state = state
+        self.voiceRecording = voiceRecording
         self.activeCall = activeCall
         self.callEvents = callEvents
+        self.onVoiceRecordingAction = onVoiceRecordingAction
         self.onSendMessage = onSendMessage
         self.onStartCall = onStartCall
         self.onStartVideoCall = onStartVideoCall
@@ -80,6 +86,7 @@ struct ChatView: View {
         self.onSendMedia = onSendMedia
         self.onHypernoteAction = onHypernoteAction
         self.onSendPoll = onSendPoll
+        _voiceRecorder = State(initialValue: VoiceRecorder(dispatchAction: onVoiceRecordingAction))
     }
 
     var body: some View {
@@ -322,6 +329,8 @@ struct ChatView: View {
                                             }
                                         }
                                     )
+                                case .unreadDivider:
+                                    UnreadDividerRow()
                                 case .callEvent(let event):
                                     CallTimelineEventRow(event: event)
                                 }
@@ -468,14 +477,22 @@ struct ChatView: View {
         let membersByPubkey = Dictionary(uniqueKeysWithValues: chat.members.map { ($0.pubkey, $0) })
         var rows: [ChatTimelineRow] = []
         rows.reserveCapacity(entries.count)
+        var insertedUnreadDivider = false
 
         for entry in entries {
             switch entry {
             case .callEvent(_, let event):
                 rows.append(.callEvent(event))
             case .message(_, let message):
+                let isFirstUnread = chat.firstUnreadMessageId == message.id
+                if isFirstUnread, !insertedUnreadDivider, !rows.isEmpty {
+                    rows.append(.unreadDivider)
+                    insertedUnreadDivider = true
+                }
+
                 if let lastIndex = rows.indices.last,
                    case .messageGroup(var group) = rows[lastIndex],
+                   !isFirstUnread,
                    group.senderPubkey == message.senderPubkey,
                    group.isMine == message.isMine {
                     group.messages.append(message)
@@ -536,12 +553,15 @@ struct ChatView: View {
 
     private enum ChatTimelineRow: Identifiable {
         case messageGroup(GroupedChatMessage)
+        case unreadDivider
         case callEvent(CallTimelineEvent)
 
         var id: String {
             switch self {
             case .messageGroup(let group):
                 return "msg:\(group.id)"
+            case .unreadDivider:
+                return "unread-divider"
             case .callEvent(let event):
                 return "call:\(event.id)"
             }
@@ -610,29 +630,30 @@ struct ChatView: View {
         return trimmed
     }
 
+    private var activeVoiceRecording: VoiceRecordingState? {
+        guard let voiceRecording else { return nil }
+        switch voiceRecording.phase {
+        case .recording, .paused:
+            return voiceRecording
+        case .idle, .done:
+            return nil
+        }
+    }
+
     @ViewBuilder
     private func messageInputBar(chat: ChatViewState) -> some View {
         VStack(spacing: 0) {
-            if voiceRecorder.isRecording {
+            if let recording = activeVoiceRecording {
                 VoiceRecordingView(
-                    recorder: voiceRecorder,
+                    recording: recording,
                     onSend: {
-                        Task {
-                            // Capture transcript before stopRecording resets state
-                            let transcriptText = voiceRecorder.transcript
-                            guard let url = await voiceRecorder.stopRecording() else { return }
-                            guard let data = try? Data(contentsOf: url) else { return }
-                            let timestamp = Int(Date().timeIntervalSince1970)
-                            // Send transcript as italic markdown caption
-                            let caption = transcriptText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                                ? ""
-                                : "*\(transcriptText.trimmingCharacters(in: .whitespacesAndNewlines))*"
-                            onSendMedia?(chatId, data, "audio/mp4", "voice_\(timestamp).m4a", caption)
-                            try? FileManager.default.removeItem(at: url)
-                        }
+                        sendVoiceRecording(using: recording)
                     },
                     onCancel: {
-                        voiceRecorder.cancelRecording()
+                        cancelVoiceRecording()
+                    },
+                    onTogglePause: {
+                        toggleVoiceRecordingPause(phase: recording.phase)
                     }
                 )
                 .modifier(GlassInputModifier())
@@ -772,7 +793,7 @@ struct ChatView: View {
                 }
             }
         }
-        .animation(.easeInOut(duration: 0.2), value: voiceRecorder.isRecording)
+        .animation(.easeInOut(duration: 0.2), value: activeVoiceRecording?.phase)
         .alert("Microphone Access Denied", isPresented: $showMicPermissionDenied) {
             Button("Open Settings") {
                 if let url = URL(string: UIApplication.openSettingsURLString) {
@@ -782,6 +803,39 @@ struct ChatView: View {
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("Enable microphone access in Settings to send voice messages.")
+        }
+    }
+
+    private func sendVoiceRecording(using recording: VoiceRecordingState) {
+        Task {
+            guard let url = await voiceRecorder.stopRecording() else {
+                onVoiceRecordingAction(.voiceRecordingCancel)
+                return
+            }
+            defer {
+                try? FileManager.default.removeItem(at: url)
+                onVoiceRecordingAction(.voiceRecordingCancel)
+            }
+            guard let data = try? Data(contentsOf: url) else { return }
+            let timestamp = Int(Date().timeIntervalSince1970)
+            let transcriptText = recording.transcript.trimmingCharacters(in: .whitespacesAndNewlines)
+            let caption = transcriptText.isEmpty ? "" : "*\(transcriptText)*"
+            onSendMedia?(chatId, data, "audio/mp4", "voice_\(timestamp).m4a", caption)
+        }
+    }
+
+    private func cancelVoiceRecording() {
+        voiceRecorder.cancelRecording()
+    }
+
+    private func toggleVoiceRecordingPause(phase: VoiceRecordingPhase) {
+        switch phase {
+        case .paused:
+            voiceRecorder.resumeRecording()
+        case .recording:
+            voiceRecorder.pauseRecording()
+        case .idle, .done:
+            break
         }
     }
 
@@ -1082,6 +1136,19 @@ private struct EmojiPickerSheet: View {
     }
 }
 
+private struct UnreadDividerRow: View {
+    var body: some View {
+        HStack(spacing: 10) {
+            Divider()
+            Text("NEW MESSAGES")
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(.blue)
+            Divider()
+        }
+        .padding(.vertical, 8)
+    }
+}
+
 private struct BottomVisibleKey: PreferenceKey {
     static var defaultValue: CGFloat? = nil
     static func reduce(value: inout CGFloat?, nextValue: () -> CGFloat?) {
@@ -1116,11 +1183,10 @@ private struct FloatingInputBarModifier<Bar: View>: ViewModifier {
 }
 
 // Extracted to MessageBubbleViews.swift:
-// PikaPrompt, MessageSegment, parseMessageSegments,
 // GroupedChatMessage, GroupedBubblePosition,
 // MessageGroupRow, MessageBubbleStack, MessageBubble,
 // MediaAttachmentView, ReplyPreviewCard, deliveryText,
-// PikaPromptView, PikaHtmlView, PikaWebView, Theme extensions
+// PikaHtmlView, PikaWebView, Theme extensions
 
 #if DEBUG
 private enum ChatViewPreviewData {

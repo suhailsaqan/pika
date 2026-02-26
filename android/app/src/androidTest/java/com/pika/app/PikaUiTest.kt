@@ -6,12 +6,14 @@ import android.util.Log
 import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertTextContains
+import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.semantics.SemanticsProperties
@@ -90,11 +92,16 @@ class PikaUiTest {
                 compose.onNodeWithText("Chats").assertIsDisplayed()
             }.isSuccess
         }
-        compose.onNodeWithContentDescription("My npub").performClick()
-        compose.onNodeWithText("My npub").assertIsDisplayed()
+        compose.onNodeWithTag(TestTags.CHATLIST_MY_PROFILE).performClick()
+        compose.waitUntil(30_000) {
+            runCatching { compose.onNodeWithText("Profile").assertIsDisplayed() }.isSuccess &&
+                runCatching {
+                    compose.onNodeWithTag(TestTags.MYPROFILE_COPY_NPUB).assertIsDisplayed()
+                }.isSuccess
+        }
 
         // Use the in-app "Copy" action and read from the system clipboard (no semantics scraping).
-        compose.onNodeWithText("Copy").performClick()
+        compose.onNodeWithTag(TestTags.MYPROFILE_COPY_NPUB).performClick()
         val myNpub = waitForClipboardMatching(Regex("^npub1[0-9a-z]+$"))
         Log.d("PikaUiTest", "myNpub=$myNpub")
 
@@ -156,7 +163,19 @@ class PikaUiTest {
             compose.onNodeWithContentDescription("Back").performClick()
         }
         compose.onNodeWithText("Chats").assertIsDisplayed()
-        compose.onNodeWithContentDescription("Logout").performClick()
+        compose.onNodeWithTag(TestTags.CHATLIST_MY_PROFILE).performClick()
+        compose.waitUntil(30_000) {
+            runCatching { compose.onNodeWithText("Profile").assertIsDisplayed() }.isSuccess
+        }
+        compose.onNodeWithTag(TestTags.MYPROFILE_SHEET_LIST)
+            .performScrollToNode(hasTestTag(TestTags.MYPROFILE_LOGOUT))
+        compose.onNodeWithTag(TestTags.MYPROFILE_LOGOUT).performClick()
+        compose.waitUntil(30_000) {
+            runCatching {
+                compose.onNodeWithTag(TestTags.MYPROFILE_LOGOUT_CONFIRM).assertIsDisplayed()
+            }.isSuccess
+        }
+        compose.onNodeWithTag(TestTags.MYPROFILE_LOGOUT_CONFIRM).performClick()
         compose.onNodeWithText("Pika").assertIsDisplayed()
     }
 

@@ -281,6 +281,6 @@ private fun callStatusText(call: CallState): String =
         is CallStatus.Offering -> "Calling..."
         is CallStatus.Ringing -> "Incoming call"
         is CallStatus.Connecting -> "Connecting..."
-        is CallStatus.Active -> "Call active"
+        is CallStatus.Active -> call.durationDisplay ?: "Call active"
         is CallStatus.Ended -> "Call ended: ${status.reason}"
     }

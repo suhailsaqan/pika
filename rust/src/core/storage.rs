@@ -2,9 +2,10 @@
 
 use super::*;
 use crate::state::{
-    resolve_mentions, HypernoteResponder, HypernoteResponseTally, MemberInfo, PollTally,
+    resolve_mentions, HypernoteResponder, HypernoteResponseTally, MemberInfo, MessageSegment,
 };
 use hypernote_protocol as hn;
+use std::sync::OnceLock;
 
 impl AppCore {
     pub(super) fn refresh_all_from_storage(&mut self) {
@@ -139,9 +140,7 @@ impl AppCore {
             let unread_count = *self.unread_counts.get(&chat_id).unwrap_or(&0);
 
             let last_message = last_message.map(|msg: String| {
-                if msg.contains("```pika-prompt-response\n") {
-                    "Voted in poll".to_string()
-                } else if msg.contains("```pika-html-update ") {
+                if msg.contains("```pika-html-update ") {
                     "Updated content".to_string()
                 } else if msg.contains("```pika-html-state-update ") {
                     "Updated widget".to_string()
@@ -150,6 +149,34 @@ impl AppCore {
                 }
             });
 
+            let member_count = members_for_state.len() + 1;
+            let (display_name, subtitle) = if is_group {
+                let display_name = explicit_name
+                    .clone()
+                    .unwrap_or_else(|| format!("Group ({member_count})"));
+                let subtitle = Some(format!("{member_count} members"));
+                (display_name, subtitle)
+            } else {
+                let peer = members_for_state.first();
+                let display_name =
+                    peer.and_then(|member| member.name.clone())
+                        .unwrap_or_else(|| {
+                            peer.map(|member| truncated_npub(&member.npub))
+                                .unwrap_or_else(|| "Chat".to_string())
+                        });
+                let subtitle = if peer.and_then(|member| member.name.as_ref()).is_some() {
+                    peer.map(|member| truncated_npub(&member.npub))
+                } else {
+                    None
+                };
+                (display_name, subtitle)
+            };
+            let last_message_preview = match &last_message {
+                None => "No messages yet".to_string(),
+                Some(msg) if msg.trim().is_empty() => "Media".to_string(),
+                Some(msg) => msg.clone(),
+            };
+
             list.push(ChatSummary {
                 chat_id: chat_id.clone(),
                 is_group,
@@ -157,6 +184,9 @@ impl AppCore {
                 members: members_for_state,
                 last_message,
                 last_message_at,
+                display_name,
+                subtitle,
+                last_message_preview,
                 unread_count,
             });
 
@@ -276,7 +306,7 @@ impl AppCore {
             })
             .collect();
 
-        // Include current user's name so poll tallies show it instead of hex.
+        // Include current user's name so mention resolution can render "@you".
         let my_name = &self.state.my_profile.name;
         if !my_name.is_empty() {
             sender_names.insert(my_pubkey_hex.clone(), my_name.clone());
@@ -402,6 +432,8 @@ impl AppCore {
                     &m.tags,
                 );
                 let (display_content, mentions) = resolve_mentions(&m.content, &sender_names);
+                let segments = parse_message_segments(&display_content);
+                let timestamp = m.created_at.as_secs() as i64;
 
                 // Aggregate reactions for this message.
                 let reactions = if let Some(rxns) = reaction_map.get(&id) {
@@ -435,13 +467,13 @@ impl AppCore {
                     display_content,
                     reply_to_message_id: last_event_tag_id(&m.tags),
                     mentions,
-                    timestamp: m.created_at.as_secs() as i64,
+                    timestamp,
+                    display_timestamp: format_display_timestamp(timestamp),
                     is_mine,
                     delivery,
                     reactions,
                     media,
-                    poll_tally: vec![],
-                    my_poll_vote: None,
+                    segments,
                     html_state: None,
                     hypernote: if m.kind == super::HYPERNOTE_KIND {
                         let ast_json =
@@ -511,6 +543,7 @@ impl AppCore {
                     .cloned()
                     .unwrap_or(MessageDeliveryState::Pending);
                 let (display_content, mentions) = resolve_mentions(&lm.content, &sender_names);
+                let segments = parse_message_segments(&display_content);
                 msgs.push(ChatMessage {
                     id,
                     sender_pubkey: lm.sender_pubkey,
@@ -520,12 +553,12 @@ impl AppCore {
                     reply_to_message_id: lm.reply_to_message_id.clone(),
                     mentions,
                     timestamp: lm.timestamp,
+                    display_timestamp: format_display_timestamp(lm.timestamp),
                     is_mine: true,
                     delivery,
                     reactions: vec![],
                     media: lm.media,
-                    poll_tally: vec![],
-                    my_poll_vote: None,
+                    segments,
                     html_state: None,
                     hypernote: None,
                 });
@@ -548,7 +581,13 @@ impl AppCore {
         );
         process_html_updates(&mut msgs);
         process_html_state_updates(&mut msgs);
-        process_poll_tallies(&mut msgs, &my_pubkey_hex);
+
+        let unread_count = *self.unread_counts.get(chat_id).unwrap_or(&0) as usize;
+        let first_unread_message_id = if unread_count > 0 && unread_count <= msgs.len() {
+            Some(msgs[msgs.len() - unread_count].id.clone())
+        } else {
+            None
+        };
 
         let is_admin = entry.admin_pubkeys.contains(&my_pubkey_hex);
         let members_for_state: Vec<MemberInfo> = entry
@@ -572,6 +611,7 @@ impl AppCore {
             members: members_for_state,
             is_admin,
             messages: msgs,
+            first_unread_message_id,
             can_load_older,
             typing_members: typing,
         });
@@ -660,6 +700,8 @@ impl AppCore {
                     &m.tags,
                 );
                 let (display_content, mentions) = resolve_mentions(&m.content, &sender_names);
+                let timestamp = m.created_at.as_secs() as i64;
+                let segments = parse_message_segments(&display_content);
                 ChatMessage {
                     id,
                     sender_pubkey: sender_hex,
@@ -668,13 +710,13 @@ impl AppCore {
                     display_content,
                     reply_to_message_id: last_event_tag_id(&m.tags),
                     mentions,
-                    timestamp: m.created_at.as_secs() as i64,
+                    timestamp,
+                    display_timestamp: format_display_timestamp(timestamp),
                     is_mine,
                     delivery,
                     reactions: vec![],
                     media,
-                    poll_tally: vec![],
-                    my_poll_vote: None,
+                    segments,
                     html_state: None,
                     hypernote: None,
                 }
@@ -690,11 +732,90 @@ impl AppCore {
                     .insert(chat_id.to_string(), base_offset + total_fetched);
                 process_html_updates(&mut cur.messages);
                 process_html_state_updates(&mut cur.messages);
-                process_poll_tallies(&mut cur.messages, &my_pubkey_hex);
+                let unread_count = *self.unread_counts.get(chat_id).unwrap_or(&0) as usize;
+                cur.first_unread_message_id =
+                    if unread_count > 0 && unread_count <= cur.messages.len() {
+                        Some(cur.messages[cur.messages.len() - unread_count].id.clone())
+                    } else {
+                        None
+                    };
                 self.emit_current_chat();
             }
         }
     }
+}
+
+fn truncated_npub(s: &str) -> String {
+    if s.len() > 16 {
+        format!("{}...", &s[..12])
+    } else {
+        s.to_string()
+    }
+}
+
+fn format_display_timestamp(timestamp: i64) -> String {
+    use chrono::TimeZone;
+    let display = chrono::Utc
+        .timestamp_opt(timestamp, 0)
+        .single()
+        .map(|utc| utc.with_timezone(&chrono::Local))
+        .unwrap_or_else(chrono::Local::now)
+        .format("%l:%M %p")
+        .to_string();
+    display.trim().to_string()
+}
+
+fn parse_message_segments(content: &str) -> Vec<MessageSegment> {
+    static SEGMENT_RE: OnceLock<regex::Regex> = OnceLock::new();
+    let re = SEGMENT_RE.get_or_init(|| {
+        regex::Regex::new(r"```pika-([\w-]+)(?:[ \t]+(\S+))?\n([\s\S]*?)```")
+            .expect("valid pika segment regex")
+    });
+
+    let mut segments = Vec::new();
+    let mut last_end = 0usize;
+
+    for caps in re.captures_iter(content) {
+        let Some(full_match) = caps.get(0) else {
+            continue;
+        };
+
+        let before = &content[last_end..full_match.start()];
+        if !before.trim().is_empty() {
+            segments.push(MessageSegment::Markdown {
+                text: before.to_string(),
+            });
+        }
+
+        let block_type = caps.get(1).map(|m| m.as_str()).unwrap_or_default();
+        let block_id = caps.get(2).map(|m| m.as_str().trim().to_string());
+        let block_body = caps
+            .get(3)
+            .map(|m| m.as_str().trim().to_string())
+            .unwrap_or_default();
+
+        match block_type {
+            "html" => segments.push(MessageSegment::PikaHtml {
+                id: block_id,
+                html: block_body,
+            }),
+            "html-update" | "html-state-update" | "prompt-response" => {}
+            _ => segments.push(MessageSegment::Markdown {
+                text: full_match.as_str().to_string(),
+            }),
+        }
+
+        last_end = full_match.end();
+    }
+
+    let tail = &content[last_end..];
+    if !tail.trim().is_empty() {
+        segments.push(MessageSegment::Markdown {
+            text: tail.to_string(),
+        });
+    }
+
+    segments
 }
 
 fn first_event_tag_id(tags: &Tags) -> Option<String> {
@@ -715,89 +836,6 @@ fn last_event_tag_id(tags: &Tags) -> Option<String> {
         }
     }
     last
-}
-
-/// Parse a `pika-prompt-response` code block from message content.
-/// Returns `(prompt_id, selected_option)` if found.
-fn parse_poll_response(content: &str) -> Option<(String, String)> {
-    let marker = "```pika-prompt-response\n";
-    let start = content.find(marker)?;
-    let json_start = start + marker.len();
-    let rest = &content[json_start..];
-    let end = rest.find("```")?;
-    let json_str = rest[..end].trim();
-    let v: serde_json::Value = serde_json::from_str(json_str).ok()?;
-    let prompt_id = v.get("prompt_id")?.as_str()?.to_string();
-    let selected = v.get("selected")?.as_str()?.to_string();
-    Some((prompt_id, selected))
-}
-
-/// Scan messages for `pika-prompt-response` blocks, tally votes onto
-/// the matching prompt messages, and remove the response messages.
-fn process_poll_tallies(msgs: &mut Vec<ChatMessage>, my_pubkey_hex: &str) {
-    // Collect votes: (prompt_id, sender_pubkey) -> (option, timestamp, sender_name)
-    // Only keep the latest vote per (sender, prompt_id).
-    let mut latest_votes: HashMap<(String, String), (String, i64, Option<String>)> = HashMap::new();
-    let mut response_indices: Vec<usize> = Vec::new();
-
-    for (i, msg) in msgs.iter().enumerate() {
-        if let Some((prompt_id, selected)) = parse_poll_response(&msg.content) {
-            let key = (prompt_id, msg.sender_pubkey.clone());
-            if latest_votes
-                .get(&key)
-                .map(|(_, ts, _)| msg.timestamp > *ts)
-                .unwrap_or(true)
-            {
-                latest_votes.insert(key, (selected, msg.timestamp, msg.sender_name.clone()));
-            }
-            response_indices.push(i);
-        }
-    }
-
-    if response_indices.is_empty() {
-        return;
-    }
-
-    // Build tallies: prompt_id -> option -> Vec<voter_name>
-    let mut tallies: HashMap<String, HashMap<String, Vec<String>>> = HashMap::new();
-    let mut my_votes: HashMap<String, String> = HashMap::new();
-
-    for ((prompt_id, sender_pubkey), (option, _, sender_name)) in &latest_votes {
-        let voter_name = sender_name
-            .clone()
-            .unwrap_or_else(|| sender_pubkey[..sender_pubkey.len().min(8)].to_string());
-        tallies
-            .entry(prompt_id.clone())
-            .or_default()
-            .entry(option.clone())
-            .or_default()
-            .push(voter_name);
-        if sender_pubkey == my_pubkey_hex {
-            my_votes.insert(prompt_id.clone(), option.clone());
-        }
-    }
-
-    // Attach tallies to matching prompt messages.
-    for msg in msgs.iter_mut() {
-        if let Some(option_tallies) = tallies.get(&msg.id) {
-            let mut poll_tally: Vec<PollTally> = option_tallies
-                .iter()
-                .map(|(option, voters)| PollTally {
-                    option: option.clone(),
-                    count: voters.len() as u32,
-                    voter_names: voters.clone(),
-                })
-                .collect();
-            poll_tally.sort_by_key(|b| std::cmp::Reverse(b.count));
-            msg.poll_tally = poll_tally;
-            msg.my_poll_vote = my_votes.get(&msg.id).cloned();
-        }
-    }
-
-    // Remove response messages (reverse order to preserve indices).
-    for i in response_indices.into_iter().rev() {
-        msgs.remove(i);
-    }
 }
 
 #[derive(Debug, Clone)]
@@ -991,6 +1029,7 @@ fn process_html_updates(msgs: &mut Vec<ChatMessage>) {
                 tracing::debug!(html_id, msg_id = msg.id, "html-update applied to original");
                 msg.content = new_content.clone();
                 msg.display_content = new_content.clone();
+                msg.segments = parse_message_segments(&msg.display_content);
                 matched += 1;
             }
         }
@@ -1072,24 +1111,54 @@ mod tests {
     use crate::state::MessageDeliveryState;
 
     fn make_msg(id: &str, content: &str, timestamp: i64) -> ChatMessage {
+        let display_content = content.to_string();
         ChatMessage {
             id: id.to_string(),
             sender_pubkey: "aabb".to_string(),
             sender_name: None,
             content: content.to_string(),
-            display_content: content.to_string(),
+            display_content: display_content.clone(),
             reply_to_message_id: None,
             mentions: vec![],
             timestamp,
+            display_timestamp: format_display_timestamp(timestamp),
             is_mine: false,
             delivery: MessageDeliveryState::Sent,
             reactions: vec![],
             media: vec![],
-            poll_tally: vec![],
-            my_poll_vote: None,
+            segments: parse_message_segments(&display_content),
             html_state: None,
             hypernote: None,
         }
+    }
+
+    #[test]
+    fn parse_message_segments_splits_markdown_and_html() {
+        let content = "hello\n```pika-html widget\n<div>Hi</div>\n```\nworld";
+        let segments = parse_message_segments(content);
+        assert_eq!(segments.len(), 3);
+        assert!(matches!(
+            &segments[0],
+            MessageSegment::Markdown { text } if text.contains("hello")
+        ));
+        assert!(matches!(
+            &segments[1],
+            MessageSegment::PikaHtml { id: Some(id), html } if id == "widget" && html == "<div>Hi</div>"
+        ));
+        assert!(matches!(
+            &segments[2],
+            MessageSegment::Markdown { text } if text.contains("world")
+        ));
+    }
+
+    #[test]
+    fn parse_message_segments_drops_prompt_response_blocks() {
+        let content =
+            "before\n```pika-prompt-response\n{\"prompt_id\":\"a\",\"selected\":\"x\"}\n```\nafter";
+        let segments = parse_message_segments(content);
+        assert_eq!(segments.len(), 2);
+        assert!(matches!(segments[0], MessageSegment::Markdown { .. }));
+        assert!(matches!(segments[1], MessageSegment::Markdown { .. }));
     }
 
     #[test]

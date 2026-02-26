@@ -233,16 +233,9 @@ fn push_duration_and_debug<'a>(
     call: &'a CallState,
 ) -> iced::widget::Column<'a, Message, Theme> {
     if matches!(call.status, CallStatus::Active) {
-        if let Some(started_at) = call.started_at {
-            let now = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_secs() as i64;
-            let elapsed = (now - started_at).max(0);
-            let mins = elapsed / 60;
-            let secs = elapsed % 60;
+        if let Some(duration) = call.duration_display.as_deref() {
             content = content.push(
-                text(format!("{mins:02}:{secs:02}"))
+                text(duration)
                     .size(20)
                     .color(iced::Color::from_rgba(1.0, 1.0, 1.0, 0.9))
                     .center()

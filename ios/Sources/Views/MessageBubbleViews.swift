@@ -9,70 +9,6 @@ import WebKit
 // TODO: Change to a pika related domain
 private let webViewBaseURL = URL(string: "https://webview.benthecarman.com")!
 
-// MARK: - Pika-prompt model
-
-struct PikaPrompt: Decodable {
-    let title: String
-    let options: [String]
-}
-
-/// Parses message content into segments: plain markdown text and pika-* code blocks.
-enum MessageSegment: Identifiable {
-    case markdown(String)
-    case pikaPrompt(PikaPrompt)
-    case pikaHtml(id: String?, html: String, state: String?)
-
-    var id: String {
-        switch self {
-        case .markdown(let text): return "md-\(text.hashValue)"
-        case .pikaPrompt(let prompt): return "prompt-\(prompt.title.hashValue)"
-        case .pikaHtml(let id, let html, _):
-            if let id { return "html-\(id)" }
-            return "html-\(html.hashValue)"
-        }
-    }
-}
-
-func parseMessageSegments(_ content: String, htmlState: String? = nil) -> [MessageSegment] {
-    var segments: [MessageSegment] = []
-    let pattern = /```pika-([\w-]+)(?:[ \t]+(\S+))?\n([\s\S]*?)```/
-    var remaining = content[...]
-
-    while let match = remaining.firstMatch(of: pattern) {
-        let before = String(remaining[remaining.startIndex..<match.range.lowerBound])
-        if !before.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            segments.append(.markdown(before))
-        }
-
-        let blockType = String(match.output.1)
-        let blockId = match.output.2.map(String.init)
-        let blockBody = String(match.output.3).trimmingCharacters(in: .whitespacesAndNewlines)
-
-        switch blockType {
-        case "prompt":
-            if let data = blockBody.data(using: .utf8),
-               let prompt = try? JSONDecoder().decode(PikaPrompt.self, from: data) {
-                segments.append(.pikaPrompt(prompt))
-            }
-        case "html":
-            segments.append(.pikaHtml(id: blockId, html: blockBody, state: htmlState))
-        case "html-update", "html-state-update", "prompt-response":
-            break // Consumed by Rust core; silently drop if one slips through.
-        default:
-            segments.append(.markdown("```\(blockType)\n\(blockBody)\n```"))
-        }
-
-        remaining = remaining[match.range.upperBound...]
-    }
-
-    let tail = String(remaining)
-    if !tail.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-        segments.append(.markdown(tail))
-    }
-
-    return segments
-}
-
 // MARK: - Message grouping
 
 struct GroupedChatMessage: Identifiable {
@@ -421,7 +357,7 @@ private struct MessageBubble: View {
 
     var body: some View {
         let hasReactions = !message.reactions.isEmpty
-        let segments = parseMessageSegments(message.displayContent, htmlState: message.htmlState)
+        let segments = message.segments.isEmpty ? fallbackSegments() : message.segments
 
         VStack(alignment: message.isMine ? .trailing : .leading, spacing: 0) {
             if let replyToId = message.replyToMessageId {
@@ -449,16 +385,12 @@ private struct MessageBubble: View {
             } else if hasMedia {
                 mediaBubble(segments: segments)
             } else {
-                ForEach(segments) { segment in
+                ForEach(Array(segments.enumerated()), id: \.offset) { _, segment in
                     switch segment {
-                    case .markdown(let text):
+                    case let .markdown(text):
                         markdownBubble(text: text)
-                    case .pikaPrompt(let prompt):
-                        PikaPromptView(prompt: prompt, message: message, onSelect: {
-                            onSendMessage($0, nil)
-                        })
-                    case .pikaHtml(_, let html, let state):
-                        PikaHtmlView(html: html, htmlState: state, onSendMessage: {
+                    case let .pikaHtml(_, html):
+                        PikaHtmlView(html: html, htmlState: message.htmlState, onSendMessage: {
                             onSendMessage($0, nil)
                         })
                     }
@@ -547,8 +479,8 @@ private struct MessageBubble: View {
 
             if hasText {
                 VStack(alignment: .leading, spacing: 3) {
-                    ForEach(segments) { segment in
-                        if case .markdown(let text) = segment {
+                    ForEach(Array(segments.enumerated()), id: \.offset) { _, segment in
+                        if case let .markdown(text) = segment {
                             Markdown(text)
                                 .markdownTheme(message.isMine ? .pikaOutgoing : .pikaIncoming)
                                 .multilineTextAlignment(.leading)
@@ -585,8 +517,13 @@ private struct MessageBubble: View {
     }
 
     private var timestampText: String {
-        Date(timeIntervalSince1970: TimeInterval(message.timestamp))
-            .formatted(date: .omitted, time: .shortened)
+        message.displayTimestamp
+    }
+
+    private func fallbackSegments() -> [MessageSegment] {
+        let text = message.displayContent.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return [] }
+        return [.markdown(text: message.displayContent)]
     }
 
     private var bubbleRadii: RectangleCornerRadii {
@@ -720,65 +657,6 @@ func deliveryText(_ d: MessageDeliveryState) -> String {
     case .pending: return "Pending"
     case .sent: return "Sent"
     case .failed(let reason): return "Failed: \(reason)"
-    }
-}
-
-// MARK: - Pika prompt view
-
-private struct PikaPromptView: View {
-    let prompt: PikaPrompt
-    let message: ChatMessage
-    let onSelect: @MainActor (String) -> Void
-
-    private var hasVoted: Bool { message.myPollVote != nil }
-    private var hasTallies: Bool { !message.pollTally.isEmpty }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(prompt.title)
-                .font(.subheadline.weight(.semibold))
-            ForEach(prompt.options, id: \.self) { option in
-                let tally = message.pollTally.first(where: { $0.option == option })
-                let isMyVote = message.myPollVote == option
-                Button {
-                    let response = """
-                    ```pika-prompt-response
-                    {"prompt_id":"\(message.id)","selected":"\(option)"}
-                    ```
-                    """
-                    onSelect(response)
-                } label: {
-                    HStack {
-                        Text(option)
-                        Spacer()
-                        if let tally {
-                            Text("\(tally.count)")
-                                .font(.subheadline.weight(.semibold))
-                        }
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 8)
-                    .background(isMyVote ? Color.blue.opacity(0.25) : Color.blue.opacity(0.1))
-                    .foregroundStyle(Color.blue)
-                    .clipShape(RoundedRectangle(cornerRadius: 10))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 10)
-                            .strokeBorder(isMyVote ? Color.blue : Color.clear, lineWidth: 1.5)
-                    )
-                }
-                .disabled(hasVoted)
-                if let tally, !tally.voterNames.isEmpty {
-                    Text(tally.voterNames.joined(separator: ", "))
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                        .padding(.leading, 12)
-                }
-            }
-        }
-        .padding(12)
-        .background(Color.gray.opacity(0.1))
-        .clipShape(RoundedRectangle(cornerRadius: 16))
     }
 }
 

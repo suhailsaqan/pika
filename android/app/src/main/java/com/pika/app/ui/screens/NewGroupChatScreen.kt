@@ -53,9 +53,9 @@ import com.pika.app.AppManager
 import com.pika.app.rust.AppAction
 import com.pika.app.rust.AuthState
 import com.pika.app.rust.FollowListEntry
+import com.pika.app.rust.isValidPeerKey
+import com.pika.app.rust.normalizePeerKey
 import com.pika.app.ui.Avatar
-import com.pika.app.ui.PeerKeyNormalizer
-import com.pika.app.ui.PeerKeyValidator
 import com.pika.app.ui.TestTags
 import com.pika.app.ui.theme.PikaBlue
 
@@ -166,8 +166,8 @@ fun NewGroupChatScreen(manager: AppManager, padding: PaddingValues) {
             // Manual entry
             if (showManualEntry) {
                 item {
-                    val normalizedInput = PeerKeyNormalizer.normalize(npubInput)
-                    val isValidInput = PeerKeyValidator.isValidPeer(normalizedInput)
+                    val normalizedInput = normalizePeerKey(npubInput)
+                    val isValidInput = isValidPeerKey(normalizedInput)
 
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -192,7 +192,7 @@ fun NewGroupChatScreen(manager: AppManager, padding: PaddingValues) {
                         TextButton(
                             onClick = {
                                 val raw = clipboard.getText()?.text.orEmpty()
-                                npubInput = PeerKeyNormalizer.normalize(raw)
+                                npubInput = normalizePeerKey(raw)
                             },
                             enabled = !isCreating,
                         ) {
@@ -311,8 +311,8 @@ fun NewGroupChatScreen(manager: AppManager, padding: PaddingValues) {
         QrScannerDialog(
             onDismiss = { showScanner = false },
             onScanned = { scanned ->
-                val normalized = PeerKeyNormalizer.normalize(scanned)
-                if (PeerKeyValidator.isValidPeer(normalized) && normalized !in selectedNpubs) {
+                val normalized = normalizePeerKey(scanned)
+                if (isValidPeerKey(normalized) && normalized !in selectedNpubs) {
                     selectedNpubs.add(normalized)
                 } else {
                     npubInput = scanned

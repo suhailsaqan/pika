@@ -78,21 +78,10 @@ struct ContentView: View {
                 isCallScreenPresented = true
             }
             videoPipeline.syncWithCallState(manager.state.activeCall)
+            visibleToast = manager.state.toast
         }
         .onChange(of: manager.state.toast) { _, new in
-            guard let message = new else { return }
-            // Show the non-blocking overlay and immediately clear Rust state so it
-            // doesn't re-show on state resync. The overlay manages its own lifetime.
-            withAnimation { visibleToast = message }
-            manager.dispatch(.clearToast)
-            // Auto-dismiss after 3 seconds.
-            let captured = message
-            Task { @MainActor in
-                try? await Task.sleep(for: .seconds(3))
-                withAnimation {
-                    if visibleToast == captured { visibleToast = nil }
-                }
-            }
+            withAnimation { visibleToast = new }
         }
         .onChange(of: manager.state.currentChat?.chatId) { _, newChatId in
             AppDelegate.activeChatId = newChatId
@@ -128,6 +117,7 @@ struct ContentView: View {
     private var toastOverlay: some View {
         if let toast = visibleToast {
             Button {
+                manager.dispatch(.clearToast)
                 withAnimation {
                     visibleToast = nil
                 }
@@ -247,8 +237,12 @@ private func screenView(
         ChatView(
             chatId: chatId,
             state: chatScreenState(from: state),
+            voiceRecording: state.voiceRecording,
             activeCall: state.activeCall,
             callEvents: state.callTimeline.filter { $0.chatId == chatId },
+            onVoiceRecordingAction: { action in
+                manager.dispatch(action)
+            },
             onSendMessage: { message, replyToMessageId in
                 manager.dispatch(
                     .sendMessage(

@@ -1,6 +1,60 @@
 #if DEBUG
 import SwiftUI
 
+private func previewTimestampText(_ timestamp: Int64) -> String {
+    Date(timeIntervalSince1970: TimeInterval(timestamp))
+        .formatted(date: .omitted, time: .shortened)
+}
+
+extension ChatMessage {
+    init(
+        id: String,
+        senderPubkey: String,
+        senderName: String?,
+        content: String,
+        displayContent: String,
+        replyToMessageId: String?,
+        mentions: [Mention],
+        timestamp: Int64,
+        isMine: Bool,
+        delivery: MessageDeliveryState,
+        reactions: [ReactionSummary],
+        media: [ChatMediaAttachment],
+        pollTally: [String] = [],
+        myPollVote: String?,
+        htmlState: String?,
+        hypernote: HypernoteData?
+    ) {
+        _ = pollTally
+        _ = myPollVote
+        let segments: [MessageSegment]
+        if displayContent.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            segments = []
+        } else {
+            segments = [.markdown(text: displayContent)]
+        }
+
+        self.init(
+            id: id,
+            senderPubkey: senderPubkey,
+            senderName: senderName,
+            content: content,
+            displayContent: displayContent,
+            replyToMessageId: replyToMessageId,
+            mentions: mentions,
+            timestamp: timestamp,
+            displayTimestamp: previewTimestampText(timestamp),
+            isMine: isMine,
+            delivery: delivery,
+            reactions: reactions,
+            media: media,
+            segments: segments,
+            htmlState: htmlState,
+            hypernote: hypernote
+        )
+    }
+}
+
 @MainActor
 enum PreviewFactory {
     static func manager(_ state: AppState) -> AppManager {
@@ -168,6 +222,7 @@ enum PreviewAppState {
                 members: [MemberInfo(pubkey: samplePeerPubkey, npub: samplePeerNpub, name: "Empty Chat", pictureUrl: nil, isAdmin: false)],
                 isAdmin: false,
                 messages: [],
+                firstUnreadMessageId: nil,
                 canLoadOlder: false,
                 typingMembers: []
             )
@@ -246,7 +301,9 @@ enum PreviewAppState {
             peerProfile: nil,
             activeCall: activeCall,
             callTimeline: callTimeline,
-            toast: toast
+            toast: toast,
+            developerMode: false,
+            voiceRecording: nil
         )
     }
 
@@ -258,6 +315,9 @@ enum PreviewAppState {
             members: [MemberInfo(pubkey: samplePeerPubkey, npub: samplePeerNpub, name: name, pictureUrl: nil, isAdmin: false)],
             lastMessage: lastMessage,
             lastMessageAt: 1_709_000_000,
+            displayName: name ?? samplePeerNpub,
+            subtitle: name == nil ? nil : samplePeerNpub,
+            lastMessagePreview: lastMessage,
             unreadCount: unread
         )
     }
@@ -327,6 +387,7 @@ enum PreviewAppState {
             members: [MemberInfo(pubkey: samplePeerPubkey, npub: samplePeerNpub, name: name, pictureUrl: nil, isAdmin: false)],
             isAdmin: false,
             messages: messages,
+            firstUnreadMessageId: nil,
             canLoadOlder: true,
             typingMembers: []
         )
@@ -364,6 +425,7 @@ enum PreviewAppState {
             members: [MemberInfo(pubkey: samplePeerPubkey, npub: samplePeerNpub, name: "Long Thread", pictureUrl: nil, isAdmin: false)],
             isAdmin: false,
             messages: messages,
+            firstUnreadMessageId: nil,
             canLoadOlder: true,
             typingMembers: []
         )
@@ -521,6 +583,7 @@ enum PreviewAppState {
             ],
             isAdmin: true,
             messages: messages,
+            firstUnreadMessageId: nil,
             canLoadOlder: true,
             typingMembers: []
         )
@@ -633,6 +696,7 @@ enum PreviewAppState {
             members: [MemberInfo(pubkey: samplePeerPubkey, npub: samplePeerNpub, name: "Anthony", pictureUrl: nil, isAdmin: false)],
             isAdmin: false,
             messages: messages,
+            firstUnreadMessageId: nil,
             canLoadOlder: false,
             typingMembers: []
         )

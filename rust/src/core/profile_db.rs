@@ -18,6 +18,10 @@ pub fn open_profile_db(data_dir: &str) -> Result<Connection, rusqlite::Error> {
         );
         CREATE TABLE IF NOT EXISTS follows (
             pubkey TEXT PRIMARY KEY
+        );
+        CREATE TABLE IF NOT EXISTS app_settings (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL
         );",
     )?;
     Ok(conn)
@@ -116,6 +120,28 @@ pub fn clear_all(conn: &Connection) {
     }
 }
 
+pub fn load_developer_mode(conn: &Connection) -> bool {
+    conn.query_row(
+        "SELECT value FROM app_settings WHERE key = 'developer_mode'",
+        [],
+        |row| row.get::<_, String>(0),
+    )
+    .map(|value| matches!(value.as_str(), "1" | "true" | "TRUE"))
+    .unwrap_or(false)
+}
+
+pub fn save_developer_mode(conn: &Connection, enabled: bool) {
+    let value = if enabled { "1" } else { "0" };
+    if let Err(e) = conn.execute(
+        "INSERT INTO app_settings (key, value)
+         VALUES ('developer_mode', ?1)
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        [value],
+    ) {
+        tracing::warn!(%e, enabled, "failed to save developer mode setting");
+    }
+}
+
 // ── Follow cache ─────────────────────────────────────────────────────
 
 pub fn load_follows(conn: &Connection) -> Vec<String> {
@@ -192,6 +218,10 @@ mod tests {
             );
             CREATE TABLE IF NOT EXISTS follows (
                 pubkey TEXT PRIMARY KEY
+            );
+            CREATE TABLE IF NOT EXISTS app_settings (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL
             );",
         )
         .unwrap();
@@ -283,5 +313,17 @@ mod tests {
 
         assert!(load_profiles(&conn).is_empty());
         assert!(load_follows(&conn).is_empty());
+    }
+
+    #[test]
+    fn developer_mode_roundtrip() {
+        let conn = test_db();
+        assert!(!load_developer_mode(&conn));
+
+        save_developer_mode(&conn, true);
+        assert!(load_developer_mode(&conn));
+
+        save_developer_mode(&conn, false);
+        assert!(!load_developer_mode(&conn));
     }
 }

@@ -7,27 +7,29 @@ import Speech
 final class VoiceRecorder {
     private(set) var isRecording = false
     private(set) var isPaused = false
-    private(set) var duration: TimeInterval = 0
-    private(set) var levels: [CGFloat] = []
-    private(set) var recordingURL: URL?
-    private(set) var transcript: String = ""
+
+    private let dispatchAction: @MainActor (AppAction) -> Void
 
     private var audioEngine: AVAudioEngine?
     private var audioFile: AVAudioFile?
     private var tempCAFURL: URL?
     private var timer: Timer?
-    private var recordingStartTime: Date?
-    private var pausedDuration: TimeInterval = 0
-    private var pauseStartTime: Date?
 
     private var speechRecognizer: SFSpeechRecognizer?
     private var speechRequest: SFSpeechAudioBufferRecognitionRequest?
     private var speechTask: SFSpeechRecognitionTask?
+    private var lastDispatchedTranscript: String = ""
 
     // Latest RMS power from the tap callback, read on main actor by the timer.
     private nonisolated(unsafe) var latestPower: Float = 0
 
+    init(dispatchAction: @escaping @MainActor (AppAction) -> Void = { _ in }) {
+        self.dispatchAction = dispatchAction
+    }
+
     func startRecording() {
+        guard !isRecording else { return }
+
         // Activate audio session BEFORE creating the engine / querying the
         // input format. After a previous stopEngine() deactivates the session,
         // inputNode.outputFormat returns an invalid format (0 Hz / 0 ch).
@@ -86,14 +88,11 @@ final class VoiceRecorder {
         audioEngine = engine
         isRecording = true
         isPaused = false
-        duration = 0
-        levels = []
-        transcript = ""
-        pausedDuration = 0
-        recordingStartTime = Date()
+        lastDispatchedTranscript = ""
+        dispatchAction(.voiceRecordingStart)
 
-        // 30Hz timer to poll duration + append power levels
-        timer = Timer.scheduledTimer(withTimeInterval: 1.0 / 30.0, repeats: true) { [weak self] _ in
+        // Sample levels at 10Hz and forward them to Rust.
+        timer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in
                 self?.timerTick()
             }
@@ -101,6 +100,8 @@ final class VoiceRecorder {
     }
 
     func stopRecording() async -> URL? {
+        guard isRecording else { return nil }
+        dispatchAction(.voiceRecordingStop)
         stopEngine()
 
         guard let cafURL = tempCAFURL else {
@@ -117,19 +118,13 @@ final class VoiceRecorder {
         // Clean up temp CAF
         try? FileManager.default.removeItem(at: cafURL)
 
-        let result: URL?
-        if success == true {
-            recordingURL = outputURL
-            result = outputURL
-        } else {
-            result = nil
-        }
-
         resetState()
-        return result
+        return success == true ? outputURL : nil
     }
 
     func cancelRecording() {
+        guard isRecording else { return }
+        dispatchAction(.voiceRecordingCancel)
         stopEngine()
         if let cafURL = tempCAFURL {
             try? FileManager.default.removeItem(at: cafURL)
@@ -141,17 +136,14 @@ final class VoiceRecorder {
         guard isRecording, !isPaused else { return }
         audioEngine?.pause()
         isPaused = true
-        pauseStartTime = Date()
+        dispatchAction(.voiceRecordingPause)
     }
 
     func resumeRecording() {
         guard isRecording, isPaused else { return }
-        if let pauseStart = pauseStartTime {
-            pausedDuration += Date().timeIntervalSince(pauseStart)
-        }
-        pauseStartTime = nil
         try? audioEngine?.start()
         isPaused = false
+        dispatchAction(.voiceRecordingResume)
     }
 
     // MARK: - Speech Recognition
@@ -176,7 +168,13 @@ final class VoiceRecorder {
         speechTask = recognizer.recognitionTask(with: request) { [weak self] result, error in
             guard let self, let result else { return }
             Task { @MainActor [weak self] in
-                self?.transcript = result.bestTranscription.formattedString
+                guard let self else { return }
+                let transcript = result.bestTranscription.formattedString
+                if transcript == self.lastDispatchedTranscript {
+                    return
+                }
+                self.lastDispatchedTranscript = transcript
+                self.dispatchAction(.voiceRecordingTranscript(text: transcript))
             }
         }
     }
@@ -192,18 +190,12 @@ final class VoiceRecorder {
     // MARK: - Private
 
     private func timerTick() {
-        guard isRecording, !isPaused, let startTime = recordingStartTime else { return }
-
-        var currentPausedDuration = pausedDuration
-        if let pauseStart = pauseStartTime {
-            currentPausedDuration += Date().timeIntervalSince(pauseStart)
-        }
-        duration = Date().timeIntervalSince(startTime) - currentPausedDuration
+        guard isRecording, !isPaused else { return }
 
         let rms = latestPower
         let db = 20 * log10f(max(rms, 1e-6))
-        let normalized = CGFloat(max(0, min(1, (db + 50) / 50)))
-        levels.append(normalized)
+        let normalized = max(0, min(1, (db + 50) / 50))
+        dispatchAction(.voiceRecordingAudioLevel(level: normalized))
     }
 
     private func stopEngine() {
@@ -227,15 +219,9 @@ final class VoiceRecorder {
     private func resetState() {
         isRecording = false
         isPaused = false
-        duration = 0
-        levels = []
-        recordingURL = nil
         tempCAFURL = nil
-        recordingStartTime = nil
-        pausedDuration = 0
-        pauseStartTime = nil
+        lastDispatchedTranscript = ""
         latestPower = 0
-        // transcript is intentionally NOT reset here — the caller reads it after stop
     }
 
     private func convertToM4A(from inputURL: URL, to outputURL: URL) async -> Bool? {

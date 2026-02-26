@@ -45,9 +45,9 @@ import com.pika.app.AppManager
 import com.pika.app.rust.AppAction
 import com.pika.app.rust.AuthState
 import com.pika.app.rust.MemberInfo
+import com.pika.app.rust.isValidPeerKey
+import com.pika.app.rust.normalizePeerKey
 import com.pika.app.ui.Avatar
-import com.pika.app.ui.PeerKeyNormalizer
-import com.pika.app.ui.PeerKeyValidator
 import com.pika.app.ui.TestTags
 
 @Composable
@@ -220,8 +220,8 @@ fun GroupInfoScreen(manager: AppManager, chatId: String, padding: PaddingValues)
                     )
                     Spacer(Modifier.height(4.dp))
 
-                    val normalized = PeerKeyNormalizer.normalize(npubInput)
-                    val isValid = PeerKeyValidator.isValidPeer(normalized)
+                    val normalized = normalizePeerKey(npubInput)
+                    val isValid = isValidPeerKey(normalized)
 
                     Row(
                         verticalAlignment = Alignment.CenterVertically,

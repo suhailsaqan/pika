@@ -1,16 +1,17 @@
 import SwiftUI
 
 struct VoiceRecordingView: View {
-    let recorder: VoiceRecorder
+    let recording: VoiceRecordingState
     let onSend: () -> Void
     let onCancel: () -> Void
+    let onTogglePause: () -> Void
 
     var body: some View {
         VStack(spacing: 8) {
             // Transcript (scrolling, appears as text comes in)
-            if !recorder.transcript.isEmpty {
+            if !recording.transcript.isEmpty {
                 ScrollView(.vertical, showsIndicators: false) {
-                    Text(recorder.transcript)
+                    Text(recording.transcript)
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -25,7 +26,7 @@ struct VoiceRecordingView: View {
                     Circle()
                         .fill(Color.red)
                         .frame(width: 8, height: 8)
-                        .opacity(recorder.isPaused ? 0.4 : 1)
+                        .opacity(isPaused ? 0.4 : 1)
 
                     Text(formattedDuration)
                         .font(.subheadline.monospacedDigit())
@@ -33,7 +34,7 @@ struct VoiceRecordingView: View {
                 }
                 .frame(width: 64, alignment: .leading)
 
-                WaveformView(levels: recorder.levels)
+                WaveformView(levels: levels)
                     .frame(height: 28)
             }
 
@@ -51,13 +52,9 @@ struct VoiceRecordingView: View {
                 Spacer()
 
                 Button {
-                    if recorder.isPaused {
-                        recorder.resumeRecording()
-                    } else {
-                        recorder.pauseRecording()
-                    }
+                    onTogglePause()
                 } label: {
-                    Image(systemName: recorder.isPaused ? "record.circle" : "pause.circle.fill")
+                    Image(systemName: isPaused ? "record.circle" : "pause.circle.fill")
                         .font(.title2)
                         .foregroundStyle(.primary)
                         .frame(width: 36, height: 36)
@@ -79,9 +76,17 @@ struct VoiceRecordingView: View {
     }
 
     private var formattedDuration: String {
-        let minutes = Int(recorder.duration) / 60
-        let seconds = Int(recorder.duration) % 60
+        let minutes = Int(recording.durationSecs) / 60
+        let seconds = Int(recording.durationSecs) % 60
         return String(format: "%d:%02d", minutes, seconds)
+    }
+
+    private var levels: [CGFloat] {
+        recording.levels.map(CGFloat.init)
+    }
+
+    private var isPaused: Bool {
+        recording.phase == .paused
     }
 }
 

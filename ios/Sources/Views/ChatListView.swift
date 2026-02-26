@@ -19,9 +19,6 @@ struct ChatListView: View {
 
     var body: some View {
         List(state.chats, id: \.chatId) { chat in
-            let displayName = chatDisplayName(chat)
-            let subtitle = chatSubtitle(chat)
-
             let row = HStack(spacing: 12) {
                 if chat.isGroup {
                     groupAvatar(chat)
@@ -34,16 +31,16 @@ struct ChatListView: View {
                 }
 
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(displayName)
+                    Text(chat.displayName)
                         .font(.headline)
                         .lineLimit(1)
-                    if let subtitle {
+                    if let subtitle = chat.subtitle {
                         Text(subtitle)
                             .font(.caption)
                             .foregroundStyle(.tertiary)
                             .lineLimit(1)
                     }
-                    Text(chatPreviewText(chat.lastMessage))
+                    Text(chat.lastMessagePreview)
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
@@ -125,23 +122,6 @@ struct ChatListView: View {
         }
     }
 
-    private func chatDisplayName(_ chat: ChatSummary) -> String {
-        if chat.isGroup {
-            return chat.groupName ?? "Group (\(chat.members.count + 1))"
-        }
-        return chat.members.first?.name ?? truncatedNpub(chat.members.first?.npub ?? "")
-    }
-
-    private func chatSubtitle(_ chat: ChatSummary) -> String? {
-        if chat.isGroup {
-            return "\(chat.members.count + 1) members"
-        }
-        if chat.members.first?.name != nil {
-            return truncatedNpub(chat.members.first?.npub ?? "")
-        }
-        return nil
-    }
-
     @ViewBuilder
     private func groupAvatar(_ chat: ChatSummary) -> some View {
         ZStack {
@@ -152,11 +132,6 @@ struct ChatListView: View {
                 .font(.system(size: 16))
                 .foregroundStyle(.blue)
         }
-    }
-
-    private func truncatedNpub(_ npub: String) -> String {
-        if npub.count <= 16 { return npub }
-        return String(npub.prefix(12)) + "..."
     }
 }
 
@@ -233,11 +208,3 @@ struct ChatListView: View {
     }
 }
 #endif
-
-private func chatPreviewText(_ lastMessage: String?) -> String {
-    guard let msg = lastMessage else { return "No messages yet" }
-    if msg.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-        return "Media"
-    }
-    return msg
-}

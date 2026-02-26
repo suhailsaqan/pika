@@ -147,6 +147,18 @@ pub enum AppAction {
 
     // UI
     ClearToast,
+    EnableDeveloperMode,
+    VoiceRecordingStart,
+    VoiceRecordingPause,
+    VoiceRecordingResume,
+    VoiceRecordingStop,
+    VoiceRecordingCancel,
+    VoiceRecordingAudioLevel {
+        level: f32,
+    },
+    VoiceRecordingTranscript {
+        text: String,
+    },
 
     // Lifecycle
     Foregrounded,
@@ -235,6 +247,14 @@ impl AppAction {
 
             // UI
             AppAction::ClearToast => "ClearToast",
+            AppAction::EnableDeveloperMode => "EnableDeveloperMode",
+            AppAction::VoiceRecordingStart => "VoiceRecordingStart",
+            AppAction::VoiceRecordingPause => "VoiceRecordingPause",
+            AppAction::VoiceRecordingResume => "VoiceRecordingResume",
+            AppAction::VoiceRecordingStop => "VoiceRecordingStop",
+            AppAction::VoiceRecordingCancel => "VoiceRecordingCancel",
+            AppAction::VoiceRecordingAudioLevel { .. } => "VoiceRecordingAudioLevel",
+            AppAction::VoiceRecordingTranscript { .. } => "VoiceRecordingTranscript",
 
             // Lifecycle
             AppAction::Foregrounded => "Foregrounded",

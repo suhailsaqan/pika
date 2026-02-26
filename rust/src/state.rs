@@ -20,6 +20,8 @@ pub struct AppState {
     pub active_call: Option<CallState>,
     pub call_timeline: Vec<CallTimelineEvent>,
     pub toast: Option<String>,
+    pub developer_mode: bool,
+    pub voice_recording: Option<VoiceRecordingState>,
 }
 
 impl AppState {
@@ -40,6 +42,8 @@ impl AppState {
             active_call: None,
             call_timeline: vec![],
             toast: None,
+            developer_mode: false,
+            voice_recording: None,
         }
     }
 }
@@ -54,6 +58,7 @@ pub struct CallState {
     pub should_auto_present_call_screen: bool,
     pub should_enable_proximity_lock: bool,
     pub started_at: Option<i64>,
+    pub duration_display: Option<String>,
     pub is_muted: bool,
     pub is_video_call: bool,
     pub is_camera_enabled: bool,
@@ -103,6 +108,7 @@ impl CallState {
         } else {
             status.should_enable_proximity_lock()
         };
+        let duration_display = Self::compute_duration_display(&status, started_at, now_seconds());
         Self {
             call_id,
             chat_id,
@@ -112,6 +118,7 @@ impl CallState {
             should_enable_proximity_lock,
             status,
             started_at,
+            duration_display,
             is_muted,
             is_video_call,
             is_camera_enabled: is_video_call,
@@ -128,6 +135,28 @@ impl CallState {
             status.should_enable_proximity_lock()
         };
         self.status = status;
+        self.duration_display =
+            Self::compute_duration_display(&self.status, self.started_at, now_seconds());
+    }
+
+    pub fn refresh_duration_display(&mut self, now_seconds: i64) {
+        self.duration_display =
+            Self::compute_duration_display(&self.status, self.started_at, now_seconds);
+    }
+
+    fn compute_duration_display(
+        status: &CallStatus,
+        started_at: Option<i64>,
+        now_seconds: i64,
+    ) -> Option<String> {
+        if !matches!(status, CallStatus::Active) {
+            return None;
+        }
+        let started_at = started_at?;
+        let elapsed = (now_seconds - started_at).max(0);
+        let minutes = elapsed / 60;
+        let seconds = elapsed % 60;
+        Some(format!("{minutes:02}:{seconds:02}"))
     }
 }
 
@@ -259,6 +288,9 @@ pub struct ChatSummary {
     pub members: Vec<MemberInfo>,
     pub last_message: Option<String>,
     pub last_message_at: Option<i64>,
+    pub display_name: String,
+    pub subtitle: Option<String>,
+    pub last_message_preview: String,
     pub unread_count: u32,
 }
 
@@ -270,6 +302,7 @@ pub struct ChatViewState {
     pub members: Vec<MemberInfo>,
     pub is_admin: bool,
     pub messages: Vec<ChatMessage>,
+    pub first_unread_message_id: Option<String>,
     pub can_load_older: bool,
     pub typing_members: Vec<TypingMember>,
 }
@@ -280,11 +313,20 @@ pub struct TypingMember {
     pub name: Option<String>,
 }
 
+#[derive(uniffi::Enum, Clone, Debug, PartialEq)]
+pub enum VoiceRecordingPhase {
+    Idle,
+    Recording,
+    Paused,
+    Done,
+}
+
 #[derive(uniffi::Record, Clone, Debug)]
-pub struct PollTally {
-    pub option: String,
-    pub count: u32,
-    pub voter_names: Vec<String>,
+pub struct VoiceRecordingState {
+    pub phase: VoiceRecordingPhase,
+    pub duration_secs: f64,
+    pub levels: Vec<f32>,
+    pub transcript: String,
 }
 
 #[derive(uniffi::Record, Clone, Debug)]
@@ -311,6 +353,12 @@ pub struct HypernoteData {
     pub responders: Vec<HypernoteResponder>,
 }
 
+#[derive(uniffi::Enum, Clone, Debug)]
+pub enum MessageSegment {
+    Markdown { text: String },
+    PikaHtml { id: Option<String>, html: String },
+}
+
 #[derive(uniffi::Record, Clone, Debug)]
 pub struct ChatMessage {
     pub id: String,
@@ -321,12 +369,12 @@ pub struct ChatMessage {
     pub reply_to_message_id: Option<String>,
     pub mentions: Vec<Mention>,
     pub timestamp: i64,
+    pub display_timestamp: String,
     pub is_mine: bool,
     pub delivery: MessageDeliveryState,
     pub reactions: Vec<ReactionSummary>,
     pub media: Vec<ChatMediaAttachment>,
-    pub poll_tally: Vec<PollTally>,
-    pub my_poll_vote: Option<String>,
+    pub segments: Vec<MessageSegment>,
     pub html_state: Option<String>,
     pub hypernote: Option<HypernoteData>,
 }

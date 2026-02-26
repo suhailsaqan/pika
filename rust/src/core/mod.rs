@@ -33,7 +33,8 @@ use crate::mdk_support::{open_mdk, PikaMdk};
 use crate::state::now_seconds;
 use crate::state::{
     AuthMode, AuthState, BusyState, CallDebugStats, CallStatus, ChatMediaAttachment, ChatMessage,
-    ChatSummary, ChatViewState, MessageDeliveryState, MyProfileState, Screen,
+    ChatSummary, ChatViewState, MessageDeliveryState, MyProfileState, Screen, VoiceRecordingPhase,
+    VoiceRecordingState,
 };
 use crate::updates::{AppUpdate, CoreMsg, InternalEvent};
 
@@ -381,6 +382,9 @@ pub struct AppCore {
     call_runtime: call_runtime::CallRuntime,
     call_session_params: Option<call_control::CallSessionParams>,
     call_timeline_logged_keys: HashSet<String>,
+    toast_dismiss_token: u64,
+    call_duration_tick_token: u64,
+    voice_recording_tick_token: u64,
     pending_nostr_connect_login: Option<PendingNostrConnectLogin>,
     next_nostr_connect_attempt_id: u64,
 }
@@ -433,6 +437,10 @@ impl AppCore {
             .as_ref()
             .map(profile_db::load_profiles)
             .unwrap_or_default();
+        let developer_mode = profile_db
+            .as_ref()
+            .map(profile_db::load_developer_mode)
+            .unwrap_or(false);
 
         let push_device_id = Self::load_or_create_push_device_id(&data_dir);
         let push_subscribed_chat_ids = Self::load_push_subscriptions(&data_dir);
@@ -476,9 +484,13 @@ impl AppCore {
             call_runtime: call_runtime::CallRuntime::default(),
             call_session_params: None,
             call_timeline_logged_keys: HashSet::new(),
+            toast_dismiss_token: 0,
+            call_duration_tick_token: 0,
+            voice_recording_tick_token: 0,
             pending_nostr_connect_login: None,
             next_nostr_connect_attempt_id: 1,
         };
+        this.state.developer_mode = developer_mode;
 
         if run_moq_probe {
             if let Some(moq_url) = moq_probe_url {
@@ -774,10 +786,78 @@ impl AppCore {
     }
 
     fn toast(&mut self, msg: impl Into<String>) {
-        // Keep toast in state until the UI explicitly clears it. This makes the UX
-        // robust to rev-gap resyncs (state() snapshot still contains the toast).
         self.state.toast = Some(msg.into());
+        self.toast_dismiss_token = self.toast_dismiss_token.saturating_add(1);
+        self.schedule_toast_auto_dismiss(self.toast_dismiss_token);
         self.emit_toast();
+    }
+
+    fn schedule_toast_auto_dismiss(&self, token: u64) {
+        let tx = self.core_sender.clone();
+        self.runtime.spawn(async move {
+            tokio::time::sleep(Duration::from_secs(3)).await;
+            let _ = tx.send(CoreMsg::Internal(Box::new(
+                InternalEvent::ToastAutoDismiss { token },
+            )));
+        });
+    }
+
+    fn cancel_call_duration_ticks(&mut self) {
+        self.call_duration_tick_token = self.call_duration_tick_token.saturating_add(1);
+    }
+
+    fn schedule_call_duration_tick(&self, token: u64) {
+        let tx = self.core_sender.clone();
+        self.runtime.spawn(async move {
+            tokio::time::sleep(Duration::from_secs(1)).await;
+            let _ = tx.send(CoreMsg::Internal(Box::new(
+                InternalEvent::CallDurationTick { token },
+            )));
+        });
+    }
+
+    fn ensure_call_duration_ticks(&mut self) {
+        let should_tick = self
+            .state
+            .active_call
+            .as_ref()
+            .map(|call| matches!(call.status, CallStatus::Active) && call.started_at.is_some())
+            .unwrap_or(false);
+        if !should_tick {
+            self.cancel_call_duration_ticks();
+            return;
+        }
+        self.call_duration_tick_token = self.call_duration_tick_token.saturating_add(1);
+        self.schedule_call_duration_tick(self.call_duration_tick_token);
+    }
+
+    fn refresh_active_call_duration_display(&mut self) -> bool {
+        let now = now_seconds();
+        let Some(call) = self.state.active_call.as_mut() else {
+            return false;
+        };
+        let before = call.duration_display.clone();
+        call.refresh_duration_display(now);
+        call.duration_display != before
+    }
+
+    fn cancel_voice_recording_ticks(&mut self) {
+        self.voice_recording_tick_token = self.voice_recording_tick_token.saturating_add(1);
+    }
+
+    fn schedule_voice_recording_tick(&self, token: u64) {
+        let tx = self.core_sender.clone();
+        self.runtime.spawn(async move {
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            let _ = tx.send(CoreMsg::Internal(Box::new(
+                InternalEvent::VoiceRecordingDurationTick { token },
+            )));
+        });
+    }
+
+    fn start_voice_recording_ticks(&mut self) {
+        self.voice_recording_tick_token = self.voice_recording_tick_token.saturating_add(1);
+        self.schedule_voice_recording_tick(self.voice_recording_tick_token);
     }
 
     fn is_logged_in(&self) -> bool {
@@ -2142,17 +2222,23 @@ impl AppCore {
     fn handle_auth_transition(&mut self, logged_in: bool) {
         if logged_in {
             self.call_runtime.stop_all();
+            self.cancel_call_duration_ticks();
+            self.cancel_voice_recording_ticks();
             self.state.router.default_screen = Screen::ChatList;
             self.state.router.screen_stack.clear();
             self.state.active_call = None;
+            self.state.voice_recording = None;
             self.call_session_params = None;
             self.emit_router();
         } else {
             self.call_runtime.stop_all();
+            self.cancel_call_duration_ticks();
+            self.cancel_voice_recording_ticks();
             self.state.router.default_screen = Screen::Login;
             self.state.router.screen_stack.clear();
             self.state.current_chat = None;
             self.state.active_call = None;
+            self.state.voice_recording = None;
             self.state.call_timeline = vec![];
             self.state.chat_list = vec![];
             self.state.busy = BusyState::idle();
@@ -2190,6 +2276,10 @@ impl AppCore {
         self.push_subscribed_chat_ids.clear();
         self.push_apns_token = None;
         self.state.toast = None;
+        self.state.developer_mode = false;
+        self.state.voice_recording = None;
+        self.cancel_call_duration_ticks();
+        self.cancel_voice_recording_ticks();
 
         let root = std::path::Path::new(&self.data_dir);
         match std::fs::read_dir(root) {
@@ -2268,9 +2358,9 @@ impl AppCore {
                     .map(|c| c.chat_id != chat_id)
                     .unwrap_or(true);
                 if needs_refresh {
+                    self.refresh_current_chat(&chat_id);
                     self.unread_counts.insert(chat_id.clone(), 0);
                     self.refresh_chat_list_from_storage();
-                    self.refresh_current_chat(&chat_id);
                 }
             }
             _ => {
@@ -2319,6 +2409,15 @@ impl AppCore {
             InternalEvent::Toast(ref msg) => {
                 tracing::info!(msg, "toast");
                 self.toast(msg.clone());
+            }
+            InternalEvent::ToastAutoDismiss { token } => {
+                if token != self.toast_dismiss_token {
+                    return;
+                }
+                if self.state.toast.is_some() {
+                    self.state.toast = None;
+                    self.emit_toast();
+                }
             }
             InternalEvent::NostrConnectConnectResponseReady => {
                 if self.pending_nostr_connect_login.is_some() {
@@ -2386,10 +2485,19 @@ impl AppCore {
                 if let Some(call) = self.state.active_call.as_ref() {
                     if call.call_id == call_id && matches!(call.status, CallStatus::Connecting) {
                         let previous = self.state.active_call.clone();
-                        let call = self.state.active_call.as_mut().unwrap();
-                        call.set_status(CallStatus::Active);
-                        if call.started_at.is_none() {
-                            call.started_at = Some(now_seconds());
+                        let mut should_tick = false;
+                        if let Some(call) = self.state.active_call.as_mut() {
+                            call.set_status(CallStatus::Active);
+                            if call.started_at.is_none() {
+                                call.started_at = Some(now_seconds());
+                            }
+                            call.refresh_duration_display(now_seconds());
+                            should_tick = call.started_at.is_some();
+                        }
+                        if should_tick {
+                            self.ensure_call_duration_ticks();
+                        } else {
+                            self.cancel_call_duration_ticks();
                         }
                         self.emit_call_state_with_previous(previous);
                     }
@@ -2409,25 +2517,68 @@ impl AppCore {
                 if let Some(call) = self.state.active_call.as_ref() {
                     if call.call_id == call_id {
                         let previous = self.state.active_call.clone();
-                        let call = self.state.active_call.as_mut().unwrap();
-                        if matches!(call.status, CallStatus::Connecting) {
-                            call.set_status(CallStatus::Active);
-                            if call.started_at.is_none() {
-                                call.started_at = Some(now_seconds());
+                        let mut should_tick = false;
+                        if let Some(call) = self.state.active_call.as_mut() {
+                            if matches!(call.status, CallStatus::Connecting) {
+                                call.set_status(CallStatus::Active);
+                                if call.started_at.is_none() {
+                                    call.started_at = Some(now_seconds());
+                                }
+                                call.refresh_duration_display(now_seconds());
+                                should_tick = call.started_at.is_some();
                             }
+                            call.debug = Some(CallDebugStats {
+                                tx_frames,
+                                rx_frames,
+                                rx_dropped,
+                                jitter_buffer_ms,
+                                last_rtt_ms,
+                                video_tx,
+                                video_rx,
+                                video_rx_decrypt_fail,
+                            });
                         }
-                        call.debug = Some(CallDebugStats {
-                            tx_frames,
-                            rx_frames,
-                            rx_dropped,
-                            jitter_buffer_ms,
-                            last_rtt_ms,
-                            video_tx,
-                            video_rx,
-                            video_rx_decrypt_fail,
-                        });
+                        if should_tick {
+                            self.ensure_call_duration_ticks();
+                        }
                         self.emit_call_state_with_previous(previous);
                     }
+                }
+            }
+            InternalEvent::CallDurationTick { token } => {
+                if token != self.call_duration_tick_token {
+                    return;
+                }
+                let should_continue = self
+                    .state
+                    .active_call
+                    .as_ref()
+                    .map(|call| {
+                        matches!(call.status, CallStatus::Active) && call.started_at.is_some()
+                    })
+                    .unwrap_or(false);
+                if !should_continue {
+                    return;
+                }
+                if self.refresh_active_call_duration_display() {
+                    self.emit_call_state();
+                }
+                self.schedule_call_duration_tick(token);
+            }
+            InternalEvent::VoiceRecordingDurationTick { token } => {
+                if token != self.voice_recording_tick_token {
+                    return;
+                }
+                let mut should_continue = false;
+                if let Some(recording) = self.state.voice_recording.as_mut() {
+                    if recording.phase == VoiceRecordingPhase::Recording {
+                        recording.duration_secs += 0.1;
+                        should_continue = true;
+                        self.emit_state();
+                    }
+                }
+                if should_continue {
+                    self.schedule_voice_recording_tick(token);
                 }
             }
             InternalEvent::VideoFrameFromPlatform { payload } => {
@@ -3537,6 +3688,91 @@ impl AppCore {
                     self.emit_toast();
                 }
             }
+            AppAction::EnableDeveloperMode => {
+                if self.state.developer_mode {
+                    return;
+                }
+                self.state.developer_mode = true;
+                if let Some(conn) = self.profile_db.as_ref() {
+                    profile_db::save_developer_mode(conn, true);
+                }
+                self.emit_state();
+            }
+            AppAction::VoiceRecordingStart => {
+                self.state.voice_recording = Some(VoiceRecordingState {
+                    phase: VoiceRecordingPhase::Recording,
+                    duration_secs: 0.0,
+                    levels: vec![],
+                    transcript: String::new(),
+                });
+                self.start_voice_recording_ticks();
+                self.emit_state();
+            }
+            AppAction::VoiceRecordingPause => {
+                let Some(recording) = self.state.voice_recording.as_mut() else {
+                    return;
+                };
+                if recording.phase != VoiceRecordingPhase::Recording {
+                    return;
+                }
+                recording.phase = VoiceRecordingPhase::Paused;
+                self.cancel_voice_recording_ticks();
+                self.emit_state();
+            }
+            AppAction::VoiceRecordingResume => {
+                let Some(recording) = self.state.voice_recording.as_mut() else {
+                    return;
+                };
+                if recording.phase != VoiceRecordingPhase::Paused {
+                    return;
+                }
+                recording.phase = VoiceRecordingPhase::Recording;
+                self.start_voice_recording_ticks();
+                self.emit_state();
+            }
+            AppAction::VoiceRecordingStop => {
+                let Some(recording) = self.state.voice_recording.as_mut() else {
+                    return;
+                };
+                if !matches!(
+                    recording.phase,
+                    VoiceRecordingPhase::Recording | VoiceRecordingPhase::Paused
+                ) {
+                    return;
+                }
+                recording.phase = VoiceRecordingPhase::Done;
+                self.cancel_voice_recording_ticks();
+                self.emit_state();
+            }
+            AppAction::VoiceRecordingCancel => {
+                if self.state.voice_recording.is_none() {
+                    return;
+                }
+                self.state.voice_recording = None;
+                self.cancel_voice_recording_ticks();
+                self.emit_state();
+            }
+            AppAction::VoiceRecordingAudioLevel { level } => {
+                let Some(recording) = self.state.voice_recording.as_mut() else {
+                    return;
+                };
+                if recording.phase != VoiceRecordingPhase::Recording {
+                    return;
+                }
+                recording.levels.push(level);
+                if recording.levels.len() > 300 {
+                    let drop_count = recording.levels.len() - 300;
+                    recording.levels.drain(0..drop_count);
+                }
+                self.emit_state();
+            }
+            AppAction::VoiceRecordingTranscript { text } => {
+                let Some(recording) = self.state.voice_recording.as_mut() else {
+                    return;
+                };
+                recording.transcript = text;
+                self.emit_state();
+            }
             AppAction::SetPushToken { token } => {
                 self.set_push_token(token);
             }
@@ -3779,10 +4015,10 @@ impl AppCore {
                     self.toast("Chat not found");
                     return;
                 }
-                self.unread_counts.insert(chat_id.clone(), 0);
-                self.refresh_chat_list_from_storage();
                 self.open_chat_screen(&chat_id);
                 self.refresh_current_chat(&chat_id);
+                self.unread_counts.insert(chat_id.clone(), 0);
+                self.refresh_chat_list_from_storage();
                 self.emit_router();
             }
             AppAction::SendMessage {

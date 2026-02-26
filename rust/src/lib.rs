@@ -57,6 +57,27 @@ pub fn reset_relay_config_json(existing_json: Option<String>) -> String {
     core::relay_reset_config_json(existing_json.as_deref())
 }
 
+#[uniffi::export]
+pub fn normalize_peer_key(input: &str) -> String {
+    let mut normalized = input.trim().to_ascii_lowercase();
+    if let Some(stripped) = normalized.strip_prefix("nostr:") {
+        normalized = stripped.to_string();
+    }
+    normalized
+}
+
+#[uniffi::export]
+pub fn is_valid_peer_key(input: &str) -> bool {
+    let normalized = normalize_peer_key(input);
+    if normalized.len() == 64 && normalized.chars().all(|ch| ch.is_ascii_hexdigit()) {
+        return true;
+    }
+    if !normalized.starts_with("npub1") {
+        return false;
+    }
+    nostr_sdk::prelude::PublicKey::parse(&normalized).is_ok()
+}
+
 uniffi::setup_scaffolding!();
 
 #[uniffi::export(callback_interface)]
