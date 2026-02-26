@@ -5776,6 +5776,7 @@ dependencies = [
  "nostr-sdk",
  "serde",
  "serde_json",
+ "tokio",
 ]
 
 [[package]]
