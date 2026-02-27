@@ -584,7 +584,59 @@ pub struct FfiApp {
 }
 ```
 
-**Constructor:** `FfiApp::new(data_dir: String, keychain_group: String) -> Arc<Self>`. The constructor initializes logging, creates channels, spawns the actor thread, and returns an `Arc` (UniFFI requirement for Object types). It runs the core's initial state computation before returning.
+**Constructor:** `FfiApp::new(data_dir: String) -> Arc<Self>`. The constructor creates channels, spawns the actor thread, and returns an `Arc` (UniFFI requirement for Object types). This is the complete wiring -- channels, actor spawn, shared state:
+
+```rust
+#[uniffi::export]
+impl FfiApp {
+    #[uniffi::constructor]
+    pub fn new(data_dir: String) -> Arc<Self> {
+        let (update_tx, update_rx) = flume::unbounded();
+        let (core_tx, core_rx) = flume::unbounded::<CoreMsg>();
+        let shared_state = Arc::new(RwLock::new(AppState::empty()));
+
+        // Spawn the actor thread -- the single owner of all mutable state.
+        let shared_for_core = shared_state.clone();
+        thread::spawn(move || {
+            let mut state = AppState::empty();
+            let mut rev: u64 = 0;
+
+            // Emit initial state so platforms have something to display immediately.
+            let snapshot = state.clone();
+            if let Ok(mut g) = shared_for_core.write() { *g = snapshot.clone(); }
+            let _ = update_tx.send(AppUpdate::FullState(snapshot));
+
+            // Actor loop: process messages sequentially, forever.
+            while let Ok(msg) = core_rx.recv() {
+                match msg {
+                    CoreMsg::Action(action) => {
+                        // Handle action, mutate state...
+                        rev += 1;
+                        state.rev = rev;
+                        // ... domain-specific logic here ...
+
+                        // Write to shared state and emit update.
+                        let snapshot = state.clone();
+                        if let Ok(mut g) = shared_for_core.write() {
+                            *g = snapshot.clone();
+                        }
+                        let _ = update_tx.send(AppUpdate::FullState(snapshot));
+                    }
+                }
+            }
+        });
+
+        Arc::new(Self {
+            core_tx,
+            update_rx,
+            listening: AtomicBool::new(false),
+            shared_state,
+        })
+    }
+}
+```
+
+The pattern has three moving parts: (1) `core_tx`/`core_rx` for inbound actions, (2) `update_tx`/`update_rx` for outbound state updates, (3) `shared_state` for synchronous reads via `state()`. The actor thread writes to both `shared_state` and `update_tx` on every mutation. Production apps add a `keychain_group` parameter, logging initialization, and `tokio::runtime` for async I/O (see Section 2.8), but the core wiring is identical.
 
 **Exported methods:**
 
@@ -614,7 +666,29 @@ pub trait AppReconciler: Send + Sync + 'static {
 }
 ```
 
-The platform's `AppManager` implements this trait. Rust's listener thread calls `reconciler.reconcile(update)` for every state change. The platform implementation hops to the main thread and applies the update.
+The platform's `AppManager` implements this trait. The Rust side spawns a dedicated listener thread that drains the update channel and forwards each update to the reconciler:
+
+```rust
+pub fn listen_for_updates(&self, reconciler: Box<dyn AppReconciler>) {
+    // CAS guard: only one listener thread allowed (a second would split messages).
+    if self
+        .listening
+        .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+        .is_err()
+    {
+        return;
+    }
+
+    let rx = self.update_rx.clone();
+    thread::spawn(move || {
+        while let Ok(update) = rx.recv() {
+            reconciler.reconcile(update);
+        }
+    });
+}
+```
+
+This is the bridge between the actor's `update_tx.send()` and the platform's `reconcile()` callback. The `AtomicBool` CAS ensures only one thread drains the channel -- calling `listen_for_updates` a second time is a no-op, preventing messages from being split across multiple consumers.
 
 **Thread safety is critical.** Callback interfaces must be `Send + Sync + 'static`. Rust calls them from background threads. The platform must handle the thread hop:
 - **iOS:** `nonisolated func reconcile(update:)` dispatches to `@MainActor` via `Task { @MainActor in self?.apply(update:) }`.
