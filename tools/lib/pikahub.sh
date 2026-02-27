@@ -26,15 +26,28 @@ pikahub_down() {
   rm -rf "$state_dir" 2>/dev/null || true
 }
 
+# pikahub_stop STATE_DIR
+#   Stops pikahub without removing the state dir.
+pikahub_stop() {
+  local state_dir="$1"
+  cargo run -q -p pikahub -- down --state-dir "$state_dir" 2>/dev/null || true
+}
+
 # pikahub_url_port URL
 #   Extracts port from a URL like ws://127.0.0.1:12345 or http://host:8080/path.
 #   Uses python for reliable parsing instead of fragile sed.
 pikahub_url_port() {
-  python3 -c "from urllib.parse import urlparse; print(urlparse('$1').port)"
+  python3 -c "
+import sys
+from urllib.parse import urlparse
+p = urlparse(sys.argv[1]).port
+assert p is not None, f'no port in URL: {sys.argv[1]}'
+print(p)
+" "$1"
 }
 
 # pikahub_manifest_field FIELD
 #   Reads a field from the last PIKAHUB_MANIFEST.
 pikahub_manifest_field() {
-  echo "$PIKAHUB_MANIFEST" | python3 -c "import json,sys; print(json.load(sys.stdin).get('$1',''))"
+  echo "$PIKAHUB_MANIFEST" | python3 -c "import json,sys; print(json.load(sys.stdin).get(sys.argv[1],''))" "$1"
 }

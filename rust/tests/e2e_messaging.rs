@@ -7,7 +7,6 @@ use std::time::Duration;
 use pika_core::{AppAction, AuthState, FfiApp};
 use tempfile::tempdir;
 
-#[path = "support/mod.rs"]
 mod support;
 use support::{wait_until, write_config};
 
@@ -22,9 +21,6 @@ fn alice_sends_bob_receives() {
 
     let alice = FfiApp::new(dir_a.path().to_string_lossy().to_string(), String::new());
     let bob = FfiApp::new(dir_b.path().to_string_lossy().to_string(), String::new());
-
-    let bob_collector = support::Collector::new();
-    bob.listen_for_updates(Box::new(bob_collector));
 
     alice.dispatch(AppAction::CreateAccount);
     bob.dispatch(AppAction::CreateAccount);

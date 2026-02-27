@@ -438,6 +438,22 @@ pub async fn wait(state_dir: &Path, timeout_secs: u64) -> Result<()> {
         info!("[wait] relay healthy");
     }
 
+    if let Some(moq_pid) = manifest.moq_pid {
+        // moq-relay has no HTTP health endpoint (QUIC only). Verify the
+        // process is still alive as a basic liveness check.
+        let alive = std::process::Command::new("kill")
+            .args(["-0", &moq_pid.to_string()])
+            .stdout(StdStdio::null())
+            .stderr(StdStdio::null())
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false);
+        if !alive {
+            bail!("moq-relay (pid {moq_pid}) is not running");
+        }
+        info!("[wait] moq-relay alive (pid {moq_pid})");
+    }
+
     if let Some(ref url) = manifest.server_url {
         health::wait_for_http(&format!("{url}/health-check"), timeout)
             .await
@@ -471,19 +487,18 @@ pub async fn nuke(state_dir: &Path) -> Result<()> {
     }
 
     // 3. Force-kill any manifest PIDs that survived graceful down.
-    //    Scoped to PIDs from our manifest only -- never global pkill.
+    //    Uses fingerprint verification to avoid killing unrelated processes
+    //    that may have reused the same PID.
     if let Some(ref m) = manifest {
-        let mut all = m.all_pids();
-        if let Some(pid) = m.postgres_pid {
-            all.push((pid, None));
-        }
-        for (pid, _start_time) in &all {
+        for (pid, start_time) in m.all_pids() {
             info!("[nuke] force-killing pid {pid}");
-            let _ = std::process::Command::new("kill")
-                .args(["-9", &pid.to_string()])
-                .stdout(StdStdio::null())
-                .stderr(StdStdio::null())
-                .status();
+            kill_pid_safe(pid, start_time);
+        }
+        // Postgres PID has no recorded start_time, so use kill_pid directly
+        // only if the pgdata dir belongs to this state_dir (already checked above).
+        if let Some(pid) = m.postgres_pid {
+            info!("[nuke] force-killing postgres pid {pid}");
+            kill_pid(pid);
         }
     }
 

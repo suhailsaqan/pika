@@ -86,7 +86,7 @@ cleanup() {
   if [ "${KEEP}" != "1" ]; then
     pikahub_down "$STATE_DIR"
   else
-    cargo run -q -p pikahub -- down --state-dir "$STATE_DIR" 2>/dev/null || true
+    pikahub_stop "$STATE_DIR"
     echo "note: keeping state dir: ${STATE_DIR}" >&2
   fi
 }

@@ -81,7 +81,7 @@ cleanup() {
   if [ "$KEEP" -eq 0 ] && [ -z "${PIKA_INTEROP_STATE_DIR:-}" ]; then
     pikahub_down "$STATE_DIR"
   else
-    cargo run -q -p pikahub -- down --state-dir "$STATE_DIR" 2>/dev/null || true
+    pikahub_stop "$STATE_DIR"
   fi
 }
 trap cleanup EXIT

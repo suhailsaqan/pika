@@ -107,14 +107,27 @@ impl Drop for TestInfra {
     fn drop(&mut self) {
         if let Some(ref state_dir) = self.state_dir {
             let pikahub = pikahub_binary();
-            let _ = Command::new(&pikahub)
+            let status = Command::new(&pikahub)
                 .arg("down")
                 .arg("--state-dir")
                 .arg(state_dir)
                 .stdout(Stdio::null())
-                .stderr(Stdio::null())
+                .stderr(Stdio::piped())
                 .status();
-            let _ = std::fs::remove_dir_all(state_dir);
+            if let Ok(s) = &status {
+                if !s.success() {
+                    eprintln!(
+                        "[TestInfra] WARNING: pikahub down failed (exit {})",
+                        s.code().unwrap_or(-1)
+                    );
+                }
+            }
+            if let Err(e) = std::fs::remove_dir_all(state_dir) {
+                eprintln!(
+                    "[TestInfra] WARNING: failed to remove {}: {e}",
+                    state_dir.display()
+                );
+            }
         }
     }
 }
@@ -129,8 +142,10 @@ fn pikahub_binary() -> String {
     // Fallback: look relative to the workspace root.
     let repo_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
     let bin = repo_root.join("target/debug/pikahub");
-    if bin.exists() {
-        return bin.to_string_lossy().to_string();
-    }
-    "pikahub".to_string()
+    assert!(
+        bin.exists(),
+        "pikahub binary not found at {}. Build it with: cargo build -p pikahub",
+        bin.display()
+    );
+    bin.to_string_lossy().to_string()
 }

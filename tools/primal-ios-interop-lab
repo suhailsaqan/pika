@@ -421,7 +421,7 @@ cleanup() {
     wait "$TAP_PID" >/dev/null 2>&1 || true
   fi
   if [ -n "${LAST_RUN_DIR:-}" ]; then
-    cargo run -q -p pikahub -- down --state-dir "$LAST_RUN_DIR" 2>/dev/null || true
+    pikahub_stop "$LAST_RUN_DIR"
   fi
 }
 trap cleanup EXIT

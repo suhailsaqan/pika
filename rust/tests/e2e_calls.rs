@@ -9,7 +9,6 @@ use std::time::{Duration, Instant};
 use pika_core::{AppAction, AuthState, CallStatus, FfiApp};
 use tempfile::tempdir;
 
-#[path = "support/mod.rs"]
 mod support;
 use support::{wait_until, write_config_multi, write_config_with_moq};
 
@@ -809,8 +808,6 @@ fn env_csv_or(key: &str, defaults: &[&str]) -> Vec<String> {
     defaults.iter().map(|s| s.to_string()).collect()
 }
 
-use support::Collector;
-
 #[test]
 #[ignore] // requires PIKA_TEST_NSEC + production infrastructure
 fn call_deployed_bot() {
@@ -849,8 +846,6 @@ fn call_deployed_bot() {
     write_config_multi(&dir.path().to_string_lossy(), &relays, &kp_relays, &moq_url);
 
     let app = FfiApp::new(dir.path().to_string_lossy().to_string(), String::new());
-    let collector = Collector::new();
-    app.listen_for_updates(Box::new(collector.clone()));
 
     app.dispatch(AppAction::Login { nsec });
     wait_until("logged in", Duration::from_secs(20), || {

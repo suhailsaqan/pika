@@ -5,13 +5,22 @@ use std::time::{Duration, Instant};
 
 use pika_core::{AppReconciler, AppUpdate};
 
-pub fn wait_until(what: &str, timeout: Duration, mut f: impl FnMut() -> bool) {
+pub fn wait_until(what: &str, timeout: Duration, f: impl FnMut() -> bool) {
+    wait_until_with_poll(what, timeout, Duration::from_millis(50), f);
+}
+
+pub fn wait_until_with_poll(
+    what: &str,
+    timeout: Duration,
+    poll: Duration,
+    mut f: impl FnMut() -> bool,
+) {
     let start = Instant::now();
     while start.elapsed() < timeout {
         if f() {
             return;
         }
-        std::thread::sleep(Duration::from_millis(50));
+        std::thread::sleep(poll);
     }
     panic!("{what}: condition not met within {timeout:?}");
 }
