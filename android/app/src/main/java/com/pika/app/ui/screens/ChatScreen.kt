@@ -1,6 +1,12 @@
 package com.pika.app.ui.screens
 
+import android.content.Context
+import android.net.Uri
+import android.provider.OpenableColumns
+import android.util.Base64
 import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
@@ -23,11 +29,13 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.calculateEndPadding
 import androidx.compose.foundation.layout.calculateStartPadding
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBars
@@ -73,6 +81,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
@@ -93,6 +103,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.pika.app.AppManager
 import com.pika.app.rust.AppAction
+import com.pika.app.rust.ChatMediaAttachment
 import com.pika.app.rust.ChatMessage
 import com.pika.app.rust.MessageDeliveryState
 import com.pika.app.rust.MessageSegment
@@ -103,8 +114,12 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Reply
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.ArrowDownward
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Call
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Done
+import androidx.compose.material.icons.filled.InsertDriveFile
 import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.Group
 import androidx.compose.material.icons.filled.Info
@@ -112,14 +127,20 @@ import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import kotlin.math.max
 import kotlin.math.roundToInt
 import com.pika.app.rust.Screen
 import com.pika.app.ui.Avatar
 import com.pika.app.ui.TestTags
 import dev.jeziellago.compose.markdowntext.MarkdownText
+import coil.compose.AsyncImage
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.io.File
 
 // Represents an item in the chat timeline: either a message or the unread divider.
 private sealed class ChatListItem {
@@ -135,6 +156,28 @@ private enum class GroupedBubblePosition {
 }
 
 private val QUICK_REACTIONS = listOf("❤️", "👍", "👎", "😂", "😮", "😢")
+
+private data class MediaUploadPayload(
+    val bytes: ByteArray,
+    val mimeType: String,
+    val filename: String,
+)
+
+private fun readMediaUploadPayload(ctx: Context, uri: Uri): MediaUploadPayload? {
+    val bytes = ctx.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: return null
+    if (bytes.isEmpty()) return null
+    val mimeType = ctx.contentResolver.getType(uri).orEmpty()
+    val filename =
+        ctx.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)
+            ?.use { cursor ->
+                val idx = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                if (idx >= 0 && cursor.moveToFirst()) cursor.getString(idx) else null
+            }
+            ?.trim()
+            .takeUnless { it.isNullOrEmpty() }
+            ?: "attachment.bin"
+    return MediaUploadPayload(bytes = bytes, mimeType = mimeType, filename = filename)
+}
 
 @Composable
 @OptIn(ExperimentalMaterial3Api::class)
@@ -152,8 +195,11 @@ fun ChatScreen(
         return
     }
 
+    val ctx = LocalContext.current
     var draft by remember { mutableStateOf("") }
     var replyDraft by remember(chat.chatId) { mutableStateOf<ChatMessage?>(null) }
+    var showAttachmentMenu by remember(chat.chatId) { mutableStateOf(false) }
+    var fullscreenImageAttachment by remember(chat.chatId) { mutableStateOf<ChatMediaAttachment?>(null) }
     val listState = rememberLazyListState()
     val coroutineScope = rememberCoroutineScope()
     val newestMessageId = chat.messages.lastOrNull()?.id
@@ -229,6 +275,42 @@ fun ChatScreen(
         )
         replyDraft = null
     }
+
+    fun sendMediaFromUri(uri: Uri?) {
+        if (uri == null) return
+        coroutineScope.launch {
+            val payload = withContext(Dispatchers.IO) { readMediaUploadPayload(ctx, uri) }
+            if (payload == null) {
+                Toast.makeText(ctx, "Unable to read selected file", Toast.LENGTH_SHORT).show()
+                return@launch
+            }
+            val base64 = Base64.encodeToString(payload.bytes, Base64.NO_WRAP)
+            val caption = draft.trim()
+            manager.dispatch(
+                AppAction.SendChatMedia(
+                    chatId = chat.chatId,
+                    dataBase64 = base64,
+                    mimeType = payload.mimeType,
+                    filename = payload.filename,
+                    caption = caption,
+                ),
+            )
+            if (caption.isNotEmpty()) {
+                draft = ""
+            }
+            replyDraft = null
+        }
+    }
+
+    val pickPhotoOrVideoLauncher =
+        rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+            sendMediaFromUri(uri)
+        }
+
+    val pickFileLauncher =
+        rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+            sendMediaFromUri(uri)
+        }
 
     fun maybeNotifyTyping(text: String) {
         if (text.isBlank()) return
@@ -472,6 +554,18 @@ fun ChatScreen(
                                 onReact = { messageId, emoji ->
                                     manager.dispatch(AppAction.ReactToMessage(chat.chatId, messageId, emoji))
                                 },
+                                onDownloadMedia = { messageId, originalHashHex ->
+                                    manager.dispatch(
+                                        AppAction.DownloadChatMedia(
+                                            chatId = chat.chatId,
+                                            messageId = messageId,
+                                            originalHashHex = originalHashHex,
+                                        ),
+                                    )
+                                },
+                                onOpenImage = { attachment ->
+                                    fullscreenImageAttachment = attachment
+                                },
                             )
                         }
                         is ChatListItem.NewMessagesDivider -> {
@@ -586,6 +680,37 @@ fun ChatScreen(
                                 .padding(horizontal = 12.dp, vertical = 8.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
+                        Box {
+                            IconButton(
+                                onClick = { showAttachmentMenu = true },
+                                modifier = Modifier.size(40.dp),
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Add,
+                                    contentDescription = "Attach",
+                                )
+                            }
+                            DropdownMenu(
+                                expanded = showAttachmentMenu,
+                                onDismissRequest = { showAttachmentMenu = false },
+                            ) {
+                                DropdownMenuItem(
+                                    text = { Text("Photos & Videos") },
+                                    onClick = {
+                                        showAttachmentMenu = false
+                                        pickPhotoOrVideoLauncher.launch(arrayOf("image/*", "video/*"))
+                                    },
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("File") },
+                                    onClick = {
+                                        showAttachmentMenu = false
+                                        pickFileLauncher.launch(arrayOf("*/*"))
+                                    },
+                                )
+                            }
+                        }
+                        Spacer(Modifier.width(4.dp))
                         BasicTextField(
                             value = draft,
                             onValueChange = {
@@ -647,6 +772,13 @@ fun ChatScreen(
                 }
             }
         }
+    }
+
+    fullscreenImageAttachment?.let { attachment ->
+        FullscreenImageViewer(
+            attachment = attachment,
+            onDismiss = { fullscreenImageAttachment = null },
+        )
     }
 }
 
@@ -896,6 +1028,184 @@ private fun ReactionChipsRow(
     }
 }
 
+@Composable
+private fun MediaAttachmentContent(
+    attachment: ChatMediaAttachment,
+    isMine: Boolean,
+    onDownload: () -> Unit,
+    onOpenImage: () -> Unit,
+) {
+    val hasLocalFile = attachment.localPath?.let { File(it).exists() } == true
+    val isImage = attachment.mimeType.startsWith("image/")
+    val containerColor =
+        if (isMine) {
+            MaterialTheme.colorScheme.primary.copy(alpha = 0.25f)
+        } else {
+            MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f)
+        }
+
+    if (isImage) {
+        Surface(
+            modifier = Modifier.widthIn(max = 280.dp),
+            shape = MaterialTheme.shapes.medium,
+            color = containerColor,
+        ) {
+            if (hasLocalFile) {
+                val imageModel = attachment.localPath?.let { File(it) }
+                Box(
+                    modifier =
+                        Modifier
+                            .fillMaxWidth()
+                            .then(
+                                if (attachment.width != null && attachment.height != null &&
+                                    attachment.width!! > 0u && attachment.height!! > 0u
+                                ) {
+                                    Modifier.aspectRatio(attachment.width!!.toFloat() / attachment.height!!.toFloat())
+                                } else {
+                                    Modifier.heightIn(min = 120.dp, max = 260.dp)
+                                },
+                            )
+                            .clickable { onOpenImage() },
+                ) {
+                    AsyncImage(
+                        model = imageModel,
+                        contentDescription = attachment.filename,
+                        modifier = Modifier.fillMaxSize(),
+                        contentScale = ContentScale.Crop,
+                    )
+                }
+            } else {
+                Row(
+                    modifier =
+                        Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = 84.dp)
+                            .padding(horizontal = 12.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Download,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Text(
+                        text = attachment.filename.ifBlank { "Image" },
+                        modifier = Modifier.weight(1f),
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    TextButton(onClick = onDownload) {
+                        Text("Download")
+                    }
+                }
+            }
+        }
+        return
+    }
+
+    Surface(
+        modifier = Modifier.widthIn(max = 280.dp),
+        shape = MaterialTheme.shapes.medium,
+        color = containerColor,
+    ) {
+        Row(
+            modifier =
+                Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Icon(
+                imageVector = Icons.Default.InsertDriveFile,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(
+                    text = attachment.filename.ifBlank { "Attachment" },
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+                if (attachment.mimeType.isNotBlank()) {
+                    Text(
+                        text = attachment.mimeType,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+            if (hasLocalFile) {
+                Text(
+                    text = "Saved",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            } else {
+                TextButton(onClick = onDownload) {
+                    Text("Download")
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun FullscreenImageViewer(
+    attachment: ChatMediaAttachment,
+    onDismiss: () -> Unit,
+) {
+    val imageModel =
+        attachment.localPath
+            ?.takeIf { File(it).exists() }
+            ?.let { File(it) }
+            ?: attachment.url.takeIf { it.isNotBlank() }
+
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false),
+    ) {
+        Box(
+            modifier =
+                Modifier
+                    .fillMaxSize()
+                    .background(Color.Black.copy(alpha = 0.95f)),
+        ) {
+            IconButton(
+                onClick = onDismiss,
+                modifier = Modifier.align(Alignment.TopEnd).padding(12.dp),
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Close,
+                    contentDescription = "Close image",
+                    tint = Color.White,
+                )
+            }
+            if (imageModel != null) {
+                AsyncImage(
+                    model = imageModel,
+                    contentDescription = attachment.filename,
+                    modifier = Modifier.fillMaxSize().padding(16.dp),
+                    contentScale = ContentScale.Fit,
+                )
+            } else {
+                Text(
+                    text = "Image unavailable",
+                    modifier = Modifier.align(Alignment.Center),
+                    color = Color.White,
+                )
+            }
+        }
+    }
+}
+
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun MessageBubble(
@@ -907,6 +1217,8 @@ private fun MessageBubble(
     onJumpToMessage: (String) -> Unit,
     onRetryMessage: (String) -> Unit,
     onReact: (String, String) -> Unit,
+    onDownloadMedia: (String, String) -> Unit,
+    onOpenImage: (ChatMediaAttachment) -> Unit,
 ) {
     val isMine = message.isMine
     val bubbleColor =
@@ -957,6 +1269,18 @@ private fun MessageBubble(
                 onJumpToMessage = onJumpToMessage,
             )
             Spacer(Modifier.height(4.dp))
+        }
+
+        if (message.media.isNotEmpty()) {
+            for (attachment in message.media) {
+                MediaAttachmentContent(
+                    attachment = attachment,
+                    isMine = isMine,
+                    onDownload = { onDownloadMedia(message.id, attachment.originalHashHex) },
+                    onOpenImage = { onOpenImage(attachment) },
+                )
+                Spacer(Modifier.height(3.dp))
+            }
         }
 
         for (segment in segments) {
