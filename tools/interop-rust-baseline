@@ -11,6 +11,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
+. tools/lib/pikahub.sh
 
 KEEP=0
 MANUAL=0
@@ -77,23 +78,17 @@ cleanup() {
     kill "${BOT_PID}" >/dev/null 2>&1 || true
     wait "${BOT_PID}" >/dev/null 2>&1 || true
   fi
-  cargo run -q -p pikahub -- down --state-dir "$STATE_DIR" 2>/dev/null || true
   if [ "$KEEP" -eq 0 ] && [ -z "${PIKA_INTEROP_STATE_DIR:-}" ]; then
-    rm -rf "$STATE_DIR" >/dev/null 2>&1 || true
+    pikahub_down "$STATE_DIR"
+  else
+    cargo run -q -p pikahub -- down --state-dir "$STATE_DIR" 2>/dev/null || true
   fi
 }
 trap cleanup EXIT
 
 # ── Start relay via pikahub ─────────────────────────────────────────────
 
-MANIFEST="$(cargo run -q -p pikahub -- up \
-  --profile relay \
-  --background \
-  --state-dir "$STATE_DIR" \
-  --relay-port 0)"
-
-RELAY_URL="$(echo "$MANIFEST" | python3 -c "import json,sys; print(json.load(sys.stdin)['relay_url'])")"
-RELAY_PORT="$(echo "$RELAY_URL" | sed 's/.*://')"
+pikahub_up relay "$STATE_DIR"
 ANDROID_RELAY_URL="ws://10.0.2.2:${RELAY_PORT}"
 
 echo "relay_url=${RELAY_URL}"

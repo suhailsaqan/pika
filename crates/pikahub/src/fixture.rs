@@ -451,7 +451,8 @@ pub async fn wait(state_dir: &Path, timeout_secs: u64) -> Result<()> {
 
 pub async fn nuke(state_dir: &Path) -> Result<()> {
     // 1. Try a graceful down first (manifest-based).
-    if Manifest::load(state_dir)?.is_some() {
+    let manifest = Manifest::load(state_dir)?;
+    if manifest.is_some() {
         info!("[nuke] running graceful down first...");
         let _ = down(state_dir).await;
     }
@@ -469,13 +470,21 @@ pub async fn nuke(state_dir: &Path) -> Result<()> {
             .status();
     }
 
-    // 3. Kill any remaining pikahub-related processes.
-    for pattern in ["pika-relay", "moq-relay", "pika-server", "pikachat.*bot"] {
-        let _ = std::process::Command::new("pkill")
-            .args(["-f", pattern])
-            .stdout(StdStdio::null())
-            .stderr(StdStdio::null())
-            .status();
+    // 3. Force-kill any manifest PIDs that survived graceful down.
+    //    Scoped to PIDs from our manifest only -- never global pkill.
+    if let Some(ref m) = manifest {
+        let mut all = m.all_pids();
+        if let Some(pid) = m.postgres_pid {
+            all.push((pid, None));
+        }
+        for (pid, _start_time) in &all {
+            info!("[nuke] force-killing pid {pid}");
+            let _ = std::process::Command::new("kill")
+                .args(["-9", &pid.to_string()])
+                .stdout(StdStdio::null())
+                .stderr(StdStdio::null())
+                .status();
+        }
     }
 
     // 4. Remove the state directory entirely.

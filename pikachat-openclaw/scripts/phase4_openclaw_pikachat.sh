@@ -5,6 +5,7 @@ cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
 ROOT_DIR="$(pwd)"
 REPO_ROOT="$(git rev-parse --show-toplevel)"
+. "${REPO_ROOT}/tools/lib/pikahub.sh"
 
 AUTO_STATE_DIR=0
 if [[ -z "${STATE_DIR:-}" ]]; then
@@ -28,21 +29,15 @@ cleanup() {
     kill "${OPENCLAW_PID}" >/dev/null 2>&1 || true
   fi
   if [[ -z "${RELAY_URL_WAS_SET:-}" ]]; then
-    cargo run -q --manifest-path "${REPO_ROOT}/Cargo.toml" -p pikahub -- down --state-dir "${STATE_DIR_ABS}" 2>/dev/null || true
-  fi
-  if [[ "${AUTO_STATE_DIR}" == "1" ]]; then
+    pikahub_down "${STATE_DIR_ABS}"
+  elif [[ "${AUTO_STATE_DIR}" == "1" ]]; then
     rm -rf "${STATE_DIR}" >/dev/null 2>&1 || true
   fi
 }
 trap cleanup EXIT
 
 if [[ -z "${RELAY_URL}" ]]; then
-  MANIFEST="$(cargo run -q --manifest-path "${REPO_ROOT}/Cargo.toml" -p pikahub -- up \
-    --profile relay \
-    --background \
-    --state-dir "${STATE_DIR_ABS}" \
-    --relay-port 0)"
-  RELAY_URL="$(echo "${MANIFEST}" | python3 -c "import json,sys; print(json.load(sys.stdin)['relay_url'])")"
+  pikahub_up relay "${STATE_DIR_ABS}"
 else
   RELAY_URL_WAS_SET=1
 fi

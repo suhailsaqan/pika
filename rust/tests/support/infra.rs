@@ -1,10 +1,7 @@
 #![allow(dead_code)]
 
-use std::io::{Read, Write};
-use std::net::TcpStream;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
-use std::time::{Duration, Instant};
 
 /// Provides relay + moq URLs for E2E tests.
 ///
@@ -21,9 +18,8 @@ impl TestInfra {
     pub fn start_local(need_moq: bool) -> Self {
         let pikahub = pikahub_binary();
         let state_dir = tempfile::tempdir().expect("tempdir for pikahub").keep();
-        let profile = if need_moq { "backend" } else { "relay" };
+        let profile = if need_moq { "relay-moq" } else { "relay" };
 
-        // We use --relay-port 0 so pikahub picks a free port.
         let mut cmd = Command::new(&pikahub);
         cmd.arg("up")
             .arg("--profile")
@@ -65,8 +61,24 @@ impl TestInfra {
             panic!("requested moq but pikahub manifest has no moq_url");
         }
 
-        // Wait for relay to be healthy.
-        wait_for_relay(&relay_url, Duration::from_secs(30));
+        // Use pikahub wait for reliable health checking instead of manual TCP probe.
+        let wait_output = Command::new(&pikahub)
+            .arg("wait")
+            .arg("--timeout")
+            .arg("30")
+            .arg("--state-dir")
+            .arg(&state_dir)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .output()
+            .unwrap_or_else(|e| panic!("pikahub wait failed: {e}"));
+        if !wait_output.status.success() {
+            let stderr = String::from_utf8_lossy(&wait_output.stderr);
+            panic!(
+                "pikahub wait --state-dir {} failed:\n{stderr}",
+                state_dir.display()
+            );
+        }
 
         eprintln!("[TestInfra] local relay={relay_url}");
         if let Some(ref moq) = moq_url {
@@ -102,43 +114,23 @@ impl Drop for TestInfra {
                 .stdout(Stdio::null())
                 .stderr(Stdio::null())
                 .status();
-            // Best-effort cleanup of state dir.
             let _ = std::fs::remove_dir_all(state_dir);
         }
     }
 }
 
 fn pikahub_binary() -> String {
+    // CARGO_BIN_EXE_pikahub is set by cargo when the workspace has a [[bin]] target
+    // named "pikahub" and the test depends on that crate. This handles non-default
+    // target dirs and release profiles correctly.
+    if let Ok(bin) = std::env::var("CARGO_BIN_EXE_pikahub") {
+        return bin;
+    }
+    // Fallback: look relative to the workspace root.
     let repo_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
     let bin = repo_root.join("target/debug/pikahub");
     if bin.exists() {
         return bin.to_string_lossy().to_string();
     }
-    // Fall back to PATH.
     "pikahub".to_string()
-}
-
-fn wait_for_relay(url: &str, timeout: Duration) {
-    // Extract host:port from ws://host:port
-    let addr = url
-        .trim_start_matches("ws://")
-        .trim_start_matches("wss://")
-        .trim_end_matches('/');
-    let start = Instant::now();
-    while start.elapsed() < timeout {
-        if let Ok(mut stream) = TcpStream::connect(addr) {
-            stream.set_read_timeout(Some(Duration::from_secs(2))).ok();
-            let req = format!("GET / HTTP/1.1\r\nHost: {addr}\r\nConnection: close\r\n\r\n");
-            if stream.write_all(req.as_bytes()).is_ok() {
-                let mut buf = [0u8; 256];
-                if let Ok(n) = stream.read(&mut buf) {
-                    if n > 0 {
-                        return;
-                    }
-                }
-            }
-        }
-        std::thread::sleep(Duration::from_millis(100));
-    }
-    panic!("relay at {url} not healthy within {timeout:?}");
 }

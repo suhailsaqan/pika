@@ -3,6 +3,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
+. tools/lib/pikahub.sh
 
 if [ "$(uname -s)" != "Darwin" ]; then
   echo "error: tools/primal-ios-interop-lab requires macOS" >&2
@@ -269,13 +270,9 @@ run_lab() {
   tap_log="$run_dir/nostr_connect_tap.log"
   sim_log="$run_dir/sim.log"
 
-  MANIFEST="$(cargo run -q -p pikahub -- up \
-    --profile relay \
-    --background \
-    --state-dir "$run_dir" \
-    --relay-port 0)"
-  relay_url="$(echo "$MANIFEST" | python3 -c "import json,sys; print(json.load(sys.stdin)['relay_url'])")"
-  relay_port="$(echo "$relay_url" | sed 's/.*://')"
+  pikahub_up relay "$run_dir"
+  relay_url="$RELAY_URL"
+  relay_port="$RELAY_PORT"
 
   cargo run -q -p pika_core --bin nostr_connect_tap -- \
     --relay "$relay_url" >"$tap_log" 2>&1 &

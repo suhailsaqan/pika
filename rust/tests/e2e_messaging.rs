@@ -2,38 +2,14 @@
 //!
 //! Uses pikahub for local infrastructure (default). All tests run in pre-merge.
 
-use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
-use pika_core::{AppAction, AppReconciler, AppUpdate, AuthState, FfiApp};
+use pika_core::{AppAction, AuthState, FfiApp};
 use tempfile::tempdir;
 
 #[path = "support/mod.rs"]
 mod support;
-
-fn write_config(data_dir: &str, relay_url: &str) {
-    let path = std::path::Path::new(data_dir).join("pika_config.json");
-    let v = serde_json::json!({
-        "disable_network": false,
-        "relay_urls": [relay_url],
-        "key_package_relay_urls": [relay_url],
-        "call_moq_url": "ws://moq.local/anon",
-        "call_broadcast_prefix": "pika/calls",
-        "call_audio_backend": "synthetic",
-    });
-    std::fs::write(path, serde_json::to_vec(&v).unwrap()).unwrap();
-}
-
-fn wait_until(what: &str, timeout: Duration, mut f: impl FnMut() -> bool) {
-    let start = Instant::now();
-    while start.elapsed() < timeout {
-        if f() {
-            return;
-        }
-        std::thread::sleep(Duration::from_millis(50));
-    }
-    panic!("{what}: condition not met within {timeout:?}");
-}
+use support::{wait_until, write_config};
 
 #[test]
 fn alice_sends_bob_receives() {
@@ -47,19 +23,8 @@ fn alice_sends_bob_receives() {
     let alice = FfiApp::new(dir_a.path().to_string_lossy().to_string(), String::new());
     let bob = FfiApp::new(dir_b.path().to_string_lossy().to_string(), String::new());
 
-    #[derive(Clone)]
-    struct Collector {
-        updates: Arc<Mutex<Vec<AppUpdate>>>,
-    }
-    impl AppReconciler for Collector {
-        fn reconcile(&self, update: AppUpdate) {
-            self.updates.lock().unwrap().push(update);
-        }
-    }
-    let bob_updates = Arc::new(Mutex::new(Vec::<AppUpdate>::new()));
-    bob.listen_for_updates(Box::new(Collector {
-        updates: bob_updates.clone(),
-    }));
+    let bob_collector = support::Collector::new();
+    bob.listen_for_updates(Box::new(bob_collector));
 
     alice.dispatch(AppAction::CreateAccount);
     bob.dispatch(AppAction::CreateAccount);

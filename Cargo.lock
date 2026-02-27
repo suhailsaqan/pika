@@ -5743,6 +5743,7 @@ dependencies = [
  "anyhow",
  "nostr-sdk",
  "pika-agent-control-plane",
+ "pika-test-utils",
  "reqwest",
  "serde",
  "serde_json",
@@ -5857,6 +5858,7 @@ dependencies = [
  "pika-agent-control-plane",
  "pika-agent-microvm",
  "pika-relay-profiles",
+ "pika-test-utils",
  "rand 0.8.5",
  "reqwest",
  "serde",
@@ -5865,6 +5867,10 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
 ]
+
+[[package]]
+name = "pika-test-utils"
+version = "0.1.0"
 
 [[package]]
 name = "pika-tls"
@@ -5941,6 +5947,7 @@ dependencies = [
  "pika-agent-protocol",
  "pika-marmot-runtime",
  "pika-relay-profiles",
+ "pika-test-utils",
  "pikachat-sidecar",
  "rand 0.8.5",
  "reqwest",

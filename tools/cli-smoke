@@ -8,6 +8,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
+. tools/lib/pikahub.sh
 
 with_media=0
 external_relay=""
@@ -44,8 +45,7 @@ done
 STATE_DIR="$(mktemp -d /tmp/pikachat-smoke.XXXXXX)"
 
 cleanup() {
-  cargo run -q -p pikahub -- down --state-dir "$STATE_DIR" 2>/dev/null || true
-  rm -rf "${STATE_DIR}" >/dev/null 2>&1 || true
+  pikahub_down "$STATE_DIR"
 }
 trap cleanup EXIT
 
@@ -54,12 +54,8 @@ trap cleanup EXIT
 if [ -n "$external_relay" ]; then
   relay="$external_relay"
 else
-  MANIFEST="$(cargo run -q -p pikahub -- up \
-    --profile relay \
-    --background \
-    --state-dir "$STATE_DIR" \
-    --relay-port 0)"
-  relay="$(echo "$MANIFEST" | python3 -c "import json,sys; print(json.load(sys.stdin)['relay_url'])")"
+  pikahub_up relay "$STATE_DIR"
+  relay="$RELAY_URL"
   echo "relay: $relay"
 fi
 

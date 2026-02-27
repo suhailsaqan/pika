@@ -1,58 +1,17 @@
 //! E2E call tests: signaling + media transport via pikahub.
 //!
-//! Local tests use pikahub for relay + moq-relay (run in pre-merge).
-//! The deployed-bot test requires PIKA_TEST_NSEC and hits production (#[ignore]).
+//! All tests are #[ignore] -- they require moq-relay and/or pikachat binaries
+//! on PATH (use `nix develop`). They run in nightly, not pre-merge.
 
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use pika_core::{AppAction, AppReconciler, AppUpdate, AuthState, CallStatus, FfiApp};
+use pika_core::{AppAction, AuthState, CallStatus, FfiApp};
 use tempfile::tempdir;
 
 #[path = "support/mod.rs"]
 mod support;
-
-fn write_config(data_dir: &str, relay_url: &str, kp_relay_url: Option<&str>, moq_url: &str) {
-    let path = std::path::Path::new(data_dir).join("pika_config.json");
-    let mut v = serde_json::json!({
-        "disable_network": false,
-        "relay_urls": [relay_url],
-        "call_moq_url": moq_url,
-        "call_broadcast_prefix": "pika/calls",
-        "call_audio_backend": "synthetic",
-    });
-    if let Some(kp) = kp_relay_url {
-        v.as_object_mut().unwrap().insert(
-            "key_package_relay_urls".to_string(),
-            serde_json::json!([kp]),
-        );
-    }
-    std::fs::write(path, serde_json::to_vec(&v).unwrap()).unwrap();
-}
-
-fn write_config_multi(data_dir: &str, relays: &[String], kp_relays: &[String], moq_url: &str) {
-    let path = std::path::Path::new(data_dir).join("pika_config.json");
-    let v = serde_json::json!({
-        "disable_network": false,
-        "relay_urls": relays,
-        "key_package_relay_urls": kp_relays,
-        "call_moq_url": moq_url,
-        "call_broadcast_prefix": "pika/calls",
-        "call_audio_backend": "synthetic",
-    });
-    std::fs::write(path, serde_json::to_vec(&v).unwrap()).unwrap();
-}
-
-fn wait_until(what: &str, timeout: Duration, mut f: impl FnMut() -> bool) {
-    let start = Instant::now();
-    while start.elapsed() < timeout {
-        if f() {
-            return;
-        }
-        std::thread::sleep(Duration::from_millis(50));
-    }
-    panic!("{what}: condition not met within {timeout:?}");
-}
+use support::{wait_until, write_config_multi, write_config_with_moq};
 
 #[derive(Clone, Copy, Debug)]
 struct CallStatsSnapshot {
@@ -85,13 +44,13 @@ fn call_over_local_moq_relay() {
 
     let dir_a = tempdir().unwrap();
     let dir_b = tempdir().unwrap();
-    write_config(
+    write_config_with_moq(
         &dir_a.path().to_string_lossy(),
         &infra.relay_url,
         Some(&infra.relay_url),
         moq_url,
     );
-    write_config(
+    write_config_with_moq(
         &dir_b.path().to_string_lossy(),
         &infra.relay_url,
         Some(&infra.relay_url),
@@ -519,7 +478,7 @@ fn run_pikachat_call_test(relay_url: &str, moq_url: &str) {
     });
 
     let caller_dir = tempdir().unwrap();
-    write_config(
+    write_config_with_moq(
         &caller_dir.path().to_string_lossy(),
         relay_url,
         Some(relay_url),
@@ -850,28 +809,7 @@ fn env_csv_or(key: &str, defaults: &[&str]) -> Vec<String> {
     defaults.iter().map(|s| s.to_string()).collect()
 }
 
-#[derive(Clone)]
-struct Collector(Arc<Mutex<Vec<AppUpdate>>>);
-
-impl Collector {
-    fn new() -> Self {
-        Self(Arc::new(Mutex::new(Vec::new())))
-    }
-
-    #[allow(dead_code)]
-    fn last_toast(&self) -> Option<String> {
-        self.0.lock().unwrap().iter().rev().find_map(|u| match u {
-            AppUpdate::FullState(s) => s.toast.clone(),
-            _ => None,
-        })
-    }
-}
-
-impl AppReconciler for Collector {
-    fn reconcile(&self, update: AppUpdate) {
-        self.0.lock().unwrap().push(update);
-    }
-}
+use support::Collector;
 
 #[test]
 #[ignore] // requires PIKA_TEST_NSEC + production infrastructure

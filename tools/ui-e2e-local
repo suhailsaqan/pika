@@ -16,6 +16,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
+. tools/lib/pikahub.sh
 
 platform=""
 KEEP="${KEEP:-0}"
@@ -82,10 +83,10 @@ fi
 STATE_DIR="$(mktemp -d /tmp/pika-ui-e2e-local.XXXXXX)"
 
 cleanup() {
-  cargo run -q -p pikahub -- down --state-dir "$STATE_DIR" 2>/dev/null || true
   if [ "${KEEP}" != "1" ]; then
-    rm -rf "${STATE_DIR}" >/dev/null 2>&1 || true
+    pikahub_down "$STATE_DIR"
   else
+    cargo run -q -p pikahub -- down --state-dir "$STATE_DIR" 2>/dev/null || true
     echo "note: keeping state dir: ${STATE_DIR}" >&2
   fi
 }
@@ -99,16 +100,8 @@ cat > "$FIXTURE_CONFIG" <<EOF
 timeout_secs = ${BOT_TIMEOUT_SEC}
 EOF
 
-MANIFEST="$(cargo run -q -p pikahub -- up \
-  --profile relay-bot \
-  --background \
-  --state-dir "$STATE_DIR" \
-  --relay-port 0 \
-  --config "$FIXTURE_CONFIG")"
-
-RELAY_URL="$(echo "$MANIFEST" | python3 -c "import json,sys; print(json.load(sys.stdin)['relay_url'])")"
-RELAY_PORT="$(echo "$RELAY_URL" | sed 's/.*://')"
-BOT_NPUB="$(echo "$MANIFEST" | python3 -c "import json,sys; print(json.load(sys.stdin).get('bot_npub',''))")"
+pikahub_up relay-bot "$STATE_DIR" --config "$FIXTURE_CONFIG"
+BOT_NPUB="$(pikahub_manifest_field bot_npub)"
 
 ANDROID_RELAY_URL="ws://10.0.2.2:${RELAY_PORT}"
 

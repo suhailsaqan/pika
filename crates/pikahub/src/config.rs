@@ -12,6 +12,7 @@ pub const DEFAULT_STATE_DIR: &str = ".pikahub";
 #[serde(rename_all = "kebab-case")]
 pub enum ProfileName {
     Relay,
+    RelayMoq,
     RelayBot,
     Backend,
     Postgres,
@@ -23,11 +24,14 @@ impl ProfileName {
     }
 
     pub fn needs_relay(self) -> bool {
-        matches!(self, Self::Relay | Self::RelayBot | Self::Backend)
+        matches!(
+            self,
+            Self::Relay | Self::RelayMoq | Self::RelayBot | Self::Backend
+        )
     }
 
     pub fn needs_moq(self) -> bool {
-        matches!(self, Self::Backend)
+        matches!(self, Self::RelayMoq | Self::Backend)
     }
 
     pub fn needs_server(self) -> bool {
@@ -45,10 +49,13 @@ impl FromStr for ProfileName {
     fn from_str(s: &str) -> Result<Self> {
         match s {
             "relay" => Ok(Self::Relay),
+            "relay-moq" => Ok(Self::RelayMoq),
             "relay-bot" => Ok(Self::RelayBot),
             "backend" => Ok(Self::Backend),
             "postgres" => Ok(Self::Postgres),
-            _ => bail!("unknown profile: {s} (expected: relay, relay-bot, backend, postgres)"),
+            _ => bail!(
+                "unknown profile: {s} (expected: relay, relay-moq, relay-bot, backend, postgres)"
+            ),
         }
     }
 }
@@ -57,6 +64,7 @@ impl std::fmt::Display for ProfileName {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Relay => write!(f, "relay"),
+            Self::RelayMoq => write!(f, "relay-moq"),
             Self::RelayBot => write!(f, "relay-bot"),
             Self::Backend => write!(f, "backend"),
             Self::Postgres => write!(f, "postgres"),
@@ -250,6 +258,10 @@ mod tests {
     fn profile_parse_valid() {
         assert_eq!("relay".parse::<ProfileName>().unwrap(), ProfileName::Relay);
         assert_eq!(
+            "relay-moq".parse::<ProfileName>().unwrap(),
+            ProfileName::RelayMoq
+        );
+        assert_eq!(
             "relay-bot".parse::<ProfileName>().unwrap(),
             ProfileName::RelayBot
         );
@@ -270,7 +282,7 @@ mod tests {
 
     #[test]
     fn profile_display_round_trip() {
-        for name in &["relay", "relay-bot", "backend", "postgres"] {
+        for name in &["relay", "relay-moq", "relay-bot", "backend", "postgres"] {
             let parsed: ProfileName = name.parse().unwrap();
             assert_eq!(&parsed.to_string(), name);
         }
@@ -283,6 +295,12 @@ mod tests {
         assert!(!ProfileName::Relay.needs_moq());
         assert!(!ProfileName::Relay.needs_server());
         assert!(!ProfileName::Relay.needs_bot());
+
+        assert!(!ProfileName::RelayMoq.needs_postgres());
+        assert!(ProfileName::RelayMoq.needs_relay());
+        assert!(ProfileName::RelayMoq.needs_moq());
+        assert!(!ProfileName::RelayMoq.needs_server());
+        assert!(!ProfileName::RelayMoq.needs_bot());
 
         assert!(ProfileName::Backend.needs_postgres());
         assert!(ProfileName::Backend.needs_relay());
