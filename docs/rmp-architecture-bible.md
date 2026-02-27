@@ -562,6 +562,10 @@ UniFFI maps Rust types to idiomatic platform types:
 
 **Serialization:** Records are serialized into `RustBuffer` (big-endian byte buffer) for crossing the FFI. Objects use opaque `UInt64` handles. This means every `dispatch()` call serializes the `AppAction`, and every `reconcile()` call serializes the `AppUpdate`. For `FullState`, the entire `AppState` tree is serialized.
 
+**Auto-generated conformances (critical for platform code):**
+- **Swift:** UniFFI Records and Enums automatically conform to `Equatable` and `Hashable`. Do **not** add manual conformances (e.g., `extension MyEnum: @retroactive Hashable`) -- the compiler will error on the duplicate. This means UniFFI enums can be used directly as `NavigationStack` path elements, dictionary keys, and `ForEach` identifiers without any additional Swift code.
+- **Kotlin:** Records become `data class` (automatic `equals`/`hashCode`). Enums become `sealed class` with subclass-based matching.
+
 **Gotchas:**
 - UniFFI enums cannot use `Box<T>` indirection for large variants. If one variant is much larger than others, the entire enum is sized to the largest variant.
 - Recursive types are not supported. `AppState` and its nested types form a tree, not a graph.
@@ -1215,6 +1219,20 @@ The **outer loop** is iced's: `DesktopApp` implements `new()`, `update()`, `view
 
 The `AppManager` wraps `FfiApp` and exposes `subscribe_updates() -> flume::Receiver<()>`. iced polls this via `Subscription::run_with()`. When `Message::CoreUpdated` arrives, `sync_from_manager()` reads the latest `AppState` snapshot and stores it, triggering a re-render.
 
+**iced 0.14 API notes (critical for implementation):**
+
+- **`Subscription::run_with()` requires `Hash`.** The data parameter (`AppManager`) must implement `Hash`. Derive it manually by hashing the `Arc` pointer:
+  ```rust
+  impl Hash for AppManager {
+      fn hash<H: Hasher>(&self, state: &mut H) {
+          Arc::as_ptr(&self.ffi).hash(state);
+      }
+  }
+  ```
+- **`Space` API.** There is no `horizontal_space()` free function or `Space::with_width()`. Use `iced::widget::Space::new().width(Fill)` for horizontal expansion and `Space::new().height(Fill)` for vertical.
+- **`Rule` API.** There is no `Rule::vertical()` constructor. For vertical dividers, use a styled container: `container(column![]).width(1).height(Fill).style(...)`.
+- **Theme closures.** The `.theme()` method on `iced::application` requires a method reference (e.g., `App::theme`) rather than a closure like `|_| Theme::Dark`, due to lifetime requirements on the `Fn` bound.
+
 #### 4.3.2.1 Desktop AppManager internals (production pattern)
 
 In production desktop apps, `AppManager` is typically more than a thin proxy. Pika uses an explicit inner model + subscriber fan-out pattern:
@@ -1582,14 +1600,52 @@ env -u SDKROOT -u MACOSX_DEPLOYMENT_TARGET \
   cargo build -p my_core --lib --target aarch64-apple-ios-sim --release
 ```
 
-**Critical:** When building inside a Nix shell, you must unset Nix-provided environment variables (`SDKROOT`, `MACOSX_DEPLOYMENT_TARGET`, `CC`, `CXX`, `AR`, `RANLIB`, `LIBRARY_PATH`) that conflict with the iOS SDK.
+**Critical -- Nix environment variable isolation:** When building inside a Nix shell, the shell hook sets `CC`, `CXX`, `AR`, `RANLIB`, `SDKROOT`, `MACOSX_DEPLOYMENT_TARGET`, `LIBRARY_PATH`, and `NIX_LDFLAGS` to Nix's apple-sdk paths. These **completely break** iOS cross-compilation because they point to the macOS SDK, not the iOS SDK. You must unset **all** of them and explicitly point to the system Xcode:
+
+```bash
+# The complete env var isolation for iOS cross-compilation inside Nix:
+XCODE_DEV="/Applications/Xcode.app/Contents/Developer"
+TOOLCHAIN_BIN="$XCODE_DEV/Toolchains/XcodeDefault.xctoolchain/usr/bin"
+IOS_SDK="$XCODE_DEV/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS.sdk"
+SIM_SDK="$XCODE_DEV/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator.sdk"
+
+# Device build:
+env -u SDKROOT -u MACOSX_DEPLOYMENT_TARGET -u CC -u CXX -u AR -u RANLIB -u LIBRARY_PATH \
+  DEVELOPER_DIR="$XCODE_DEV" \
+  SDKROOT="$IOS_SDK" \
+  CC="$TOOLCHAIN_BIN/clang" \
+  RUSTFLAGS="-C linker=$TOOLCHAIN_BIN/clang -C link-arg=-miphoneos-version-min=17.0 -C link-arg=-isysroot -C link-arg=$IOS_SDK" \
+  cargo build -p my_core --lib --target aarch64-apple-ios --release
+```
+
+Note the explicit `-C link-arg=-isysroot -C link-arg=$IOS_SDK` -- without this, the linker may pick up the wrong sysroot from Nix's environment.
+
+**`xcodebuild` must run outside the Nix shell** (or with `NIX_LDFLAGS` unset). Nix injects linker flags like `-objc_abi_version '-Xlinker'` via `NIX_LDFLAGS` that are not valid for the iOS linker and cause the link step to fail with cryptic errors. The simplest approach:
+
+```bash
+# Option 1: Run xcodebuild outside Nix entirely (recommended):
+xcodebuild build -project ios/App.xcodeproj -scheme App ...
+
+# Option 2: Unset all Nix linker pollution:
+env -u NIX_LDFLAGS -u NIX_CFLAGS_COMPILE -u SDKROOT -u MACOSX_DEPLOYMENT_TARGET \
+  -u CC -u CXX -u AR -u RANLIB -u LIBRARY_PATH \
+  DEVELOPER_DIR="/Applications/Xcode.app/Contents/Developer" \
+  xcodebuild build -project ios/App.xcodeproj -scheme App ...
+```
 
 **4. Create xcframework** (`ios-xcframework`)
 ```bash
+# Stage the headers from UniFFI-generated bindings:
+mkdir -p staging/headers
+cp ios/Bindings/my_coreFFI.h staging/headers/
+cp ios/Bindings/my_coreFFI.modulemap staging/headers/module.modulemap
+
 xcodebuild -create-xcframework \
   -library target/aarch64-apple-ios/release/libmy_core.a -headers staging/headers \
   -library target/aarch64-apple-ios-sim/release/libmy_core.a -headers staging/headers \
   -output ios/Frameworks/MyCore.xcframework
+
+rm -rf staging
 ```
 
 **5. Generate Xcode project** (`ios-xcodeproj`)
@@ -1652,6 +1708,21 @@ The `justfile` (using [just](https://github.com/casey/just)) is the central entr
 
 Composite recipes chain dependencies: `android-assemble: gen-kotlin android-rust android-local-properties`.
 
+**Recommended composite recipes for common workflows:**
+
+```just
+# Full iOS pipeline: host build → Swift bindings → cross-compile → xcframework → xcodegen
+ios-full: rust-build-host ios-gen-swift ios-rust ios-xcframework ios-xcodeproj
+
+# Full Android pipeline: host build → Kotlin bindings → cross-compile → Gradle assemble
+android-full: rust-build-host gen-kotlin android-rust android-assemble
+
+# Quick iteration: rebuild Rust + regenerate bindings (no platform build)
+rebind: rust-build-host ios-gen-swift gen-kotlin
+```
+
+The `ios-full` recipe is particularly valuable because the iOS pipeline has 5 sequential steps with environment variable isolation requirements (see Section 5.2). Running them individually is error-prone; a composite recipe ensures the correct order and can embed the `env -u` invocations.
+
 **Pika scale:** dozens of recipes in a ~1,300-line justfile.
 
 ### 5.6 Nix Flake: Reproducible Dev Environment
@@ -1670,6 +1741,24 @@ devShells.default = {
 ```
 
 The flake ensures every developer and CI runner has identical tool versions. Shell hooks can auto-configure `ANDROID_HOME`, `ANDROID_NDK_HOME`, `JAVA_HOME`, write `android/local.properties`, and set up AVDs.
+
+**The `rmp` wrapper script.** The flake includes a `writeShellScriptBin "rmp"` wrapper that delegates to `cargo run -p rmp-cli` from a source checkout pointed to by `$RMP_REPO`. The wrapper must handle two layouts:
+
+1. **Workspace layout:** `$RMP_REPO/Cargo.toml` is a workspace that contains `rmp-cli` as a member. Use `cargo run --manifest-path "$RMP_REPO/Cargo.toml" -p rmp-cli`.
+2. **Standalone layout:** `$RMP_REPO/rmp-cli/Cargo.toml` exists but there is no parent workspace. Use `cargo run --manifest-path "$RMP_REPO/rmp-cli/Cargo.toml"`.
+
+The wrapper should check both paths and fail with a clear error if neither exists.
+
+**`RMP_REPO` auto-detection.** The shell hook should attempt to locate `rmp-cli` in the parent directory of the project (the common monorepo layout where the scaffolded project sits next to the CLI source). Use `cd .. && pwd` rather than `BASH_SOURCE` (which is unreliable in Nix shell contexts):
+
+```bash
+if [ -z "''${RMP_REPO:-}" ]; then
+  _parent="$(cd .. 2>/dev/null && pwd)"
+  if [ -f "$_parent/rmp-cli/Cargo.toml" ]; then
+    export RMP_REPO="$_parent"
+  fi
+fi
+```
 
 **Multiple shells for different workflows:**
 - `default` -- Full development (all platforms)
